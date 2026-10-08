@@ -1,0 +1,27 @@
+# Copy to config.toml and edit. config.toml is git-ignored.
+# Every value can be overridden by an environment variable named
+# ARCTICDATA_MCP_<SECTION>_<KEY>, e.g. ARCTICDATA_MCP_AUTH_PASSWORD.
+
+[auth]
+# Clients must send:  Authorization: Bearer <password>
+# Generate one with:  python -c "import secrets; print(secrets.token_urlsafe(32))"
+password = "change-me"
+
+[server]
+transport = "http"      # "http" (password-protected) or "stdio" (local, no auth)
+host = "127.0.0.1"      # use 0.0.0.0 to listen on all interfaces
+port = 8000
+path = "/mcp"
+
+[arcticdata]
+base_url = "https://arcticdata.io/metacat/d1/mn/v2"
+cn_url = "https://cn.dataone.org/cn/v2"
+catalog_url = "https://arcticdata.io/catalog/view"
+timeout = 60.0
+
+[downloads]
+# Files up to this size are returned inline to the agent; larger files return a URL.
+max_inline_bytes = 10485760
+# Allow tools to save files on the MCP server's own disk (delivery="server").
+allow_server_save = false
+download_dir = "./downloads"

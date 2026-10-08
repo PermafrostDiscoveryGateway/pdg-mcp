@@ -1,0 +1,56 @@
+"""FastMCP application factory."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+import httpx
+from fastmcp import FastMCP
+
+from arcticdata_mcp.auth import PasswordTokenVerifier
+from arcticdata_mcp.client import DataONEClient
+from arcticdata_mcp.config import Settings
+from arcticdata_mcp.tools import datasets, node, objects, search
+from arcticdata_mcp.tools.common import ToolContext
+
+INSTRUCTIONS = """\
+Search and download public data from the NSF Arctic Data Center (arcticdata.io), a DataONE member node.
+
+Typical workflow:
+1. Discover datasets with search_datasets or a specific search_by_* tool (keyword, bounding box, temporal
+   coverage, author, funding award, measured variable, taxon, ...). get_facet_counts reveals valid values.
+2. Inspect a dataset with get_dataset_details, get_metadata_document (EML) or get_dataset_citation.
+3. List its files with list_dataset_files, peek with preview_file, then fetch with download_file.
+   Large files return a direct URL instead of inline bytes (see get_server_config).
+Identifiers (PIDs) look like 'doi:10.18739/A2...' for datasets and 'urn:uuid:...' for files.
+"""
+
+
+def create_server(
+    settings: Settings,
+    *,
+    require_auth: bool = True,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> FastMCP:
+    """Build the MCP server. ``transport`` lets tests inject a mock HTTP transport."""
+    client = DataONEClient(settings, transport=transport)
+
+    @asynccontextmanager
+    async def lifespan(_: FastMCP) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            await client.aclose()
+
+    auth = PasswordTokenVerifier(settings.auth.password) if require_auth else None
+    mcp = FastMCP(
+        name="Arctic Data Center",
+        instructions=INSTRUCTIONS,
+        auth=auth,
+        lifespan=lifespan,
+    )
+    ctx = ToolContext(settings=settings, client=client)
+    for module in (search, datasets, objects, node):
+        module.register(mcp, ctx)
+    return mcp

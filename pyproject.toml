@@ -1,0 +1,35 @@
+[project]
+name = "arcticdata-mcp"
+version = "0.1.0"
+description = "FastMCP server exposing the Arctic Data Center (DataONE) search and download API"
+readme = "README.md"
+authors = [
+    { name = "Luigi Marini", email = "lmarini@illinois.edu" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "defusedxml>=0.7.1",
+    "fastmcp>=4.0",
+    "httpx>=0.28.1",
+    "xmltodict>=1.0.4",
+]
+
+[project.scripts]
+arcticdata-mcp = "arcticdata_mcp.__main__:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["live: tests that call the real arcticdata.io API (deselect with -m 'not live')"]
+addopts = "-m 'not live'"
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "respx>=0.23.1",
+]

@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--transport", choices=["http", "stdio"], default=None)
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
-    parser.add_argument("--insecure", action="store_true", help="Allow HTTP transport without a password (NOT recommended)")
+    parser.add_argument("--insecure", action="store_true", help="Allow HTTP transport without authentication (NOT recommended)")
     args = parser.parse_args(argv)
 
     config_path = args.config
@@ -32,12 +32,12 @@ def main(argv: list[str] | None = None) -> None:
         create_server(settings, require_auth=False).run(transport="stdio")
         return
 
-    if not settings.auth.password and not args.insecure:
+    if not settings.auth.realm_url and not args.insecure:
         sys.exit(
-            "Refusing to start: no password configured. Set [auth] password in config.toml "
-            "or ARCTICDATA_MCP_AUTH_PASSWORD (or pass --insecure for local testing)."
+            "Refusing to start: no Keycloak realm configured. Set [auth] realm_url in config.toml "
+            "or ARCTICDATA_MCP_AUTH_REALM_URL (or pass --insecure for local testing)."
         )
-    server = create_server(settings, require_auth=bool(settings.auth.password))
+    server = create_server(settings, require_auth=bool(settings.auth.realm_url))
     server.run(transport="http", host=host, port=port, path=settings.server.path)
 
 

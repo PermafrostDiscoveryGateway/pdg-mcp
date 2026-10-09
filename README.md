@@ -2,7 +2,7 @@
 
 A [FastMCP](https://gofastmcp.com) server that exposes the [NSF Arctic Data Center](https://arcticdata.io)
 DataONE REST API (`https://arcticdata.io/metacat/d1/mn/v2`) to MCP clients. Agents can search the catalog,
-inspect datasets, and download raw data files. The server is protected by a shared password.
+inspect datasets, and download raw data files. HTTP access is per-user, through Keycloak login.
 
 All tools are **read-only** and only see **public** content.
 
@@ -10,30 +10,36 @@ All tools are **read-only** and only see **public** content.
 
 ```bash
 uv sync
-cp config.example.toml config.toml   # then set [auth] password
+cp config.example.toml config.toml   # then set [auth] realm_url
 uv run arcticdata-mcp                 # serves http://127.0.0.1:8000/mcp
 ```
 
 Connect Claude Code:
 
 ```bash
-claude mcp add --transport http arcticdata http://127.0.0.1:8000/mcp --header "Authorization: Bearer <password>"
+claude mcp add --transport http arcticdata http://127.0.0.1:8000/mcp   # then /mcp to sign in via Keycloak
 ```
 
 Or from Python:
 
 ```python
 from fastmcp import Client
-async with Client("http://127.0.0.1:8000/mcp", auth="<password>") as c:
+async with Client("http://127.0.0.1:8000/mcp", auth="<keycloak-access-token>") as c:
     await c.call_tool("search_datasets", {"query": "permafrost"})
 ```
 
 ## Authentication
 
-In HTTP mode every request must include `Authorization: Bearer <password>`, where the password comes from
-`[auth] password` in `config.toml` or from `ARCTICDATA_MCP_AUTH_PASSWORD`. The comparison is constant-time.
-Requests without a valid password get `401`. The server refuses to start in HTTP mode without a password
-unless you pass `--insecure`. `--transport stdio` runs locally for a single client and skips auth.
+In HTTP mode every request must carry a Keycloak access token (`Authorization: Bearer <jwt>`). The server
+verifies the signature against the realm's JWKS, plus issuer, expiry and (optionally) audience, and serves
+OAuth discovery metadata so MCP clients can run the login flow themselves. Each user has their own Keycloak
+account. Users can self-register but are rejected until an admin grants them the realm role in
+`auth.required_role` (default `mcp-user`); revoke access by removing the role or disabling the user. Requests without a valid token get `401`. The server refuses to
+start in HTTP mode without `auth.realm_url` unless you pass `--insecure`. `--transport stdio` runs locally for
+a single client and skips auth.
+
+Auth protects this MCP server only. The Arctic Data Center read endpoints are public and are called
+anonymously, so no ADC credentials are involved.
 
 ## Configuration
 
@@ -42,7 +48,11 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `auth.password` | — | Shared bearer password (required for HTTP) |
+| `auth.realm_url` | — | Keycloak realm URL (required for HTTP) |
+| `auth.base_url` | `http://127.0.0.1:8000` | Public URL of this server, for OAuth discovery |
+| `auth.audience` | empty | Expected `aud` claim (skipped if empty) |
+| `auth.required_role` | `mcp-user` | Realm role granted by an admin to approve a user (empty = any user) |
+| `auth.required_scopes` | `openid` | Scopes the token must carry |
 | `server.host` / `port` / `path` | `127.0.0.1` / `8000` / `/mcp` | HTTP listener |
 | `downloads.max_inline_bytes` | 10 MiB | Largest file returned inline to the agent |
 | `downloads.allow_server_save` | `false` | Allow `delivery="server"` to write files on the server host |
@@ -109,6 +119,52 @@ uv run pytest            # unit and mocked tests
 uv run pytest -m live    # smoke tests against arcticdata.io
 ```
 
-Layout: `config.py` (settings), `auth.py` (bearer password), `client.py` (httpx + XML parsing + DataONE
+Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), and `tools/`
 (`search`, `datasets`, `objects`, `node`).
+
+## Deployment (software-dev)
+
+`Dockerfile` builds the image; `.github/workflows/image.yml` pushes it to
+`ghcr.io/permafrostdiscoverygateway/pdg-mcp` on pushes to `main` and `v*` tags (if the package stays private, see
+"Private image" below). The Helm chart is in `charts/pdg-mcp`. It is stateless and needs no secrets: all config is
+passed as `ARCTICDATA_MCP_*` environment variables, and Keycloak validates tokens through public keys.
+
+software-dev is managed by ArgoCD, with one `Application` per app in `charts/apps/templates/`. Add
+`charts/apps/templates/pdg-mcp.yaml` there, following the `open-webui.yaml` pattern but with a git source:
+
+```yaml
+spec:
+  project: {{ .Values.cluster }}
+  destination:
+    name: {{ .Values.cluster }}
+    namespace: pdg-mcp
+  source:
+    repoURL: https://github.com/PermafrostDiscoveryGateway/pdg-mcp.git
+    path: charts/pdg-mcp
+    targetRevision: main
+    helm:
+      releaseName: pdg-mcp
+      values: |
+        host: pdg-mcp.software-dev.ncsa.illinois.edu
+        auth:
+          realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp
+```
+
+(plus the usual `metadata`, `annotations`, `syncPolicy` and `CreateNamespace=true` block, and a `pdgMcp.enabled`
+flag in `values.yaml`). Before the first sync, create the Keycloak realm, client and `mcp-user` role described under
+Authentication.
+
+### Private image
+
+If the ghcr.io package is private, the cluster needs a pull secret in the `pdg-mcp` namespace and the chart must
+reference it (`imagePullSecrets: [ghcr-pull]`):
+
+```bash
+kubectl create secret docker-registry ghcr-pull -n pdg-mcp --dry-run=client -o yaml \
+  --docker-server=ghcr.io --docker-username=<github-user> --docker-password=<PAT with read:packages> \
+  | kubeseal --format yaml > kubernetes/pdg-mcp.ghcr-pull.sealed.yaml
+```
+
+Commit the sealed file to software-dev's `kubernetes/` folder (never the plain Secret). Prefer a token from a
+service or machine account over a personal one.

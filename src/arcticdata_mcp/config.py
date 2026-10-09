@@ -1,7 +1,7 @@
 """Configuration loading: a TOML file with environment-variable overrides.
 
 Environment variables use the form ``ARCTICDATA_MCP_<SECTION>_<KEY>``, e.g.
-``ARCTICDATA_MCP_AUTH_PASSWORD`` or ``ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES``.
+``ARCTICDATA_MCP_AUTH_REALM_URL`` or ``ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,11 @@ ENV_PREFIX = "ARCTICDATA_MCP_"
 
 @dataclass
 class AuthSettings:
-    password: str = ""
+    realm_url: str = ""  # e.g. https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp
+    base_url: str = "http://127.0.0.1:8000"  # public URL of this MCP server (used in OAuth discovery)
+    audience: str = ""  # expected "aud" claim; empty disables the check
+    required_role: str = "mcp-user"  # Keycloak realm role an admin grants to approve a user; empty = any user
+    required_scopes: list[str] = field(default_factory=lambda: ["openid"])
 
 
 @dataclass
@@ -58,6 +62,8 @@ def _coerce(value: str, target: type) -> Any:
         return int(value)
     if target is float:
         return float(value)
+    if target is list:
+        return [v.strip() for v in value.split(",") if v.strip()]
     return value
 
 

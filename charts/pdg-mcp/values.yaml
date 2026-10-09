@@ -1,0 +1,42 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/permafrostdiscoverygateway/pdg-mcp
+  # defaults to the chart appVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Needed only if the ghcr.io package is private: name of a kubernetes.io/dockerconfigjson Secret in this namespace
+imagePullSecrets: []
+
+# Public hostname; also used as the OAuth base URL (https://<host>)
+host: pdg-mcp.software-dev.ncsa.illinois.edu
+
+# Keycloak (per-user login). Users need the realm role below, granted by an admin.
+auth:
+  realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp
+  audience: ""
+  requiredRole: mcp-user
+  requiredScopes: openid
+
+# Extra ARCTICDATA_MCP_* settings, e.g. ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES: "10485760"
+extraEnv: {}
+
+service:
+  port: 8000
+
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+    traefik.ingress.kubernetes.io/router.middlewares: redirect-web-to-443@internal
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi

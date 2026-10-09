@@ -1,14 +1,20 @@
 # Copy to config.toml and edit. config.toml is git-ignored.
 # Every value can be overridden by an environment variable named
-# ARCTICDATA_MCP_<SECTION>_<KEY>, e.g. ARCTICDATA_MCP_AUTH_PASSWORD.
+# ARCTICDATA_MCP_<SECTION>_<KEY>, e.g. ARCTICDATA_MCP_AUTH_REALM_URL.
 
 [auth]
-# Clients must send:  Authorization: Bearer <password>
-# Generate one with:  python -c "import secrets; print(secrets.token_urlsafe(32))"
-password = "change-me"
+# Per-user login through Keycloak. Create a realm and a client there, then point at the realm.
+realm_url = "https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp"
+# Public URL clients use to reach this server (no path); used for OAuth discovery metadata.
+base_url = "http://127.0.0.1:8000"
+# Expected "aud" claim in the access token (add an audience mapper to the client). Empty = not checked.
+audience = ""
+required_scopes = ["openid"]
+# Realm role an admin grants to approve a self-registered user. Empty = any realm user is allowed.
+required_role = "mcp-user"
 
 [server]
-transport = "http"      # "http" (password-protected) or "stdio" (local, no auth)
+transport = "http"      # "http" (Keycloak-protected) or "stdio" (local, no auth)
 host = "127.0.0.1"      # use 0.0.0.0 to listen on all interfaces
 port = 8000
 path = "/mcp"

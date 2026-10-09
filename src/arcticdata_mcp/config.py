@@ -17,7 +17,7 @@ ENV_PREFIX = "ARCTICDATA_MCP_"
 
 @dataclass
 class AuthSettings:
-    realm_url: str = ""  # e.g. https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp
+    realm_url: str = ""  # e.g. https://keycloak.software-dev.ncsa.illinois.edu/realms/PDG
     base_url: str = "http://127.0.0.1:8000"  # public URL of this MCP server (used in OAuth discovery)
     audience: str = ""  # expected "aud" claim; empty disables the check
     required_role: str = "mcp-user"  # Keycloak realm role an admin grants to approve a user; empty = any user

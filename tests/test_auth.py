@@ -4,7 +4,7 @@ from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.config import AuthSettings, load_settings
 
-REALM = "https://keycloak.example.org/realms/arcticdata-mcp"
+REALM = "https://keycloak.example.org/realms/PDG"
 
 
 def test_requires_realm_url():

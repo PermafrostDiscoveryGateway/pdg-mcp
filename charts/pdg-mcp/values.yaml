@@ -14,7 +14,7 @@ host: pdg-mcp.software-dev.ncsa.illinois.edu
 
 # Keycloak (per-user login). Users need the realm role below, granted by an admin.
 auth:
-  realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp
+  realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/PDG
   audience: ""
   requiredRole: mcp-user
   requiredScopes: openid

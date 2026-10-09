@@ -4,7 +4,7 @@
 
 [auth]
 # Per-user login through Keycloak. Create a realm and a client there, then point at the realm.
-realm_url = "https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp"
+realm_url = "https://keycloak.software-dev.ncsa.illinois.edu/realms/PDG"
 # Public URL clients use to reach this server (no path); used for OAuth discovery metadata.
 base_url = "http://127.0.0.1:8000"
 # Expected "aud" claim in the access token (add an audience mapper to the client). Empty = not checked.

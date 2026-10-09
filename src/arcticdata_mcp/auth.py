@@ -44,7 +44,7 @@ class RoleJWTVerifier(JWTVerifier):
 def build_auth(settings: AuthSettings) -> AuthProvider:
     """Create the Keycloak auth provider from ``[auth]`` settings."""
     if not settings.realm_url:
-        raise ValueError("auth.realm_url is required (e.g. https://keycloak.example.org/realms/arcticdata-mcp)")
+        raise ValueError("auth.realm_url is required (e.g. https://keycloak.example.org/realms/PDG)")
     realm_url = settings.realm_url.rstrip("/")
     verifier = RoleJWTVerifier(
         required_role=settings.required_role,

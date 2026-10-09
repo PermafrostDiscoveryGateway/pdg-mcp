@@ -148,7 +148,7 @@ spec:
       values: |
         host: pdg-mcp.software-dev.ncsa.illinois.edu
         auth:
-          realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/arcticdata-mcp
+          realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/PDG
 ```
 
 (plus the usual `metadata`, `annotations`, `syncPolicy` and `CreateNamespace=true` block, and a `pdgMcp.enabled`

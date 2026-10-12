@@ -145,10 +145,20 @@ errors), `solr.py` (query building), `downloads.py` (inline, URL, or server deli
 
 ## Deployment (software-dev)
 
-`Dockerfile` builds the image; `.github/workflows/image.yml` pushes it to
-`ghcr.io/permafrostdiscoverygateway/pdg-mcp` on pushes to `main` and `v*` tags (if the package stays private, see
-"Private image" below). The Helm chart is in `charts/pdg-mcp`. It is stateless and needs no secrets: all config is
-passed as `ARCTICDATA_MCP_*` environment variables, and Keycloak validates tokens through public keys.
+`Dockerfile` builds the image. `.github/workflows/image.yml` builds it on every pull request and pushes it on pushes
+to `main` and `v*` tags, to both:
+
+- `hub.ncsa.illinois.edu/pdg/pdg-mcp` (NCSA Harbor, `pdg` project; the chart default). This needs the repository
+  secrets `HUB_USERNAME` and `HUB_PASSWORD`, ideally a Harbor robot account with push access to `pdg`. Without them
+  the Harbor push is skipped.
+- `ghcr.io/permafrostdiscoverygateway/pdg-mcp`.
+
+Tags are `main`/`latest` for `main`, `X.Y.Z` for `vX.Y.Z` tags, and `sha-<short>` for every push. The chart
+pulls `image.tag`, which defaults to the chart's `appVersion`, so tag a release (`v0.1.0`) or set `image.tag: main`.
+Override `image.repository` to pull from ghcr.io or another registry instead.
+
+The Helm chart is in `charts/pdg-mcp`. It is stateless and needs no secrets besides the image pull secret: all config
+is passed as `ARCTICDATA_MCP_*` environment variables, and Keycloak validates tokens through public keys.
 
 software-dev is managed by ArgoCD, with one `Application` per app in `charts/apps/templates/`. Add
 `charts/apps/templates/pdg-mcp.yaml` there, following the `open-webui.yaml` pattern but with a git source:
@@ -167,6 +177,7 @@ spec:
       releaseName: pdg-mcp
       values: |
         host: pdg-mcp.software-dev.ncsa.illinois.edu
+        imagePullSecrets: [ncsa-hub]
         auth:
           realmUrl: https://keycloak.software-dev.ncsa.illinois.edu/realms/PDG
 ```
@@ -175,16 +186,15 @@ spec:
 flag in `values.yaml`). Before the first sync, create the Keycloak realm, client and `mcp-user` role described under
 Authentication.
 
-### Private image
+### Image pull secret
 
-If the ghcr.io package is private, the cluster needs a pull secret in the `pdg-mcp` namespace and the chart must
-reference it (`imagePullSecrets: [ghcr-pull]`):
+The `pdg` Harbor project is private, so the cluster needs a pull secret in the `pdg-mcp` namespace and the chart must
+reference it (`imagePullSecrets: [ncsa-hub]`). Use a Harbor robot account with pull access to `pdg`:
 
 ```bash
-kubectl create secret docker-registry ghcr-pull -n pdg-mcp --dry-run=client -o yaml \
-  --docker-server=ghcr.io --docker-username=<github-user> --docker-password=<PAT with read:packages> \
-  | kubeseal --format yaml > kubernetes/pdg-mcp.ghcr-pull.sealed.yaml
+kubectl create secret docker-registry ncsa-hub -n pdg-mcp --dry-run=client -o yaml \
+  --docker-server=hub.ncsa.illinois.edu --docker-username='<robot account>' --docker-password='<robot secret>' \
+  | kubeseal --format yaml > kubernetes/pdg-mcp.ncsa-hub.sealed.yaml
 ```
 
-Commit the sealed file to software-dev's `kubernetes/` folder (never the plain Secret). Prefer a token from a
-service or machine account over a personal one.
+Commit the sealed file to software-dev's `kubernetes/` folder (never the plain Secret).

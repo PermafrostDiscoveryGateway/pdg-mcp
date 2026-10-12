@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -12,6 +13,7 @@ import xmltodict
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.ratelimit import UpstreamLimiter
 
 USER_AGENT = "arcticdata-mcp/0.1 (+https://arcticdata.io)"
 
@@ -76,10 +78,13 @@ class DataONEClient:
         self.base_url = settings.arcticdata.base_url.rstrip("/")
         self.cn_url = settings.arcticdata.cn_url.rstrip("/")
         self.catalog_url = settings.arcticdata.catalog_url.rstrip("/")
+        self.limiter = UpstreamLimiter(settings.ratelimit)
+        max_conn = settings.ratelimit.max_concurrent or None
         self._http = httpx.AsyncClient(
             timeout=settings.arcticdata.timeout,
             follow_redirects=True,
             headers={"User-Agent": USER_AGENT},
+            limits=httpx.Limits(max_connections=max_conn, max_keepalive_connections=max_conn),
             transport=transport,
         )
 
@@ -103,10 +108,17 @@ class DataONEClient:
     async def request(
         self, method: str, url: str, *, raise_errors: bool = True, **kwargs: Any
     ) -> httpx.Response:
-        try:
-            resp = await self._http.request(method, url, **kwargs)
-        except httpx.HTTPError as exc:
-            raise ToolError(f"Request to {url} failed: {exc}") from exc
+        attempt = 0
+        while True:
+            try:
+                async with self.limiter.slot():
+                    resp = await self._http.request(method, url, **kwargs)
+            except httpx.HTTPError as exc:
+                raise ToolError(f"Request to {url} failed: {exc}") from exc
+            if not self.limiter.should_retry(resp, attempt):
+                break
+            await asyncio.sleep(self.limiter.delay(attempt, resp))
+            attempt += 1
         if raise_errors:
             _raise_for_dataone(resp)
         return resp
@@ -132,11 +144,21 @@ class DataONEClient:
 
     @asynccontextmanager
     async def stream(self, url: str) -> AsyncIterator[httpx.Response]:
+        attempt = 0
         try:
-            async with self._http.stream("GET", url) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    _raise_for_dataone(resp)
-                yield resp
+            while True:
+                async with self.limiter.slot(), self._http.stream("GET", url) as resp:
+                    if self.limiter.should_retry(resp, attempt):
+                        await resp.aread()
+                        delay = self.limiter.delay(attempt, resp)
+                    else:
+                        if resp.status_code >= 400:
+                            await resp.aread()
+                            _raise_for_dataone(resp)
+                        yield resp
+                        return
+                # Sleep outside the slot so a backing-off request does not block others.
+                await asyncio.sleep(delay)
+                attempt += 1
         except httpx.HTTPError as exc:
             raise ToolError(f"Request to {url} failed: {exc}") from exc

@@ -95,8 +95,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"reference"})
     async def get_server_config() -> dict[str, Any]:
-        """Describe this MCP server's behavior: API endpoints used and download limits (max inline size,
-        whether files can be saved on the server).
+        """Describe this MCP server's behavior: API endpoints used, download limits (max inline size,
+        whether files can be saved on the server) and rate limits.
         """
         return {
             "member_node": settings.arcticdata.base_url,
@@ -106,4 +106,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "allow_server_save": settings.downloads.allow_server_save,
             "download_dir": settings.downloads.download_dir if settings.downloads.allow_server_save else None,
             "access": "public, read-only content only",
+            "rate_limits": {
+                "per_user_calls_per_second": settings.ratelimit.per_user_rate or None,
+                "per_user_burst": settings.ratelimit.per_user_burst if settings.ratelimit.per_user_rate else None,
+                "max_concurrent_upstream_requests": settings.ratelimit.max_concurrent or None,
+            },
         }

@@ -31,3 +31,18 @@ max_inline_bytes = 10485760
 # Allow tools to save files on the MCP server's own disk (delivery="server").
 allow_server_save = false
 download_dir = "./downloads"
+
+[ratelimit]
+# ADC does not rate-limit on its side, so these limits are the only thing protecting it from overload.
+# Global cap on requests in flight to arcticdata.io across all users (0 = unlimited).
+max_concurrent = 6
+# Seconds a request waits for a free slot before the tool call fails.
+queue_timeout = 30.0
+# Per-user token bucket keyed on the Keycloak "sub" claim: sustained tool calls per second
+# (0 = unlimited) and how many calls a user can make back-to-back before that rate applies.
+per_user_rate = 2.0
+per_user_burst = 20
+# Retry on 429/502/503/504 with exponential backoff (Retry-After header wins when present).
+max_retries = 3
+retry_backoff = 1.0
+retry_max_delay = 30.0

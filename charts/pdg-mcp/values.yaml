@@ -1,12 +1,14 @@
 replicaCount: 1
 
+# Defaults to NCSA Harbor (pdg project). Override repository/tag to use another registry,
+# e.g. repository: ghcr.io/permafrostdiscoverygateway/pdg-mcp
 image:
-  repository: ghcr.io/permafrostdiscoverygateway/pdg-mcp
+  repository: hub.ncsa.illinois.edu/pdg/pdg-mcp
   # defaults to the chart appVersion
   tag: ""
   pullPolicy: IfNotPresent
 
-# Needed only if the ghcr.io package is private: name of a kubernetes.io/dockerconfigjson Secret in this namespace
+# The pdg Harbor project is private: name a kubernetes.io/dockerconfigjson Secret in this namespace, e.g. [ncsa-hub]
 imagePullSecrets: []
 
 # Public hostname; also used as the OAuth base URL (https://<host>)

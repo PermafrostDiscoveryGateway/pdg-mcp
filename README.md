@@ -6,6 +6,9 @@ inspect datasets, and download raw data files. HTTP access is per-user, through 
 
 All tools are **read-only** and only see **public** content.
 
+Guides: [connecting from Claude, ChatGPT and Claude Code](docs/user-guide.md) (users) and
+[Keycloak and deployment setup](docs/admin-guide.md) (admins).
+
 ## Quick start
 
 ```bash

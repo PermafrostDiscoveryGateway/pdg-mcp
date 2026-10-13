@@ -37,7 +37,7 @@ Custom MCP servers only show up in ChatGPT after you turn on Developer mode. Tha
 
 1. Click your name (bottom left) → **Settings → Apps** (called **Apps & Connectors** or **Connectors** in some versions).
 2. Scroll to **Advanced settings** and turn on **Developer mode**.
-3. Back at the top of **Apps**, click **Create** (or **Create app**).
+3. Click **Add** (top right) → **Add custom MCP server**. Older versions show a **Create** or **Create app** button instead.
 4. Fill in:
    - **Name:** `PDG Arctic Data`
    - **Description:** `Search and download NSF Arctic Data Center datasets`

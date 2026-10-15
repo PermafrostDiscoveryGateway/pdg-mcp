@@ -120,3 +120,13 @@ async def test_citation(client, mock_api):
         {"id": "doi:10.18739/X", "title": "Snow.", "origin": ["A B", "C D", "E F"], "datePublished": "2020-05-01T00:00:00Z"}])))
     r = await client.call_tool("get_dataset_citation", {"pid": "doi:10.18739/X"})
     assert r.structured_content["citation"] == "A B, C D, and E F. 2020. Snow. Arctic Data Center. doi:10.18739/X."
+
+
+async def test_bounding_box_search_links_map_app(client):
+    tools = {t.name: t for t in await client.list_tools()}
+    uri = tools["search_by_bounding_box"].meta["ui"]["resourceUri"]
+    assert uri == "ui://arcticdata/search-map.html"
+    [res] = [r for r in await client.list_resources() if str(r.uri) == uri]
+    assert res.mime_type == "text/html;profile=mcp-app"
+    [content] = await client.read_resource(uri)
+    assert "ext-apps" in content.text and "ontoolresult" in content.text

@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
+from fastmcp.apps import AppConfig
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from arcticdata_mcp import solr
 from arcticdata_mcp.client import as_list
+from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
 from arcticdata_mcp.tools.common import (
     READ_ONLY,
     DateStr,
@@ -121,7 +123,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         }[vocabulary]
         return await run(solr.any_field(fields, keyword), rows=rows, start=start, sort=sort, latest_only=latest_only)
 
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"})
+    @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"}, app=AppConfig(resource_uri=SEARCH_MAP_URI))
     async def search_by_bounding_box(
         north: Lat,
         south: Lat,

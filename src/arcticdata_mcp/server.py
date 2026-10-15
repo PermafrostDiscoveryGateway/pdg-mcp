@@ -12,7 +12,7 @@ from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
-from arcticdata_mcp.tools import datasets, node, objects, search
+from arcticdata_mcp.tools import apps, datasets, node, objects, search
 from arcticdata_mcp.tools.common import ToolContext
 
 INSTRUCTIONS = """\
@@ -53,6 +53,6 @@ def create_server(
     )
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
-    for module in (search, datasets, objects, node):
+    for module in (search, datasets, objects, node, apps):
         module.register(mcp, ctx)
     return mcp

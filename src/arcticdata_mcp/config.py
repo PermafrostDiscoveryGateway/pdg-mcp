@@ -48,11 +48,23 @@ class DownloadSettings:
 
 
 @dataclass
+class RateLimitSettings:
+    max_concurrent: int = 6  # global cap on in-flight requests to ADC/DataONE; 0 = unlimited
+    queue_timeout: float = 30.0  # seconds a request waits for a free slot before failing
+    per_user_rate: float = 2.0  # sustained tool calls per second per user (Keycloak "sub"); 0 = unlimited
+    per_user_burst: int = 20  # tool calls a user can make back-to-back before the rate applies
+    max_retries: int = 3  # retries on 429/502/503/504 from ADC; 0 = no retries
+    retry_backoff: float = 1.0  # base delay in seconds, doubled per attempt (Retry-After wins if sent)
+    retry_max_delay: float = 30.0  # upper bound on a single retry delay
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
     arcticdata: ArcticDataSettings = field(default_factory=ArcticDataSettings)
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
+    ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
 
 
 def _coerce(value: str, target: type) -> Any:

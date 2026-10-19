@@ -21,7 +21,11 @@ auth:
   requiredRole: mcp-user
   requiredScopes: openid
 
-# Extra ARCTICDATA_MCP_* settings, e.g. ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES: "10485760"
+# Extra ARCTICDATA_MCP_* settings, e.g. ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES: "10485760".
+# Rate limits are enforced per pod, so with replicaCount > 1 the effective limits multiply. Example:
+#   ARCTICDATA_MCP_RATELIMIT_MAX_CONCURRENT: "6"
+#   ARCTICDATA_MCP_RATELIMIT_PER_USER_RATE: "2"
+#   ARCTICDATA_MCP_RATELIMIT_PER_USER_BURST: "20"
 extraEnv: {}
 
 service:

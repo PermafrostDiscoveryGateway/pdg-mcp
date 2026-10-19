@@ -6,6 +6,9 @@ inspect datasets, and download raw data files. HTTP access is per-user, through 
 
 All tools are **read-only** and only see **public** content.
 
+Guides: [connecting from Claude, ChatGPT and Claude Code](docs/user-guide.md) (users) and
+[Keycloak and deployment setup](docs/admin-guide.md) (admins).
+
 ## Quick start
 
 ```bash
@@ -57,6 +60,26 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `downloads.max_inline_bytes` | 10 MiB | Largest file returned inline to the agent |
 | `downloads.allow_server_save` | `false` | Allow `delivery="server"` to write files on the server host |
 | `downloads.download_dir` | `./downloads` | Where server-side saves go |
+| `ratelimit.max_concurrent` | `6` | Global cap on in-flight requests to ADC (0 = unlimited) |
+| `ratelimit.queue_timeout` | `30` | Seconds to wait for a free slot before failing |
+| `ratelimit.per_user_rate` | `2.0` | Sustained tool calls per second per user (0 = unlimited) |
+| `ratelimit.per_user_burst` | `20` | Back-to-back calls allowed before the per-user rate applies |
+| `ratelimit.max_retries` | `3` | Retries on 429/502/503/504 from ADC |
+| `ratelimit.retry_backoff` / `retry_max_delay` | `1.0` / `30` | Exponential backoff base and cap, in seconds |
+
+### Rate limiting
+
+ADC does not rate-limit on its side, so this server limits itself. There are two layers:
+
+- **Per user.** Each user gets a token bucket keyed on the Keycloak `sub` claim. The bucket holds `per_user_burst`
+  calls and refills at `per_user_rate` per second. A tool call over the limit fails with a "retry in N s" error.
+  Without auth (stdio or `--insecure`), all callers share one bucket.
+- **Global.** At most `max_concurrent` requests are in flight to arcticdata.io at once, across all users. Other
+  requests wait for up to `queue_timeout` seconds. Responses with 429/502/503/504 are retried with exponential
+  backoff, and backing-off requests don't hold a slot.
+
+`get_server_config` reports the active limits to agents. Limits are kept in memory per process, so with several
+replicas the effective limits are multiplied by the replica count.
 
 ### How downloads reach the agent
 
@@ -120,7 +143,7 @@ uv run pytest -m live    # smoke tests against arcticdata.io
 ```
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
-errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), and `tools/`
+errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`
 (`search`, `datasets`, `objects`, `node`).
 
 ## Deployment (software-dev)

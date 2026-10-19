@@ -6,7 +6,8 @@ image:
   repository: hub.ncsa.illinois.edu/pdg/pdg-mcp
   # defaults to the chart appVersion
   tag: ""
-  pullPolicy: IfNotPresent
+  # Always: the tag is reused across pushes (e.g. 0.1.0), so a node's cached copy would otherwise go stale.
+  pullPolicy: Always
 
 # The pdg Harbor project is private: name a kubernetes.io/dockerconfigjson Secret in this namespace, e.g. [ncsa-hub]
 imagePullSecrets: []

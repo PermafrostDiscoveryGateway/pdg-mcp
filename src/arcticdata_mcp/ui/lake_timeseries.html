@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lake water time series</title>
+<style>
+  html, body { margin: 0; background: #fff; font: 13px/1.4 system-ui, sans-serif; color: #222; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 8px 10px 0; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; }
+  #meta { color: #555; }
+  #chart { height: 400px; }
+  footer { display: flex; gap: 8px; align-items: center; padding: 0 10px 8px; color: #666; font-size: 11px; }
+  footer button { font-size: 12px; }
+  footer span { flex: 1; }
+</style>
+</head>
+<body>
+<header><h1 id="title">Waiting for time series…</h1><div id="meta"></div></header>
+<div id="chart"></div>
+<footer><span id="source"></span><button id="explain" hidden>Ask Claude to explain this series</button></footer>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script type="module">
+  import { App } from "https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@2.0.3/dist/src/app-with-deps.js";
+
+  const LAND_COVER = {
+    bare: "#a6761d",
+    grass: "#66a61e",
+    shrub_and_scrub: "#1b9e77",
+    flooded_vegetation: "#7570b3",
+    snow_and_ice: "#9ecae1",
+    trees: "#006d2c",
+    crops: "#e6ab02",
+    built: "#e7298a",
+  };
+  const $ = (id) => document.getElementById(id);
+  const fmt = (v) => (v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 }));
+
+  const app = new App({ name: "water-lake-timeseries", version: "0.1.0" });
+
+  app.ontoolresult = ({ structuredContent: d }) => {
+    if (!d?.series) {
+      $("title").textContent = "No time series in the tool result.";
+      return;
+    }
+    const unit = d.unit ?? "ha";
+    const s = d.summary ?? {};
+    $("title").textContent = `Lake ${d.lake_id}`;
+    $("meta").textContent =
+      `${s.n_observations ?? 0} observations · water ${fmt(s.min?.water_ha)}–${fmt(s.max?.water_ha)} ${unit}` +
+      (d.lake ? ` · net change ${fmt(d.lake.net_change_perc)} %` : "");
+    $("source").textContent = d.source ?? "";
+
+    const traces = [{
+      x: d.dates, y: d.series.water, name: "water", type: "scatter", mode: "lines+markers",
+      line: { color: "#1f6feb", width: 2.5 }, marker: { size: 5 },
+      hovertemplate: `%{x|%b %Y}: %{y:.1f} ${unit}<extra>water</extra>`,
+    }];
+    // Other land-cover classes start hidden; click them in the legend to compare.
+    for (const [name, color] of Object.entries(LAND_COVER)) {
+      if (!d.series[name]) continue;
+      traces.push({
+        x: d.dates, y: d.series[name], name, type: "scatter", mode: "lines+markers", visible: "legendonly",
+        line: { color, width: 1.5 }, marker: { size: 4 },
+        hovertemplate: `%{x|%b %Y}: %{y:.1f} ${unit}<extra>${name}</extra>`,
+      });
+    }
+    const shapes = [];
+    if (d.lake?.area_end_ha != null) {
+      shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, y0: d.lake.area_end_ha, y1: d.lake.area_end_ha,
+        line: { color: "#888", dash: "dot", width: 1 } });
+    }
+    Plotly.newPlot("chart", traces, {
+      margin: { l: 56, r: 12, t: 12, b: 40 },
+      yaxis: { title: { text: `Area (${unit})` }, rangemode: "tozero" },
+      xaxis: { type: "date" },
+      legend: { orientation: "h", y: -0.15 },
+      shapes,
+      annotations: shapes.length ? [{ xref: "paper", x: 1, y: d.lake.area_end_ha, xanchor: "right", yanchor: "bottom",
+        text: "mapped lake area", showarrow: false, font: { size: 10, color: "#888" } }] : [],
+    }, { responsive: true, displaylogo: false });
+
+    const btn = $("explain");
+    btn.hidden = false;
+    btn.onclick = () =>
+      app.sendMessage({
+        role: "user",
+        content: [{ type: "text", text:
+          `Explain the water area time series of lake ${d.lake_id}: describe the trend, and whether the low ` +
+          `values (e.g. ${s.min?.date}) look like real drainage or bad observations (check the other land-cover classes).` }],
+      });
+  };
+
+  await app.connect();
+</script>
+</body>
+</html>

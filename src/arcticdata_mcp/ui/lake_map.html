@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lake map</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin: 0; background: #fff; font: 13px/1.4 system-ui, sans-serif; }
+  #status { padding: 6px 10px; color: #444; }
+  #map { height: 460px; }
+  .legend { background: rgba(255,255,255,0.92); padding: 6px 8px; border-radius: 4px; line-height: 1.6; }
+  .legend i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; }
+  .popup-title { font-weight: 600; margin-bottom: 4px; }
+  .popup table { border-collapse: collapse; }
+  .popup td { padding: 0 8px 0 0; }
+  .popup button { margin-top: 6px; }
+  .popup .note { margin-top: 6px; color: #666; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="status">Waiting for lakes…</div>
+<div id="map"></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module">
+  import { App } from "https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@2.0.3/dist/src/app-with-deps.js";
+
+  const map = L.map("map").setView([66.5, -163], 8);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 17,
+    attribution: "Imagery &copy; Esri",
+  }).addTo(map);
+  const layer = L.featureGroup().addTo(map);
+  const status = document.getElementById("status");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const fmt = (v, unit) => (v == null ? "–" : `${Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`);
+
+  // Net change in percent -> red (shrinking) ... blue (growing).
+  const BINS = [
+    [-Infinity, -25, "#b2182b", "< −25 %"],
+    [-25, -5, "#ef8a62", "−25 to −5 %"],
+    [-5, 5, "#f7f7f7", "±5 %"],
+    [5, 25, "#67a9cf", "5 to 25 %"],
+    [25, Infinity, "#2166ac", "> 25 %"],
+  ];
+  const color = (p) => (p == null ? "#999" : BINS.find(([lo, hi]) => p >= lo && p < hi)[2]);
+
+  const legend = L.control({ position: "bottomright" });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create("div", "legend");
+    div.innerHTML = "<b>Net area change</b><br>" +
+      BINS.map(([, , c, label]) => `<i style="background:${c}"></i>${label}`).join("<br>") +
+      '<br><i style="background:#ffd400;border-radius:50%;border:1px solid #000"></i>has time series';
+    return div;
+  };
+  legend.addTo(map);
+
+  const app = new App({ name: "water-lake-map", version: "0.1.0" });
+
+  // Draw the requested bounding box, if the model passed one.
+  app.ontoolinput = ({ arguments: a }) => {
+    if (a && a.north != null && a.south != null && a.east != null && a.west != null) {
+      L.rectangle([[a.south, a.west], [a.north, a.east]], { color: "#fff", dashArray: "4", weight: 1, fill: false })
+        .addTo(layer);
+    }
+  };
+
+  function popupFor(p) {
+    const div = document.createElement("div");
+    div.className = "popup";
+    div.innerHTML =
+      `<div class="popup-title">Lake ${esc(p.id_geohash)}</div>` +
+      "<table>" +
+      `<tr><td>Area (start)</td><td>${fmt(p.area_start_ha, "ha")}</td></tr>` +
+      `<tr><td>Area (end)</td><td>${fmt(p.area_end_ha, "ha")}</td></tr>` +
+      `<tr><td>Net change</td><td>${fmt(p.net_change_ha, "ha")} (${fmt(p.net_change_perc, "%")})</td></tr>` +
+      "</table>";
+    if (p.has_timeseries) {
+      const btn = document.createElement("button");
+      btn.textContent = "Show water time series";
+      btn.onclick = () =>
+        app.sendMessage({
+          role: "user",
+          content: [{ type: "text", text: `Show the water area time series for lake ${p.id_geohash} (get_lake_timeseries).` }],
+        });
+      div.appendChild(btn);
+    } else {
+      div.insertAdjacentHTML("beforeend", '<div class="note">No time series in the sample data.</div>');
+    }
+    return div;
+  }
+
+  app.ontoolresult = ({ structuredContent: data }) => {
+    const gj = data?.geojson;
+    if (!gj) {
+      status.textContent = "No lake data in the tool result.";
+      return;
+    }
+    L.geoJSON(gj, {
+      style: (f) => ({
+        color: f.properties.has_timeseries ? "#ffd400" : "#333",
+        weight: f.properties.has_timeseries ? 3 : 1,
+        fillColor: color(f.properties.net_change_perc),
+        fillOpacity: 0.75,
+      }),
+      onEachFeature: (f, l) => {
+        l.bindPopup(() => popupFor(f.properties));
+        // Lakes are a few pixels wide at overview zoom; give the ones with data a marker you can click.
+        if (f.properties.has_timeseries) {
+          L.circleMarker(l.getBounds().getCenter(), {
+            radius: 7, color: "#000", weight: 1, fillColor: "#ffd400", fillOpacity: 1,
+          }).bindPopup(() => popupFor(f.properties)).addTo(layer);
+        }
+      },
+    }).addTo(layer);
+    const withTs = gj.features.filter((f) => f.properties.has_timeseries).length;
+    status.textContent =
+      `${data.returned} of ${data.numFound} lakes shown · ${withTs} with time series (yellow) · click a lake for details`;
+    if (layer.getLayers().length) map.fitBounds(layer.getBounds(), { padding: [10, 10] });
+  };
+
+  await app.connect();
+</script>
+</body>
+</html>

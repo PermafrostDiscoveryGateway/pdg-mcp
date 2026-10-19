@@ -20,7 +20,7 @@ def solr_json(docs, num=None, **extra):
 
 async def test_lists_all_tools(client):
     names = {t.name for t in await client.list_tools()}
-    assert len(names) == 47
+    assert len(names) == 49
     assert {"search_datasets", "download_file", "list_dataset_files", "get_facet_counts"} <= names
 
 
@@ -126,6 +126,51 @@ async def test_bounding_box_search_links_map_app(client):
     tools = {t.name: t for t in await client.list_tools()}
     uri = tools["search_by_bounding_box"].meta["ui"]["resourceUri"]
     assert uri == "ui://arcticdata/search-map.html"
+    [res] = [r for r in await client.list_resources() if str(r.uri) == uri]
+    assert res.mime_type == "text/html;profile=mcp-app"
+    [content] = await client.read_resource(uri)
+    assert "ext-apps" in content.text and "ontoolresult" in content.text
+
+
+async def test_show_lakes_links_map_app_and_filters_bbox(client):
+    tools = {t.name: t for t in await client.list_tools()}
+    assert tools["show_lakes"].meta["ui"]["resourceUri"] == "ui://water/lake-map.html"
+    everything = await client.call_tool("show_lakes", {})
+    assert everything.structured_content["numFound"] == 121
+    with_ts = await client.call_tool("show_lakes", {"only_with_timeseries": True})
+    assert with_ts.structured_content["numFound"] == 5
+    assert all(lake["has_timeseries"] for lake in with_ts.structured_content["lakes"])
+    boxed = await client.call_tool("show_lakes", {"north": 66.6, "south": 66.5, "east": -164.0, "west": -164.2})
+    assert 0 < boxed.structured_content["numFound"] < 121
+    gj = boxed.structured_content["geojson"]
+    assert gj["type"] == "FeatureCollection" and gj["features"][0]["geometry"]["type"] in {"Polygon", "MultiPolygon"}
+    # Polygons go to the view only, not into the model's text result.
+    assert '"geometry"' not in boxed.content[0].text
+
+
+async def test_show_lakes_rejects_partial_bbox(client):
+    with pytest.raises(ToolError, match="all four"):
+        await client.call_tool("show_lakes", {"north": 67})
+
+
+async def test_get_lake_timeseries(client):
+    tools = {t.name: t for t in await client.list_tools()}
+    assert tools["get_lake_timeseries"].meta["ui"]["resourceUri"] == "ui://water/lake-timeseries.html"
+    r = await client.call_tool("get_lake_timeseries", {"lake_id": "b7uefy0bvcrc"})
+    d = r.structured_content
+    assert d["unit"] == "ha" and len(d["dates"]) == len(d["series"]["water"]) == 41
+    assert {"water", "bare", "snow_and_ice"} <= set(d["series"])
+    assert d["lake"]["id_geohash"] == "b7uefy0bvcrc"
+    assert d["summary"]["n_observations"] > 0 and d["summary"]["min"]["water_ha"] <= d["summary"]["max"]["water_ha"]
+
+
+async def test_get_lake_timeseries_unknown_lake(client):
+    with pytest.raises(ToolError, match="Lakes with data"):
+        await client.call_tool("get_lake_timeseries", {"lake_id": "zzzzzzzzzzzz"})
+
+
+@pytest.mark.parametrize("uri", ["ui://water/lake-map.html", "ui://water/lake-timeseries.html"])
+async def test_water_views_are_mcp_apps(client, uri):
     [res] = [r for r in await client.list_resources() if str(r.uri) == uri]
     assert res.mime_type == "text/html;profile=mcp-app"
     [content] = await client.read_resource(uri)

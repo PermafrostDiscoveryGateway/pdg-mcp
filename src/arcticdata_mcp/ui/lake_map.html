@@ -160,8 +160,9 @@
     return div;
   }
 
-  function bind(layer, p) {
-    layer.bindTooltip(() => `<div class="lake-popup">${describe(p)}</div>`, { sticky: true, offset: [15, 0] });
+  // Like the dashboard, hover only works on polygons (zoom >= POINT_POLY_SWITCH_ZOOM); points are click-only.
+  function bind(layer, p, hover) {
+    if (hover) layer.bindTooltip(() => `<div class="lake-popup">${describe(p)}</div>`, { sticky: true, offset: [15, 0] });
     layer.bindPopup(() => popupFor(p));
   }
 
@@ -182,7 +183,7 @@
       const p = f.properties;
       if (hideStable.checked && !isDrained(p)) continue;
       const poly = L.geoJSON(f, { style: () => polygonStyle(p) });
-      bind(poly, p);
+      bind(poly, p, true);
       polygons.addLayer(poly);
       // Below the switch zoom the dashboard draws centroids, colored like the polygon fill.
       const dot = L.circleMarker(poly.getBounds().getCenter(), {
@@ -192,7 +193,7 @@
         color: isDrained(p) ? ramp(LINE_STOPS, p.date_break_year) : STABLE_LINE,
         weight: 1,
       });
-      bind(dot, p);
+      bind(dot, p, false);
       points.addLayer(dot);
     }
     updateZoomLayers();

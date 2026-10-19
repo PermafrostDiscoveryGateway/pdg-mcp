@@ -47,35 +47,50 @@ Connect a client as described in the [user guide](user-guide.md), then ask somet
 
 ## Water timeseries views
 
-Two more tools add MCP Apps views on top of a sample of the
-[water-timeseries-v2](https://github.com/PermafrostDiscoveryGateway/water-timeseries-v2) lake data (#14):
+Two more tools add MCP Apps views that mirror the Historical view of the
+[water-timeseries-v2](https://github.com/PermafrostDiscoveryGateway/water-timeseries-v2) "Lost Lakes" dashboard,
+on a small sample of its data (#14). The UI is rewritten for MCP Apps (Leaflet instead of MapLibre/PMTiles), but
+the data and charts come from the water_timeseries library itself.
 
-| Tool | View | Resource |
+| Tool | View | Matches the dashboard's |
 |---|---|---|
-| `show_lakes(north?, south?, east?, west?, only_with_timeseries?)` | Leaflet map on Esri imagery; lakes colored by net area change, lakes with a time series marked yellow. A popup button asks the model to call `get_lake_timeseries`. | `ui://water/lake-map.html` |
-| `get_lake_timeseries(lake_id)` | Plotly chart of monthly Dynamic World water area (ha); other land-cover classes can be toggled from the legend. A button asks the model to explain the series. | `ui://water/lake-timeseries.html` |
+| `show_lakes(north?, south?, east?, west?, only_drained?, only_with_timeseries?)` | `ui://water/lake-map.html` | drainage-year coloring (`get_style_pmtiles_drainage_year`), stable lakes in grey, *Hide stable lakes* toggle, hover fields and labels (`map_utils.py`), *Drainage Year* legend, ESRI / Dark Matter / TCVIS base layers, points below zoom 8 and polygons above, click popup with *Select for time series* |
+| `get_lake_timeseries(lake_id)` | `ui://water/lake-timeseries.html` | *Time Series Plot of Lake* section: the Dynamic World figure (water, vegetation, bare, breakpoint line, relative-area axis) and the JRC figure, both built by `plot_timeseries_interactive`, plus *Save Interactive Plot (HTML)* buttons (via the host's download) |
 
-`show_lakes` puts the polygons only in `structuredContent` (for the map); the text result the model reads holds
-just the lake attributes.
+*Select for time series* and *Ask Claude to explain this series* send a message into the chat instead of
+rerunning a Streamlit page. Polygons and Plotly figures go only in `structuredContent` (for the views); the text
+result the model reads holds the lake attributes, break statistics and the masked series.
+
+Not mirrored: the Near Real-Time mode, the monthly drainage statistics heatmap, recent imagery, yearly
+thumbnails and timelapses (all Earth Engine), on-demand downloads, shareable links and the tutorial.
 
 ### Data
 
-The tools read `lakes.geojson` and `timeseries.json`, by default the copies bundled in
-`src/arcticdata_mcp/data/water/` (121 lakes on the Seward Peninsula, 5 with time series), exported from the
-water-timeseries-v2 test fixtures so this server does not need geopandas or xarray. To regenerate them, or to
-export another set and point `[water] data_dir` at it:
+`scripts/export_water_fixtures.py` runs the library on the water-timeseries-v2 test fixtures and writes
+`src/arcticdata_mcp/data/water/{lakes.geojson,timeseries.json}`:
+
+- `DWDataset` / `JRCDataset` masking (no-data and snow months dropped) and the dashboard's vegetation grouping;
+- `SimpleBreakpoint` breaks (the Historical mode's `break_method=simple`) with pre/post-break medians and change;
+- the dashboard's figures, `plot_timeseries_interactive(lake, breakpoints=break_date, plot_variables=["water",
+  "vegetation", "bare"])` for DW and the JRC equivalent, saved as Plotly JSON;
+- the dashboard's lake name (`geohash_to_human_readable_name`).
+
+The sample is 121 lakes on the Seward Peninsula, 5 with time series, 3 of them drained. The server only reads the
+JSON, so it doesn't depend on the library. Point `[water] data_dir` at another export to swap the data. The
+library needs its full environment, and water-timeseries-v2's lockfile currently pins numpy<2 with a pyarrow that
+needs numpy 2, so run the export in an isolated env:
 
 ```bash
-uv run --no-project --python 3.12 --with geopandas --with pyarrow --with "xarray<2026" --with netcdf4 \
+uv run --no-project --python 3.12 --with ../water-timeseries-v2 --with "pyarrow<18" \
     python scripts/export_water_fixtures.py ../water-timeseries-v2/tests/data src/arcticdata_mcp/data/water
 ```
 
 ### Try it
 
-> Show me the lakes in the water timeseries sample, then the time series of one that drained.
+> Show me the drained lakes in the water timeseries sample, then the time series of the biggest one.
 
 ### Limitations
 
-- Sample data only. Pan-Arctic scale needs PMTiles (as the water-timeseries dashboard uses) rather than GeoJSON
-  in the tool result, and a hosted data source instead of bundled files.
-- No NRT drainage, breakpoints or Earth Engine downloads.
+- Sample data only. Pan-Arctic scale needs PMTiles (as the dashboard uses) rather than GeoJSON in the tool
+  result, and a hosted data source instead of bundled files.
+- Lakes without a time series in the sample show as stable; in the dashboard every lake has been analysed.

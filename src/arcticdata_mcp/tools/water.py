@@ -1,7 +1,8 @@
-"""Water-timeseries MCP Apps proof of concept: lake polygons and Dynamic World water-area time series.
+"""Water-timeseries MCP Apps proof of concept: the "Lost Lakes" drainage map and lake time series.
 
-Serves a small pre-exported slice of the water-timeseries-v2 data (see scripts/export_water_fixtures.py).
-Both tools render an interactive view in clients that support MCP Apps; others get the JSON result.
+Serves a small slice of water-timeseries-v2 data that scripts/export_water_fixtures.py precomputes with the
+water_timeseries library (masking, breaks and the dashboard's Plotly figures). Both tools render an
+interactive view in clients that support MCP Apps; others get the JSON result.
 """
 
 from __future__ import annotations
@@ -92,6 +93,10 @@ def _summary(dates: list[str], water: list[float | None]) -> dict[str, Any]:
     }
 
 
+def _text(payload: dict[str, Any]) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps(payload))]
+
+
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     data = WaterData(ctx.settings.water.data_dir)
 
@@ -101,17 +106,22 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         south: OptLat = None,
         east: OptLon = None,
         west: OptLon = None,
+        only_drained: Annotated[
+            bool, Field(description="Only return lakes with a detected drainage break (hide stable lakes).")
+        ] = False,
         only_with_timeseries: Annotated[
             bool, Field(description="Only return lakes that have a water-area time series (get_lake_timeseries).")
         ] = False,
         limit: Annotated[int, Field(ge=1, le=500, description="Maximum number of lakes to return.")] = 200,
     ) -> ToolResult:
-        """Show Arctic lake polygons from the water-timeseries dataset on an interactive map.
+        """Show Arctic lakes on the "Lost Lakes" drainage map (the water-timeseries dashboard's Historical view).
 
-        Each lake has its area at the start and end of the record and the net change (ha and %). Omit the
-        bounding box to get every lake. This proof of concept only holds a small sample of lakes on the
-        Seward Peninsula, Alaska (about 66.3-66.8 N, 164.3-160.8 W); lakes with has_timeseries=true can be
-        passed to get_lake_timeseries.
+        Drained lakes are colored by the year of their drainage break and carry the break date, the median
+        water area before and after the break and the change of water area. Every lake also has its area in
+        2000 and 2020 and the net change (Area_start_ha, Area_end_ha, NetChange_ha, NetChange_perc). Omit the
+        bounding box to get every lake. This proof of concept holds a small sample of lakes on the Seward
+        Peninsula, Alaska (about 66.3-66.8 N, 164.3-160.8 W); lakes with has_timeseries=true can be passed to
+        get_lake_timeseries.
         """
         box = (west, south, east, north)
         if any(v is not None for v in box) and any(v is None for v in box):
@@ -121,7 +131,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         matches = []
         for f in data.lakes:
-            if only_with_timeseries and not f["properties"]["has_timeseries"]:
+            props = f["properties"]
+            if only_with_timeseries and not props["has_timeseries"]:
+                continue
+            if only_drained and "date_break" not in props:
                 continue
             if north is not None:
                 w, s, e, n = f["bbox"]
@@ -131,41 +144,54 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         shown = matches[:limit]
         lakes = [f["properties"] for f in shown]
-        structured = {
+        summary = {
             "numFound": len(matches),
             "returned": len(shown),
+            "drained": sum(1 for p in lakes if "date_break" in p),
             "lakes": lakes,
+        }
+        structured = {
+            **summary,
             "geojson": {
                 "type": "FeatureCollection",
                 "features": [{k: f[k] for k in ("type", "properties", "geometry")} for f in shown],
             },
         }
         # The model gets the lake attributes; the polygons are only for the map view.
-        text = json.dumps({"numFound": len(matches), "returned": len(shown), "lakes": lakes})
-        return ToolResult(content=[TextContent(type="text", text=text)], structured_content=structured)
+        return ToolResult(content=_text(summary), structured_content=structured)
 
     @mcp.tool(
         annotations=LOCAL_READ_ONLY, tags={"water", "temporal"}, app=AppConfig(resource_uri=LAKE_TIMESERIES_URI)
     )
-    def get_lake_timeseries(lake_id: LakeId) -> dict[str, Any]:
-        """Monthly water area (ha) of one lake from Dynamic World, shown as an interactive chart.
+    def get_lake_timeseries(lake_id: LakeId) -> ToolResult:
+        """Water-area time series of one lake, shown as the water-timeseries dashboard's interactive charts.
 
-        Covers June-September of each year. Also returns the areas of the other Dynamic World land-cover
-        classes inside the lake polygon (bare, grass, snow_and_ice, ...), which help explain drops in water
-        area. Use show_lakes(only_with_timeseries=true) to find lake ids that have data.
+        Dynamic World (monthly, June-September): water, vegetation (flooded vegetation + grass + shrub/scrub
+        + trees), bare and snow/ice area in ha, with invalid months (no-data or snow) already masked out.
+        JRC Global Surface Water (annual): permanent and seasonal water and land. If a drainage break was
+        detected, the break date and the median water area before/after it are included. Use
+        show_lakes(only_with_timeseries=true) to find lake ids that have data.
         """
-        ts = data.timeseries
-        series = ts["lakes"].get(lake_id)
-        if series is None:
-            available = ", ".join(sorted(ts["lakes"]))
+        entry = data.timeseries["lakes"].get(lake_id)
+        if entry is None:
+            available = ", ".join(sorted(data.timeseries["lakes"]))
             raise ToolError(f"No time series for lake {lake_id!r}. Lakes with data: {available}.")
         lake = data.lake(lake_id)
-        return {
+        dw = entry["dw"]
+        summary: dict[str, Any] = {
             "lake_id": lake_id,
-            "source": ts["source"],
-            "unit": ts["unit"],
+            "name": entry["name"],
             "lake": lake["properties"] if lake else None,
-            "summary": _summary(ts["dates"], series["water"]),
-            "dates": ts["dates"],
-            "series": series,
+            "break": entry["break"],
+            "summary": _summary(dw["data"]["dates"], dw["data"]["water"]),
+            "dw": {k: v for k, v in dw.items() if k != "figure"},
         }
+        if "jrc" in entry:
+            summary["jrc"] = {k: v for k, v in entry["jrc"].items() if k != "figure"}
+        structured = {
+            **summary,
+            "dw": dw,
+            **({"jrc": entry["jrc"]} if "jrc" in entry else {}),
+        }
+        # The model gets the data; the Plotly figures are only for the chart view.
+        return ToolResult(content=_text(summary), structured_content=structured)

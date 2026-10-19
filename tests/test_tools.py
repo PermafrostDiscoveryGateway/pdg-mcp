@@ -137,6 +137,7 @@ async def test_show_lakes_links_map_app_and_filters_bbox(client):
     assert tools["show_lakes"].meta["ui"]["resourceUri"] == "ui://water/lake-map.html"
     everything = await client.call_tool("show_lakes", {})
     assert everything.structured_content["numFound"] == 121
+    assert everything.structured_content["drained"] == 3
     with_ts = await client.call_tool("show_lakes", {"only_with_timeseries": True})
     assert with_ts.structured_content["numFound"] == 5
     assert all(lake["has_timeseries"] for lake in with_ts.structured_content["lakes"])
@@ -146,6 +147,15 @@ async def test_show_lakes_links_map_app_and_filters_bbox(client):
     assert gj["type"] == "FeatureCollection" and gj["features"][0]["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     # Polygons go to the view only, not into the model's text result.
     assert '"geometry"' not in boxed.content[0].text
+
+
+async def test_show_lakes_only_drained_carries_break_attributes(client):
+    r = await client.call_tool("show_lakes", {"only_drained": True})
+    lakes = r.structured_content["lakes"]
+    assert len(lakes) == 3
+    for lake in lakes:
+        assert {"date_break", "date_break_year", "pre_break_median", "NetChange_perc"} <= set(lake)
+        assert isinstance(lake["date_break_year"], int)
 
 
 async def test_show_lakes_rejects_partial_bbox(client):
@@ -158,10 +168,16 @@ async def test_get_lake_timeseries(client):
     assert tools["get_lake_timeseries"].meta["ui"]["resourceUri"] == "ui://water/lake-timeseries.html"
     r = await client.call_tool("get_lake_timeseries", {"lake_id": "b7uefy0bvcrc"})
     d = r.structured_content
-    assert d["unit"] == "ha" and len(d["dates"]) == len(d["series"]["water"]) == 41
-    assert {"water", "bare", "snow_and_ice"} <= set(d["series"])
-    assert d["lake"]["id_geohash"] == "b7uefy0bvcrc"
-    assert d["summary"]["n_observations"] > 0 and d["summary"]["min"]["water_ha"] <= d["summary"]["max"]["water_ha"]
+    assert d["name"].startswith("b7uefy0bvcrc | ")
+    assert d["break"]["date_break"] == "2018-06-01" and d["break"]["break_method"] == "simple"
+    dw = d["dw"]["data"]
+    # Masked months are dropped, and vegetation is the dashboard's grouped class.
+    assert len(dw["dates"]) == len(dw["water"]) < 41
+    assert {"water", "vegetation", "bare", "snow_and_ice"} <= set(dw)
+    assert [t["name"] for t in d["dw"]["figure"]["data"]] == ["Water", "Vegetation", "Bare", "Normalized", "Breakpoint"]
+    assert d["jrc"]["figure"]["data"]
+    # Figures go to the view only, not into the model's text result.
+    assert '"figure"' not in r.content[0].text and '"water"' in r.content[0].text
 
 
 async def test_get_lake_timeseries_unknown_lake(client):

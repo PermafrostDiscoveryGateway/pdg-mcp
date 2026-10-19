@@ -3,92 +3,94 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lake water time series</title>
+<title>Lake time series</title>
+<!--
+  Mirrors the water-timeseries dashboard's time series section (map_viewer.py): the
+  figures are the ones DWDataset/JRCDataset.plot_timeseries_interactive build, exported
+  as Plotly JSON by scripts/export_water_fixtures.py, so this page only renders them.
+-->
 <style>
   html, body { margin: 0; background: #fff; font: 13px/1.4 system-ui, sans-serif; color: #222; }
-  header { display: flex; align-items: baseline; gap: 12px; padding: 8px 10px 0; flex-wrap: wrap; }
-  h1 { font-size: 15px; margin: 0; }
-  #meta { color: #555; }
-  #chart { height: 400px; }
-  footer { display: flex; gap: 8px; align-items: center; padding: 0 10px 8px; color: #666; font-size: 11px; }
-  footer button { font-size: 12px; }
-  footer span { flex: 1; }
+  h1 { font-size: 15px; margin: 0; padding: 8px 10px 2px; }
+  h2 { font-size: 14px; margin: 8px 10px 0; }
+  #meta { color: #555; padding: 0 10px 4px; }
+  .plot { width: 100%; }
+  .actions { display: flex; gap: 8px; padding: 2px 10px 8px; flex-wrap: wrap; }
+  button { font-size: 12px; padding: 4px 10px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
+  button:hover { background: #f3f3f3; }
+  .caption { color: #666; font-size: 12px; padding: 0 10px 8px; }
 </style>
 </head>
 <body>
-<header><h1 id="title">Waiting for time series…</h1><div id="meta"></div></header>
-<div id="chart"></div>
-<footer><span id="source"></span><button id="explain" hidden>Ask Claude to explain this series</button></footer>
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<h1 id="title">Waiting for time series…</h1>
+<div id="meta"></div>
+<div id="dw" class="plot"></div>
+<div class="actions" id="dw-actions"></div>
+<section id="jrc-section" hidden>
+  <h2>JRC</h2>
+  <div id="jrc" class="plot"></div>
+  <div class="actions" id="jrc-actions"></div>
+</section>
+<div class="caption" id="jrc-missing" hidden>JRC data not available for this feature</div>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@4.1.1/plotly.min.js"></script>
 <script type="module">
   import { App } from "https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@2.0.3/dist/src/app-with-deps.js";
 
-  const LAND_COVER = {
-    bare: "#a6761d",
-    grass: "#66a61e",
-    shrub_and_scrub: "#1b9e77",
-    flooded_vegetation: "#7570b3",
-    snow_and_ice: "#9ecae1",
-    trees: "#006d2c",
-    crops: "#e6ab02",
-    built: "#e7298a",
-  };
   const $ = (id) => document.getElementById(id);
-  const fmt = (v) => (v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 }));
+  const fmt = (v) => (v == null ? "N/A" : Number(v).toFixed(2));
+  const app = new App({ name: "water-lake-timeseries", version: "0.2.0" });
 
-  const app = new App({ name: "water-lake-timeseries", version: "0.1.0" });
+  // Same file the dashboard's "Save Interactive Plot (HTML)" button produces
+  // (fig.to_html(include_plotlyjs="cdn")), built from the figure JSON.
+  function figureHtml(fig, title) {
+    const json = JSON.stringify(fig).replace(/</g, "\\u003c");
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>` +
+      '<script src="https://cdn.plot.ly/plotly-4.1.1.min.js"><\/script></head><body>' +
+      `<div id="plot"></div><script>const f=${json};Plotly.newPlot("plot",f.data,f.layout,{responsive:true});<\/script>` +
+      "</body></html>";
+  }
+
+  function addSaveButton(container, fig, lakeId, prefix) {
+    if (!app.getHostCapabilities()?.downloadFile) return;
+    const btn = document.createElement("button");
+    btn.textContent = `💾 Save ${prefix ? prefix.toUpperCase() + " " : ""}Interactive Plot (HTML)`;
+    const name = `timeseries_${prefix ? prefix + "_" : ""}${lakeId}.html`;
+    btn.onclick = () => app.downloadFile({
+      contents: [{ type: "resource", resource: { uri: `file:///${name}`, mimeType: "text/html", text: figureHtml(fig, name) } }],
+    });
+    container.appendChild(btn);
+  }
 
   app.ontoolresult = ({ structuredContent: d }) => {
-    if (!d?.series) {
+    if (!d?.dw?.figure) {
       $("title").textContent = "No time series in the tool result.";
       return;
     }
-    const unit = d.unit ?? "ha";
-    const s = d.summary ?? {};
-    $("title").textContent = `Lake ${d.lake_id}`;
-    $("meta").textContent =
-      `${s.n_observations ?? 0} observations · water ${fmt(s.min?.water_ha)}–${fmt(s.max?.water_ha)} ${unit}` +
-      (d.lake ? ` · net change ${fmt(d.lake.net_change_perc)} %` : "");
-    $("source").textContent = d.source ?? "";
+    $("title").textContent = `📈 Time Series Plot of Lake: ${d.name ?? d.lake_id}`;
+    const b = d.break;
+    $("meta").textContent = b
+      ? `Break ${b.date_break.slice(0, 7)} · water area before ${fmt(b.pre_break_median)} ha, after ${fmt(b.post_break_median)} ha`
+      : "No drainage break detected";
 
-    const traces = [{
-      x: d.dates, y: d.series.water, name: "water", type: "scatter", mode: "lines+markers",
-      line: { color: "#1f6feb", width: 2.5 }, marker: { size: 5 },
-      hovertemplate: `%{x|%b %Y}: %{y:.1f} ${unit}<extra>water</extra>`,
-    }];
-    // Other land-cover classes start hidden; click them in the legend to compare.
-    for (const [name, color] of Object.entries(LAND_COVER)) {
-      if (!d.series[name]) continue;
-      traces.push({
-        x: d.dates, y: d.series[name], name, type: "scatter", mode: "lines+markers", visible: "legendonly",
-        line: { color, width: 1.5 }, marker: { size: 4 },
-        hovertemplate: `%{x|%b %Y}: %{y:.1f} ${unit}<extra>${name}</extra>`,
-      });
-    }
-    const shapes = [];
-    if (d.lake?.area_end_ha != null) {
-      shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, y0: d.lake.area_end_ha, y1: d.lake.area_end_ha,
-        line: { color: "#888", dash: "dot", width: 1 } });
-    }
-    Plotly.newPlot("chart", traces, {
-      margin: { l: 56, r: 12, t: 12, b: 40 },
-      yaxis: { title: { text: `Area (${unit})` }, rangemode: "tozero" },
-      xaxis: { type: "date" },
-      legend: { orientation: "h", y: -0.15 },
-      shapes,
-      annotations: shapes.length ? [{ xref: "paper", x: 1, y: d.lake.area_end_ha, xanchor: "right", yanchor: "bottom",
-        text: "mapped lake area", showarrow: false, font: { size: 10, color: "#888" } }] : [],
-    }, { responsive: true, displaylogo: false });
+    Plotly.newPlot("dw", d.dw.figure.data, d.dw.figure.layout, { responsive: true, displaylogo: false });
+    addSaveButton($("dw-actions"), d.dw.figure, d.lake_id, "");
+    const explain = document.createElement("button");
+    explain.textContent = "Ask Claude to explain this series";
+    explain.onclick = () => app.sendMessage({
+      role: "user",
+      content: [{ type: "text", text:
+        `Explain the water area time series of lake ${d.lake_id}: the trend, the detected break (if any), ` +
+        "and how the vegetation and bare areas change around it." }],
+    });
+    $("dw-actions").appendChild(explain);
 
-    const btn = $("explain");
-    btn.hidden = false;
-    btn.onclick = () =>
-      app.sendMessage({
-        role: "user",
-        content: [{ type: "text", text:
-          `Explain the water area time series of lake ${d.lake_id}: describe the trend, and whether the low ` +
-          `values (e.g. ${s.min?.date}) look like real drainage or bad observations (check the other land-cover classes).` }],
-      });
+    if (d.jrc?.figure) {
+      $("jrc-section").hidden = false;
+      Plotly.newPlot("jrc", d.jrc.figure.data, d.jrc.figure.layout, { responsive: true, displaylogo: false });
+      addSaveButton($("jrc-actions"), d.jrc.figure, d.lake_id, "jrc");
+    } else {
+      $("jrc-missing").hidden = false;
+    }
   };
 
   await app.connect();

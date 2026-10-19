@@ -15,7 +15,14 @@ LAKE_TIMESERIES_URI = "ui://water/lake-timeseries.html"
 
 # Origins the sandboxed iframes may load scripts, styles and map tiles from.
 SEARCH_MAP_CSP = ResourceCSP(resource_domains=["https://cdn.jsdelivr.net", "https://tile.openstreetmap.org"])
-LAKE_MAP_CSP = ResourceCSP(resource_domains=["https://cdn.jsdelivr.net", "https://server.arcgisonline.com"])
+LAKE_MAP_CSP = ResourceCSP(
+    resource_domains=[
+        "https://cdn.jsdelivr.net",
+        "https://server.arcgisonline.com",  # ESRI World Imagery
+        "https://*.basemaps.cartocdn.com",  # Dark Matter
+        "https://maps.awi.de",  # TCVIS WMS
+    ]
+)
 LAKE_TIMESERIES_CSP = ResourceCSP(resource_domains=["https://cdn.jsdelivr.net"])
 
 

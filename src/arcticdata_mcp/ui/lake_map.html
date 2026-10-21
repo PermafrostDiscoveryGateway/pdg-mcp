@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lost Lakes map</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<!--
+  Mirrors the water-timeseries dashboard's Historical ("drainage_year") map:
+  styling from utils/map_styles/pmtiles.py (get_style_pmtiles_drainage_year), hover
+  aliases from map_utils.py, legend from utils/visualization.py, and the click popup /
+  point-polygon zoom switch from dashboard/static/lake_map.html.
+-->
+<style>
+  html, body { margin: 0; background: #fff; font: 13px/1.4 system-ui, sans-serif; color: #222; }
+  header { padding: 8px 10px 4px; }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  header ul { margin: 0; padding-left: 18px; color: #444; }
+  #bar { display: flex; align-items: center; gap: 12px; padding: 4px 10px 6px; color: #444; flex-wrap: wrap; }
+  #bar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #status { flex: 1; }
+  #map { height: 480px; }
+  .legend { background: rgba(255,255,255,0.9); border: 2px solid grey; border-radius: 5px; padding: 8px 10px;
+    font-size: 12px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
+  .legend p { margin: 0 0 6px; font-weight: bold; text-align: center; }
+  .legend .cols { display: flex; gap: 12px; }
+  .legend .cols > div { display: flex; flex-direction: column; gap: 3px; }
+  .legend span { display: inline-block; width: 16px; height: 16px; border: 1px solid #555; border-radius: 3px;
+    margin-right: 6px; vertical-align: -3px; }
+  .lake-popup { font-size: 13px; line-height: 1.4; max-width: 280px; }
+  .select-lake-btn { margin-top: 8px; padding: 6px 10px; background: #0068c9; color: #fff; border: none;
+    border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .select-lake-btn:hover { background: #0054a3; }
+  .note { margin-top: 6px; color: #666; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💧 Lost Lakes: Arctic Lake Drainage Explorer</h1>
+  <ul>
+    <li><b>Hover</b> over a feature to see its attributes</li>
+    <li><b>Click</b> on a feature to select it and view its time series</li>
+  </ul>
+</header>
+<div id="bar">
+  <span id="status">Waiting for lakes…</span>
+  <label><input type="checkbox" id="hide-stable"> Hide stable lakes</label>
+</div>
+<div id="map"></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module">
+  import { App } from "https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@2.0.3/dist/src/app-with-deps.js";
+
+  // POINT_POLY_SWITCH_ZOOM in pmtiles_build.py: centroids below, polygons from here up.
+  const POINT_POLY_SWITCH_ZOOM = 8;
+  // get_style_pmtiles_drainage_year: fill and outline ramps over date_break_year.
+  const FILL_STOPS = [[2016, "#313695"], [2017, "#4575b4"], [2018, "#74add1"], [2019, "#abd9e9"], [2020, "#e0f3f8"],
+    [2021, "#fee090"], [2022, "#fdae61"], [2023, "#f46d43"], [2024, "#d73027"], [2025, "#a50026"]];
+  const LINE_STOPS = [[2017, "#4575b4"], [2018, "#74add1"], [2019, "#abd9e9"], [2020, "#e0f3f8"], [2021, "#ffffbf"],
+    [2022, "#fee090"], [2023, "#fdae61"], [2024, "#f46d43"], [2025, "#d73027"]];
+  const STABLE_LINE = "#9e9e9e";
+  // Hover aliases of the drainage_year mode (map_utils.py), in display order.
+  const ALIASES = {
+    id_geohash: "Lake ID",
+    date_break: "Break date [YYYY-MM]",
+    date_break_year: "Year of change",
+    date_break_month: "Month of change",
+    pre_break_median: "Lake area before break [ha]",
+    post_break_median: "Lake area after break [ha]",
+    water_change_ha: "Change of water area [ha]",
+    water_change_perc: "Change of water area [%]",
+    NetChange_perc: "Net change [%]",
+    NetChange_ha: "Net change [ha]",
+    Area_start_ha: "Lake area year 2000 [ha]",
+    Area_end_ha: "Lake area year 2020 [ha]",
+  };
+  // Whole-number categories, not measured quantities -- skip toFixed(2).
+  const INTEGER_FIELDS = new Set(["date_break_year", "date_break_month"]);
+
+  const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  function ramp(stops, x) {
+    if (x <= stops[0][0]) return stops[0][1];
+    for (let i = 1; i < stops.length; i++) {
+      const [x1, c1] = stops[i];
+      if (x <= x1) {
+        const [x0, c0] = stops[i - 1];
+        const t = (x - x0) / (x1 - x0), a = hex(c0), b = hex(c1);
+        return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * t)).join(",")})`;
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+  const isDrained = (p) => p.date_break_year != null && p.date_break_year !== "" && !Number.isNaN(p.date_break_year);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const fmt = (k, v) => (v == null ? "N/A" : typeof v === "number" && !INTEGER_FIELDS.has(k) ? v.toFixed(2) : v);
+  const describe = (p) =>
+    Object.entries(ALIASES).filter(([k]) => p[k] !== undefined)
+      .map(([k, label]) => `<b>${label}:</b> ${esc(fmt(k, p[k]))}`).join("<br>");
+
+  // Base layers of the drainage_year map: Dark Matter, TCVIS, ESRI World Imagery (last added = shown).
+  const darkMatter = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd", maxZoom: 19, attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+  });
+  const tcvis = L.tileLayer.wms("https://maps.awi.de/services/common/permafrost/ows", {
+    layers: "tcvis", styles: "composite", format: "image/png", transparent: true,
+    attribution: "TCVIS Landsat Trends 2005-2024 (AWI)",
+  });
+  const esri = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Imagery &copy; Esri" },
+  );
+  const map = L.map("map", { layers: [esri] }).setView([66.5, -163], 8);
+  L.control.layers({
+    "ESRI World Imagery": esri,
+    "Dark Matter (CartoDB)": darkMatter,
+    "TCVIS Landsat Trends 2005-2024 (AWI)": tcvis,
+  }, null, { collapsed: true }).addTo(map);
+
+  const legend = L.control({ position: "bottomright" });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create("div", "legend");
+    const patch = ([y, c]) => `<div><span style="background:${c}"></span>${y}</div>`;
+    div.innerHTML = "<p>Drainage Year</p><div class=\"cols\">" +
+      `<div>${FILL_STOPS.slice(0, 5).map(patch).join("")}</div>` +
+      `<div>${FILL_STOPS.slice(5).map(patch).join("")}</div></div>` +
+      `<div style="margin-top:4px"><span style="background:transparent;border-color:${STABLE_LINE}"></span>Stable</div>`;
+    return div;
+  };
+  legend.addTo(map);
+
+  const app = new App({ name: "water-lake-map", version: "0.2.0" });
+  const polygons = L.featureGroup();
+  const points = L.featureGroup();
+  const bboxLayer = L.featureGroup().addTo(map);
+  const status = document.getElementById("status");
+  const hideStable = document.getElementById("hide-stable");
+  let features = [];
+
+  function selectLake(p) {
+    app.sendMessage({
+      role: "user",
+      content: [{ type: "text", text: `Show the water area time series for lake ${p.id_geohash} (get_lake_timeseries).` }],
+    });
+  }
+
+  function popupFor(p) {
+    const div = document.createElement("div");
+    div.className = "lake-popup";
+    div.innerHTML = describe(p);
+    if (p.has_timeseries) {
+      const btn = document.createElement("button");
+      btn.className = "select-lake-btn";
+      btn.type = "button";
+      btn.textContent = "Select for time series";
+      btn.onclick = () => selectLake(p);
+      div.appendChild(btn);
+    } else {
+      div.insertAdjacentHTML("beforeend", '<div class="note">No time series for this lake in the sample data.</div>');
+    }
+    return div;
+  }
+
+  // Like the dashboard, hover only works on polygons (zoom >= POINT_POLY_SWITCH_ZOOM); points are click-only.
+  function bind(layer, p, hover) {
+    if (hover) layer.bindTooltip(() => `<div class="lake-popup">${describe(p)}</div>`, { sticky: true, offset: [15, 0] });
+    layer.bindPopup(() => popupFor(p));
+  }
+
+  function polygonStyle(p) {
+    if (isDrained(p)) {
+      return { fillColor: ramp(FILL_STOPS, p.date_break_year), fillOpacity: 0.2,
+        color: ramp(LINE_STOPS, p.date_break_year), weight: 3, opacity: 1 };
+    }
+    const hidden = hideStable.checked;
+    return { fillColor: STABLE_LINE, fillOpacity: hidden ? 0 : 0.05, color: STABLE_LINE,
+      weight: hidden ? 0 : 0.6, opacity: 1 };
+  }
+
+  function render() {
+    polygons.clearLayers();
+    points.clearLayers();
+    for (const f of features) {
+      const p = f.properties;
+      if (hideStable.checked && !isDrained(p)) continue;
+      const poly = L.geoJSON(f, { style: () => polygonStyle(p) });
+      bind(poly, p, true);
+      polygons.addLayer(poly);
+      // Below the switch zoom the dashboard draws centroids, colored like the polygon fill.
+      const dot = L.circleMarker(poly.getBounds().getCenter(), {
+        radius: isDrained(p) ? 5 : 3,
+        fillColor: isDrained(p) ? ramp(FILL_STOPS, p.date_break_year) : STABLE_LINE,
+        fillOpacity: isDrained(p) ? 0.9 : 0.5,
+        color: isDrained(p) ? ramp(LINE_STOPS, p.date_break_year) : STABLE_LINE,
+        weight: 1,
+      });
+      bind(dot, p, false);
+      points.addLayer(dot);
+    }
+    updateZoomLayers();
+  }
+
+  function updateZoomLayers() {
+    const usePolygons = map.getZoom() >= POINT_POLY_SWITCH_ZOOM;
+    (usePolygons ? polygons : points).addTo(map);
+    map.removeLayer(usePolygons ? points : polygons);
+  }
+  map.on("zoomend", updateZoomLayers);
+  hideStable.onchange = render;
+
+  // Draw the requested bounding box, if the model passed one.
+  app.ontoolinput = ({ arguments: a }) => {
+    if (a?.only_drained) hideStable.checked = true;
+    if (a && a.north != null && a.south != null && a.east != null && a.west != null) {
+      L.rectangle([[a.south, a.west], [a.north, a.east]], { color: "#fff", dashArray: "4", weight: 1, fill: false })
+        .addTo(bboxLayer);
+    }
+  };
+
+  app.ontoolresult = ({ structuredContent: data }) => {
+    features = data?.geojson?.features ?? [];
+    if (!features.length) {
+      status.textContent = "No lakes in the tool result.";
+      return;
+    }
+    render();
+    status.textContent = `${data.returned} of ${data.numFound} lakes · ${data.drained} drained`;
+    const bounds = L.geoJSON({ type: "FeatureCollection", features }).getBounds();
+    map.fitBounds(bounds, { padding: [10, 10] });
+  };
+
+  await app.connect();
+</script>
+</body>
+</html>

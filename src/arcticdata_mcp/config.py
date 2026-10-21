@@ -59,12 +59,20 @@ class RateLimitSettings:
 
 
 @dataclass
+class WaterSettings:
+    # Directory holding lakes.geojson and timeseries.json (see scripts/export_water_fixtures.py).
+    # Empty = the small fixture set bundled with the package.
+    data_dir: str = ""
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
     arcticdata: ArcticDataSettings = field(default_factory=ArcticDataSettings)
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
+    water: WaterSettings = field(default_factory=WaterSettings)
 
 
 def _coerce(value: str, target: type) -> Any:

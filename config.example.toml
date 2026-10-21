@@ -46,3 +46,8 @@ per_user_burst = 20
 max_retries = 3
 retry_backoff = 1.0
 retry_max_delay = 30.0
+
+[water]
+# Lake data for the water-timeseries MCP Apps PoC (show_lakes, get_lake_timeseries): a directory with
+# lakes.geojson and timeseries.json written by scripts/export_water_fixtures.py. Empty = bundled fixtures.
+data_dir = ""

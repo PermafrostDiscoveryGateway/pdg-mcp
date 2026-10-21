@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dataset map</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin: 0; background: #fff; font: 13px/1.4 system-ui, sans-serif; }
+  #status { padding: 6px 10px; color: #444; }
+  #map { height: 420px; }
+  .popup-title { font-weight: 600; margin-bottom: 4px; }
+  .popup-id { color: #666; font-size: 11px; word-break: break-all; }
+  .popup button { margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="status">Waiting for search results…</div>
+<div id="map"></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module">
+  import { App } from "https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@2.0.3/dist/src/app-with-deps.js";
+
+  const map = L.map("map").setView([70, -150], 3);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 12,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+  const layer = L.featureGroup().addTo(map);
+  const status = document.getElementById("status");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+  const app = new App({ name: "arcticdata-search-map", version: "0.1.0" });
+
+  // The arguments the model called the tool with: draw the search box itself.
+  app.ontoolinput = ({ arguments: a }) => {
+    if (a && a.north != null) {
+      L.rectangle([[a.south, a.west], [a.north, a.east]], { color: "#888", dashArray: "4", fill: false })
+        .addTo(layer);
+    }
+  };
+
+  // The tool's structuredContent: one rectangle per dataset footprint.
+  app.ontoolresult = ({ structuredContent: data }) => {
+    const results = data?.results ?? [];
+    let drawn = 0;
+    for (const r of results) {
+      const b = r.bbox;
+      if (!b || b.north == null) continue;
+      const popup = document.createElement("div");
+      popup.className = "popup";
+      popup.innerHTML =
+        `<div class="popup-title">${esc(r.title)}</div><div class="popup-id">${esc(r.id)}</div>`;
+      const btn = document.createElement("button");
+      btn.textContent = "Ask Claude about this dataset";
+      btn.onclick = () =>
+        app.sendMessage({
+          role: "user",
+          content: [{ type: "text", text: `Tell me about dataset ${r.id} (get_dataset_details).` }],
+        });
+      popup.appendChild(btn);
+      L.rectangle([[b.south, b.west], [b.north, b.east]], { color: "#1f6feb", weight: 1 })
+        .bindPopup(popup)
+        .addTo(layer);
+      drawn++;
+    }
+    status.textContent = `${drawn} of ${data?.numFound ?? results.length} matching datasets shown`;
+    if (layer.getLayers().length) map.fitBounds(layer.getBounds(), { padding: [10, 10] });
+  };
+
+  await app.connect();
+</script>
+</body>
+</html>

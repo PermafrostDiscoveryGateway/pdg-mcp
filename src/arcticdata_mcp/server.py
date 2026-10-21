@@ -12,7 +12,7 @@ from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
-from arcticdata_mcp.tools import datasets, node, objects, search
+from arcticdata_mcp.tools import apps, datasets, node, objects, search, water
 from arcticdata_mcp.tools.common import ToolContext
 
 INSTRUCTIONS = """\
@@ -25,6 +25,9 @@ Typical workflow:
 3. List its files with list_dataset_files, peek with preview_file, then fetch with download_file.
    Large files return a direct URL instead of inline bytes (see get_server_config).
 Identifiers (PIDs) look like 'doi:10.18739/A2...' for datasets and 'urn:uuid:...' for files.
+
+Separately, show_lakes and get_lake_timeseries serve a small sample of Arctic lake water-area data
+(water-timeseries-v2, Dynamic World) with interactive map and chart views.
 """
 
 
@@ -53,6 +56,6 @@ def create_server(
     )
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
-    for module in (search, datasets, objects, node):
+    for module in (search, datasets, objects, node, apps, water):
         module.register(mcp, ctx)
     return mcp

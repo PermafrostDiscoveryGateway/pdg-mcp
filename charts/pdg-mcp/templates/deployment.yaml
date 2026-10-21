@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pdg-mcp.fullname" . }}
+  labels:
+    {{- include "pdg-mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "pdg-mcp.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pdg-mcp.selector" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: pdg-mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: ARCTICDATA_MCP_SERVER_HOST
+              value: 0.0.0.0
+            - name: ARCTICDATA_MCP_AUTH_REALM_URL
+              value: {{ .Values.auth.realmUrl | quote }}
+            - name: ARCTICDATA_MCP_AUTH_BASE_URL
+              value: "https://{{ .Values.host }}"
+            - name: ARCTICDATA_MCP_AUTH_AUDIENCE
+              value: {{ .Values.auth.audience | quote }}
+            - name: ARCTICDATA_MCP_AUTH_REQUIRED_ROLE
+              value: {{ .Values.auth.requiredRole | quote }}
+            - name: ARCTICDATA_MCP_AUTH_REQUIRED_SCOPES
+              value: {{ .Values.auth.requiredScopes | quote }}
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          # The MCP endpoint answers 401 without a token, so probe the TCP port.
+          readinessProbe:
+            tcpSocket:
+              port: http
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

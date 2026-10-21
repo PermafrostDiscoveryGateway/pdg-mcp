@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pdg-mcp
+description: MCP server for the NSF Arctic Data Center (DataONE) API, protected by Keycloak
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

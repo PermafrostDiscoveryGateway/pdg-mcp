@@ -1,7 +1,7 @@
 """Configuration loading: a TOML file with environment-variable overrides.
 
 Environment variables use the form ``ARCTICDATA_MCP_<SECTION>_<KEY>``, e.g.
-``ARCTICDATA_MCP_AUTH_PASSWORD`` or ``ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES``.
+``ARCTICDATA_MCP_AUTH_REALM_URL`` or ``ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,11 @@ ENV_PREFIX = "ARCTICDATA_MCP_"
 
 @dataclass
 class AuthSettings:
-    password: str = ""
+    realm_url: str = ""  # e.g. https://keycloak.software-dev.ncsa.illinois.edu/realms/PDG
+    base_url: str = "http://127.0.0.1:8000"  # public URL of this MCP server (used in OAuth discovery)
+    audience: str = ""  # expected "aud" claim; empty disables the check
+    required_role: str = "mcp-user"  # Keycloak realm role an admin grants to approve a user; empty = any user
+    required_scopes: list[str] = field(default_factory=lambda: ["openid"])
 
 
 @dataclass
@@ -44,11 +48,23 @@ class DownloadSettings:
 
 
 @dataclass
+class RateLimitSettings:
+    max_concurrent: int = 6  # global cap on in-flight requests to ADC/DataONE; 0 = unlimited
+    queue_timeout: float = 30.0  # seconds a request waits for a free slot before failing
+    per_user_rate: float = 2.0  # sustained tool calls per second per user (Keycloak "sub"); 0 = unlimited
+    per_user_burst: int = 20  # tool calls a user can make back-to-back before the rate applies
+    max_retries: int = 3  # retries on 429/502/503/504 from ADC; 0 = no retries
+    retry_backoff: float = 1.0  # base delay in seconds, doubled per attempt (Retry-After wins if sent)
+    retry_max_delay: float = 30.0  # upper bound on a single retry delay
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
     arcticdata: ArcticDataSettings = field(default_factory=ArcticDataSettings)
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
+    ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
 
 
 def _coerce(value: str, target: type) -> Any:
@@ -58,6 +74,8 @@ def _coerce(value: str, target: type) -> Any:
         return int(value)
     if target is float:
         return float(value)
+    if target is list:
+        return [v.strip() for v in value.split(",") if v.strip()]
     return value
 
 

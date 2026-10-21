@@ -8,9 +8,10 @@ from contextlib import asynccontextmanager
 import httpx
 from fastmcp import FastMCP
 
-from arcticdata_mcp.auth import PasswordTokenVerifier
+from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
 from arcticdata_mcp.tools import datasets, node, objects, search
 from arcticdata_mcp.tools.common import ToolContext
 
@@ -43,13 +44,14 @@ def create_server(
         finally:
             await client.aclose()
 
-    auth = PasswordTokenVerifier(settings.auth.password) if require_auth else None
+    auth = build_auth(settings.auth) if require_auth else None
     mcp = FastMCP(
         name="Arctic Data Center",
         instructions=INSTRUCTIONS,
         auth=auth,
         lifespan=lifespan,
     )
+    mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node):
         module.register(mcp, ctx)

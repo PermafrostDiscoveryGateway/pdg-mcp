@@ -21,7 +21,7 @@ from pydantic import Field
 
 from arcticdata_mcp.tools.apps import LAKE_MAP_URI, LAKE_TIMESERIES_URI
 from arcticdata_mcp.tools.common import ToolContext
-from arcticdata_mcp.waterdata import MAX_POINTS, MAX_POLYGONS, open_water_data
+from arcticdata_mcp.waterdata import MAX_POINTS, MAX_POLYGONS, LakeResult, open_water_data
 
 # Local data only, so unlike the ADC tools these are not open-world.
 LOCAL_READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False, idempotent_hint=True)
@@ -46,6 +46,23 @@ def _summary(dates: list[str], water: list[float | None]) -> dict[str, Any]:
         "min": {"date": min(obs, key=lambda o: o[1])[0], "water_ha": min(values)},
         "max": {"date": max(obs, key=lambda o: o[1])[0], "water_ha": max(values)},
         "mean_water_ha": round(sum(values) / len(values), 3),
+    }
+
+
+def _map_view(r: LakeResult) -> dict[str, Any]:
+    """What the map view draws: capped GeoJSON plus the counts and a note when lakes were left out."""
+    note = None
+    if len(r.features) < r.num_found:
+        cap = MAX_POLYGONS if r.geometry == "polygon" else MAX_POINTS
+        note = f"Map shows the top {cap} of {r.num_found} lakes"
+        note += "; zoom in to see more." if r.geometry == "point" else "; zoom in or filter to see others."
+    return {
+        "numFound": r.num_found,
+        "drained": r.drained,
+        "shown": len(r.features),
+        "geometry": r.geometry,
+        "map_note": note,
+        "geojson": {"type": "FeatureCollection", "features": r.features},
     }
 
 
@@ -104,20 +121,35 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         }
         if offset + len(r.page) < r.num_found:
             summary["next_offset"] = offset + len(r.page)
-        map_note = None
-        if len(r.features) < r.num_found:
-            cap = MAX_POLYGONS if r.geometry == "polygon" else MAX_POINTS
-            map_note = f"Map shows the top {cap} of {r.num_found} lakes"
-            map_note += "; zoom in (give a smaller bounding box) to see more." if r.geometry == "point" else "."
-        structured = {
-            **summary,
-            "shown": len(r.features),
-            "geometry": r.geometry,
-            "map_note": map_note,
-            "geojson": {"type": "FeatureCollection", "features": r.features},
-        }
+        structured = {**summary, **_map_view(r)}
         # The model gets the lake attributes; the geometry is only for the map view.
         return ToolResult(content=_text(summary), structured_content=structured)
+
+    @mcp.tool(
+        annotations=LOCAL_READ_ONLY, tags={"water", "spatial"}, app=AppConfig(visibility=["app"])
+    )
+    def lakes_in_view(
+        north: Annotated[float, Field(ge=-90, le=90, description="Top of the map view (WGS84).")],
+        south: Annotated[float, Field(ge=-90, le=90, description="Bottom of the map view (WGS84).")],
+        east: Annotated[float, Field(ge=-180, le=180, description="Right edge of the map view (WGS84).")],
+        west: Annotated[float, Field(ge=-180, le=180, description="Left edge of the map view (WGS84).")],
+        zoom: Annotated[int, Field(ge=0, le=22, description="The map's zoom level; picks dots or polygons.")],
+        only_drained: bool = False,
+        only_with_timeseries: bool = False,
+    ) -> ToolResult:
+        """The lake map's pan/zoom reload: lakes in the current view, for the map only (hidden from the model)."""
+        if south > north:
+            raise ToolError("south must be <= north.")
+        r = data.search(
+            bbox=(west, south, east, north),
+            only_drained=only_drained,
+            only_with_timeseries=only_with_timeseries,
+            limit=0,
+            offset=0,
+            zoom=zoom,
+        )
+        view = _map_view(r)
+        return ToolResult(content=_text({k: view[k] for k in ("numFound", "drained", "shown")}), structured_content=view)
 
     @mcp.tool(
         annotations=LOCAL_READ_ONLY, tags={"water", "temporal"}, app=AppConfig(resource_uri=LAKE_TIMESERIES_URI)

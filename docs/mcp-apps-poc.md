@@ -120,7 +120,15 @@ What `show_lakes` returns:
   around 1 MB. `map_note` says when the map shows fewer lakes than match, and the status line under the title
   shows it.
 
-The map still only shows what the call returned; panning to load more is the `lakes_in_view` step of #16.
+### Panning and zooming
+
+The map reloads when the view changes. On `moveend` (300 ms debounce) `lake_map.html` calls the app-only
+`lakes_in_view(north, south, east, west, zoom, only_drained?, only_with_timeseries?)` through
+`app.callServerTool`, then redraws. The tool has `AppConfig(visibility=["app"])`, so a host hides it from the model
+(a plain MCP client still lists it, with `_meta.ui.visibility = ["app"]`). It returns only the map payload (features,
+counts, `map_note`) and uses the map's real zoom instead of one derived from the box. *Hide stable lakes* is sent as
+`only_drained`, so the feature cap is spent on drained lakes. A response that arrives after a newer move is dropped.
+The first draw (`show_lakes`) fits the map to its result and does not trigger a reload.
 
 ### Try it
 
@@ -128,7 +136,7 @@ The map still only shows what the call returned; panning to load more is the `la
 
 ### Limitations
 
-- The map is capped at 2000 dots or 300 polygons per call and does not load more on pan/zoom (#16, next steps:
-  an app-only `lakes_in_view` tool, then vector tiles such as the dashboard's PMTiles).
+- The map is capped at 2000 dots or 300 polygons per view and every move replaces the whole payload (#16, next
+  step: vector tiles such as the dashboard's PMTiles).
 - Time series are still precomputed Plotly figures for 5 lakes, not built from raw series (#16).
 - Lakes without a time series in the sample show as stable; in the dashboard every lake has been analysed.

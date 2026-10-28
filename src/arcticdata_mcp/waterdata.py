@@ -8,8 +8,8 @@
   ``data_dir`` is empty: :class:`JsonWaterData`, which filters in Python.
 
 Both return the same :class:`LakeResult`. Lakes are ranked drained-first (biggest water change first), then
-stable lakes by size, so a capped result keeps the lakes that matter. Geometry is chosen by the zoom the
-bounding box implies: centroids when zoomed out, polygons when zoomed in, each with its own feature cap.
+stable lakes by size, so a capped result keeps the lakes that matter. Geometry is chosen by the map zoom (given,
+or implied by the bounding box): centroids when zoomed out, polygons when zoomed in, each with its own cap.
 """
 
 from __future__ import annotations
@@ -91,7 +91,14 @@ class WaterData(ABC):
 
     @abstractmethod
     def search(
-        self, *, bbox: BBox | None, only_drained: bool, only_with_timeseries: bool, limit: int, offset: int
+        self,
+        *,
+        bbox: BBox | None,
+        only_drained: bool,
+        only_with_timeseries: bool,
+        limit: int,
+        offset: int,
+        zoom: int | None = None,
     ) -> LakeResult: ...
 
     @abstractmethod
@@ -127,9 +134,16 @@ class JsonWaterData(WaterData):
         return sorted(features, key=lambda f: _rank(f["properties"]))
 
     def search(
-        self, *, bbox: BBox | None, only_drained: bool, only_with_timeseries: bool, limit: int, offset: int
+        self,
+        *,
+        bbox: BBox | None,
+        only_drained: bool,
+        only_with_timeseries: bool,
+        limit: int,
+        offset: int,
+        zoom: int | None = None,
     ) -> LakeResult:
-        zoom = zoom_for_bbox(bbox)
+        zoom = zoom_for_bbox(bbox) if zoom is None else zoom
         polygons = zoom >= POINT_POLY_SWITCH_ZOOM
         matches = []
         for f in self.lakes:  # already ranked
@@ -183,9 +197,16 @@ class ParquetWaterData(WaterData):
         return [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
 
     def search(
-        self, *, bbox: BBox | None, only_drained: bool, only_with_timeseries: bool, limit: int, offset: int
+        self,
+        *,
+        bbox: BBox | None,
+        only_drained: bool,
+        only_with_timeseries: bool,
+        limit: int,
+        offset: int,
+        zoom: int | None = None,
     ) -> LakeResult:
-        zoom = zoom_for_bbox(bbox)
+        zoom = zoom_for_bbox(bbox) if zoom is None else zoom
         polygons = zoom >= POINT_POLY_SWITCH_ZOOM
         clauses: list[str] = []
         params: list[Any] = []

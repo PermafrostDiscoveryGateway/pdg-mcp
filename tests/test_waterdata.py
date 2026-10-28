@@ -5,6 +5,7 @@ import json
 import duckdb
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp import waterdata
 from arcticdata_mcp.config import Settings
@@ -152,3 +153,44 @@ async def test_show_lakes_tool_says_when_the_map_is_capped(parquet_dir, monkeypa
     async with Client(create_server(settings, require_auth=False)) as c:
         sc = (await c.call_tool("show_lakes", {})).structured_content
         assert sc["shown"] == 20 and "top 20 of 121" in sc["map_note"] and "zoom in" in sc["map_note"]
+
+
+def test_explicit_zoom_overrides_the_bbox(data):
+    assert data.search(**{**SEARCH, "bbox": WIDE, "zoom": 10}).geometry == "polygon"
+    assert data.search(**{**SEARCH, "bbox": NARROW, "zoom": 3}).geometry == "point"
+
+
+async def test_lakes_in_view_is_app_only_and_returns_the_map_payload(parquet_dir):
+    settings = Settings()
+    settings.water.data_dir = str(parquet_dir)
+    async with Client(create_server(settings, require_auth=False)) as c:
+        tools = {t.name: t for t in await c.list_tools()}
+        assert tools["lakes_in_view"].meta["ui"]["visibility"] == ["app"]
+        assert "resourceUri" not in tools["lakes_in_view"].meta["ui"]
+        assert "model" in tools["show_lakes"].meta["ui"].get("visibility", ["model"])
+
+        args = {"north": 66.6, "south": 66.5, "east": -164.0, "west": -164.2}
+        view = await c.call_tool("lakes_in_view", {**args, "zoom": 10})
+        sc = view.structured_content
+        assert sc["geometry"] == "polygon" and sc["shown"] == len(sc["geojson"]["features"]) > 0
+        assert sc["map_note"] is None
+        # Nothing but counts goes into the model-facing text.
+        assert set(json.loads(view.content[0].text)) == {"numFound", "drained", "shown"}
+        # The same box through show_lakes gives the same lakes on the map.
+        shown = (await c.call_tool("show_lakes", args)).structured_content
+        assert [f["properties"]["id_geohash"] for f in shown["geojson"]["features"]] == [
+            f["properties"]["id_geohash"] for f in sc["geojson"]["features"]
+        ]
+
+        dots = (await c.call_tool("lakes_in_view", {**args, "zoom": 4})).structured_content
+        assert dots["geometry"] == "point"
+        drained = (await c.call_tool("lakes_in_view", {**args, "zoom": 10, "only_drained": True})).structured_content
+        assert all("date_break_year" in f["properties"] for f in drained["geojson"]["features"])
+
+
+async def test_lakes_in_view_rejects_inverted_box(parquet_dir):
+    settings = Settings()
+    settings.water.data_dir = str(parquet_dir)
+    async with Client(create_server(settings, require_auth=False)) as c:
+        with pytest.raises(ToolError, match="south must be"):
+            await c.call_tool("lakes_in_view", {"north": 1, "south": 2, "east": 1, "west": 0, "zoom": 5})

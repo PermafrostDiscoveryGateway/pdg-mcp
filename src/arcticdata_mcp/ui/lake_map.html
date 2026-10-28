@@ -136,6 +136,11 @@
   const hideStable = document.getElementById("hide-stable");
   let features = [];
   let hasPolygons = false;
+  let onlyWithTimeseries = false;
+  let loaded = false;  // true once a tool result is drawn; before that, map moves are not reloads
+  let fitting = false; // true while the map moves to the result's own bounds
+  let requestSeq = 0;
+  let reloadTimer;
 
   function selectLake(p) {
     app.sendMessage({
@@ -207,17 +212,58 @@
     updateZoomLayers();
   }
 
+  function showStatus(data) {
+    status.textContent = `${data.shown} of ${data.numFound} lakes shown · ${data.drained} drained` +
+      (data.map_note ? ` · ${data.map_note}` : "");
+  }
+
+  function draw(data) {
+    features = data?.geojson?.features ?? [];
+    hasPolygons = data?.geometry === "polygon";
+    render();
+    showStatus(data);
+  }
+
+  // Panning or zooming loads the lakes of the new view through the app-only lakes_in_view tool.
+  async function reload() {
+    const seq = ++requestSeq;
+    const b = map.getBounds();
+    const clampLon = (x) => Math.max(-180, Math.min(180, x));
+    status.textContent = "Loading lakes…";
+    try {
+      const res = await app.callServerTool({
+        name: "lakes_in_view",
+        arguments: {
+          north: Math.min(90, b.getNorth()), south: Math.max(-90, b.getSouth()),
+          east: clampLon(b.getEast()), west: clampLon(b.getWest()), zoom: Math.round(map.getZoom()),
+          only_drained: hideStable.checked, only_with_timeseries: onlyWithTimeseries,
+        },
+      });
+      if (seq !== requestSeq) return; // a newer move superseded this one
+      if (res.isError) throw new Error(res.content?.[0]?.text ?? "lakes_in_view failed");
+      draw(res.structuredContent);
+    } catch (e) {
+      if (seq === requestSeq) status.textContent = `Could not load lakes: ${e.message}`;
+    }
+  }
+  map.on("moveend", () => {
+    if (!loaded || fitting) return;
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(reload, 300);
+  });
+
   function updateZoomLayers() {
     const usePolygons = hasPolygons && map.getZoom() >= POINT_POLY_SWITCH_ZOOM;
     (usePolygons ? polygons : points).addTo(map);
     map.removeLayer(usePolygons ? points : polygons);
   }
   map.on("zoomend", updateZoomLayers);
-  hideStable.onchange = render;
+  hideStable.onchange = () => (loaded ? reload() : render());
 
   // Draw the requested bounding box, if the model passed one.
   app.ontoolinput = ({ arguments: a }) => {
     if (a?.only_drained) hideStable.checked = true;
+    onlyWithTimeseries = !!a?.only_with_timeseries;
     if (a && a.north != null && a.south != null && a.east != null && a.west != null) {
       L.rectangle([[a.south, a.west], [a.north, a.east]], { color: "#fff", dashArray: "4", weight: 1, fill: false })
         .addTo(bboxLayer);
@@ -230,12 +276,13 @@
       status.textContent = "No lakes in the tool result.";
       return;
     }
-    hasPolygons = data.geometry === "polygon";
-    render();
-    status.textContent = `${data.shown} of ${data.numFound} lakes shown · ${data.drained} drained` +
-      (data.map_note ? ` · ${data.map_note}` : "");
+    draw(data);
+    // Fit the first result; the moveend this fires is not a reload. Later moves reload through lakes_in_view.
     const bounds = L.geoJSON({ type: "FeatureCollection", features }).getBounds();
-    map.fitBounds(bounds, { padding: [10, 10], maxZoom: 12 });
+    fitting = true;
+    map.fitBounds(bounds, { padding: [10, 10], maxZoom: 12, animate: false }); // fires moveend synchronously
+    fitting = false;
+    loaded = true;
   };
 
   await app.connect();

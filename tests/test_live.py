@@ -31,6 +31,12 @@ async def test_search_list_download(live):
     assert dl.structured_content["delivery"] == "inline"
 
 
+async def test_variable_search_finds_more_by_concept(live):
+    r = (await live.call_tool("search_by_variable", {"variable": "soil depth", "rows": 0})).structured_content
+    assert r["concepts_used"][0]["uri"] == "http://purl.dataone.org/odo/ECSO_00001207"
+    assert r["counts"]["annotation"] > r["counts"]["free_text"] > 0
+
+
 async def test_portals(live):
     found = (await live.call_tool("search_portals", {"query": "PerCS-Net"})).structured_content
     assert found["portals"][0]["label"] == "PerCS-Net" and found["portals"][0]["dataset_count"] > 0

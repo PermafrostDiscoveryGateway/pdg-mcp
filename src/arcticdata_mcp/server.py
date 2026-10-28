@@ -12,7 +12,7 @@ from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
-from arcticdata_mcp.tools import apps, datasets, node, objects, portals, search, water
+from arcticdata_mcp.tools import apps, datasets, node, objects, portals, search, variables, water
 from arcticdata_mcp.tools.common import ToolContext
 
 INSTRUCTIONS = """\
@@ -20,10 +20,13 @@ Search and download public data from the NSF Arctic Data Center (arcticdata.io),
 
 Typical workflow:
 1. Discover datasets with search_datasets or a specific search_by_* tool (keyword, bounding box, temporal
-   coverage, author, funding award, measured variable, taxon, ...). get_facet_counts reveals valid values.
+   coverage, author, funding award, taxon, ...). get_facet_counts reveals valid values.
+   For "datasets that measure X" use search_by_variable: it maps X to ECSO ontology concepts and searches
+   attribute annotations, which finds far more than free text. find_variable_concepts shows the candidates.
 2. Inspect a dataset with get_dataset_details, get_metadata_document (EML) or get_dataset_citation.
 3. List its files with list_dataset_files, peek with preview_file, then fetch with download_file.
    Large files return a direct URL instead of inline bytes (see get_server_config).
+Counts cover the latest version of each dataset unless latest_only=false (older versions are excluded).
 Project portals (curated collections such as PerCS-Net or the Permafrost Discovery Gateway) add a project
 layer: search_portals finds them, get_portal describes one, search_portal_datasets searches exactly the
 datasets it collects, and find_portals_for_dataset lists the portals that include a dataset.
@@ -59,6 +62,6 @@ def create_server(
     )
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
-    for module in (search, datasets, objects, node, portals, apps, water):
+    for module in (search, variables, datasets, objects, node, portals, apps, water):
         module.register(mcp, ctx)
     return mcp

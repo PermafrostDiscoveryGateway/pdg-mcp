@@ -12,11 +12,11 @@ from html.parser import HTMLParser
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from arcticdata_mcp import downloads, eml, solr
+from arcticdata_mcp import downloads, eml, sampling, solr
 from arcticdata_mcp.client import as_list, quote_pid
 from arcticdata_mcp.tools.common import READ_ONLY, Pid, Rows, Start, ToolContext
 
@@ -218,6 +218,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "metadata"})
     async def get_metadata_document(
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI).")],
+        context: Context,
         section: Annotated[
             Literal[*eml.SECTIONS],  # type: ignore[valid-type]
             Field(description="'outline' (default) = compact overview; or one section; 'raw' = the XML itself."),
@@ -226,20 +227,31 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         entity: Annotated[str | None, Field(description="section='attributes' or 'codes': entity name, file name, id or index instead of schema_id.")] = None,
         attribute: Annotated[str | None, Field(description="section='codes': attribute name or index whose enumerated codes to page.")] = None,
         offset: Annotated[int, Field(ge=0, description="Where to resume: pass the previous response's next_offset.")] = 0,
-        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Approximate size limit per response for raw, methods, entities, attributes and codes.")] = 50_000,
+        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Approximate size limit per response for raw, free-text sections, entities, attributes and codes.")] = 50_000,
+        summarize: Annotated[
+            bool,
+            Field(description="Free-text sections only: ask your own model (MCP sampling) for a summary instead of the full text. Off by default."),
+        ] = False,
+        summary_words: Annotated[int, Field(ge=50, le=1000, description="Target length of the summary in words.")] = 250,
     ) -> dict[str, Any]:
         """Read a dataset's science-metadata document (EML, sometimes ISO 19115) in navigable pieces.
 
         Start with the default outline: title, creators, abstract, coverage, a methods preview, dataset annotations,
         and entity_groups, where data files with identical columns share one schema_id. Then request what you need:
         section='attributes' with schema_id (each column copied whole from the EML: definition, measurementScale with
-        units and domains, missing-value codes, annotations), 'methods', 'coverage', 'people', 'project', 'entities'
-        (every file with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses
-        are paged: call again with offset=next_offset. An attribute whose code list does not fit shows
-        codeDefinition_omitted; page all its codes with section='codes' and attribute=<name>. Raw XML is paged by
-        character, so a page is not valid XML on its own. Documents that are not EML datasets are returned as raw XML.
+        units and domains, missing-value codes, annotations), a free-text section as plain text ('abstract', 'methods',
+        'purpose', 'intellectual_rights', 'additional_info'), 'coverage', 'people', 'project', 'entities' (every file
+        with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged:
+        call again with offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted;
+        page all its codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not
+        valid XML on its own. Documents that are not EML datasets are returned as raw XML.
+        summarize=true is optional and only for long free-text sections: the summary is written by the
+        client's own model through MCP sampling, is labelled as model-generated, and falls back to the full
+        text when the client cannot sample. Structured content is never summarized.
         Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
+        if summarize and section not in eml.FREE_TEXT_SECTIONS:
+            raise ToolError("summarize only applies to free-text sections (e.g. section='methods'); structured metadata is never summarized.")
         cached = await documents.get(pid, lambda: client.get_text(client.object_url(pid)))
         text = cached.text
         out: dict[str, Any] = {"pid": pid, "section": section, "document_chars": len(text)}
@@ -255,12 +267,28 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             return out
         if section == "outline":
             out.update(doc.outline())
-        elif section == "methods":
-            methods = doc.methods_text()
-            if methods is None:
-                raise ToolError(f"'{pid}' has no methods section.")
-            page, nxt = eml.page_text(methods, offset, max_chars)
-            out.update({"chars": len(methods), "offset": offset, "next_offset": nxt, "text": page})
+        elif section in eml.FREE_TEXT_SECTIONS:
+            section_text = doc.free_text(section)
+            if section_text is None:
+                raise ToolError(f"'{pid}' has no {section} section.")
+            out["chars"] = len(section_text)
+            if summarize:
+                if len(section_text) < sampling.MIN_CHARS:
+                    out["summary_status"] = "not_needed_short_section"
+                else:
+                    summary = await sampling.summarize(context, section_text, section=section, pid=pid, max_words=summary_words)
+                    if summary.text is not None:
+                        out["summary"] = {
+                            "text": summary.text,
+                            "model": summary.model,
+                            "generated_by": "client LLM via MCP sampling",
+                            "covers_chars": summary.input_chars,
+                            "note": sampling.NOTE,
+                        }
+                        return out
+                    out["summary_status"] = summary.status
+            page, nxt = eml.page_text(section_text, offset, max_chars)
+            out.update({"offset": offset, "next_offset": nxt, "text": page})
         elif section == "coverage":
             out.update(doc.coverage())
         elif section == "people":

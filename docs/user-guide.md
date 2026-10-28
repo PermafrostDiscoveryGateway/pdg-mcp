@@ -82,6 +82,19 @@ Start a new chat with the server turned on and ask:
 
 A working setup returns a list of dataset titles with DOIs (for example `doi:10.18739/A2...`). If the assistant says it couldn't reach the server or offers only general advice, see Troubleshooting.
 
+## Optional: summaries of long methods sections
+
+Some datasets have very long free-text sections, such as methods. You can ask for a summary instead of the full text, for example:
+
+> Summarize the methods of doi:10.18739/A29K4B.
+
+The assistant calls `get_metadata_document` with `section="methods"` and `summarize=true`. The server does not run a model of its own. It asks **your** assistant's model to write the summary (MCP "sampling"), so:
+
+- **Cost and speed.** The summary uses your plan's model and usage, and adds a few seconds to that call.
+- **Approval.** Some apps ask you to approve each summary request. If you decline, you get the full text instead.
+- **Support.** Only apps that support MCP sampling on a 2025-era protocol can summarize. Apps on the 2026-07-28 protocol cannot, because that version removed server-initiated requests. The tool then returns the full text in pages and says why in `summary_status`.
+- **Accuracy.** Summaries are labelled as model-generated and may leave out details. Ask for the original section when exact wording matters. Short sections (under 4,000 characters) and structured metadata (attributes, units, coverage) are never summarized.
+
 ## Troubleshooting
 
 Most failures come from a missing approval or the wrong token auth method. For anything not listed, send the PDG team the URL from your browser's address bar.

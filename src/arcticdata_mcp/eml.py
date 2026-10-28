@@ -3,6 +3,7 @@
 Large EML documents are mostly repeated structure: a package of daily files often carries the same attribute
 list once per file. Entities whose attribute lists are identical (ignoring XML ids) share one ``schema_id``,
 so each schema is described once. Values are copied from the document as-is; nothing is summarized.
+Free-text sections (abstract, methods, ...) are flattened to plain text with headings and lists kept.
 """
 
 from __future__ import annotations
@@ -18,7 +19,15 @@ import defusedxml.ElementTree as ET
 from fastmcp.exceptions import ToolError
 
 ENTITY_TYPES = ("dataTable", "spatialRaster", "spatialVector", "storedProcedure", "view", "otherEntity")
-SECTIONS = ("outline", "methods", "coverage", "people", "project", "entities", "attributes", "codes", "annotations", "raw")
+# section name -> element below <dataset>
+FREE_TEXT_SECTIONS = {
+    "abstract": "abstract",
+    "methods": "methods",
+    "purpose": "purpose",
+    "intellectual_rights": "intellectualRights",
+    "additional_info": "additionalInfo",
+}
+SECTIONS = ("outline", *FREE_TEXT_SECTIONS, "coverage", "people", "project", "entities", "attributes", "codes", "annotations", "raw")
 # Top-level EML resources other than <dataset>; documents describing these have no outline.
 OTHER_RESOURCES = ("citation", "software", "protocol")
 # XML attributes that identify an element rather than describe it; they differ in every copy of a schema.
@@ -37,6 +46,13 @@ EXAMPLE_ENTITIES = 3
 PREVIEW_ATTRIBUTES = 12
 MAX_RAW_DATES = 10
 ISO_DATE = re.compile(r"^\d{4}(-\d{2}(-\d{2}([T ]\d{2}(:\d{2}(:\d{2}(\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?)?)?)?$")
+# Block-level EML TextType / methods elements that start a new paragraph.
+_BLOCK = {"para", "section", "listitem", "markdown", "description", "methodStep", "sampling", "qualityControl",
+          "studyExtent", "samplingDescription", "instrumentation", "software", "protocol", "literalLayout"}
+_HEADINGS = {"title"}
+# Whole datasets cited as data sources can be nested in methods; they are not narrative text.
+_SKIP = {"dataSource", "coverage", "spatialSamplingUnits", "citation"}
+_STEP_TITLES = {"sampling": "Sampling", "qualityControl": "Quality control"}
 
 
 def _local(tag: Any) -> str:
@@ -56,6 +72,36 @@ def _text(el: Any, path: str) -> str | None:
 
 def _texts(el: Any, path: str) -> list[str]:
     return [t for t in (_plain(x) for x in el.findall(path)) if t]
+
+
+def _walk(el: Any, parts: list[str], depth: int = 0) -> None:
+    name = _local(el.tag)
+    if name in _SKIP:
+        return
+    if name in _STEP_TITLES:
+        parts.append(f"\n\n# {_STEP_TITLES[name]}\n")
+    if name in _HEADINGS:
+        parts.append(f"\n\n{'#' * max(1, min(depth, 4))} {' '.join(''.join(el.itertext()).split())}\n")
+        if el.tail and el.tail.strip():
+            parts.append(el.tail)
+        return
+    if name == "listitem":
+        parts.append("\n\n- ")
+    elif name in _BLOCK and not "".join(parts[-3:]).rstrip(" \t\n").endswith("\n-"):
+        # A paragraph directly inside a list item stays on the bullet's line.
+        parts.append("\n\n")
+    if el.text:
+        parts.append(el.text)
+    for child in el:
+        _walk(child, parts, depth + (1 if name == "section" else 0))
+        if child.tail:
+            parts.append(child.tail)
+
+
+def _clean(text: str) -> str:
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _compact(d: dict[str, Any]) -> dict[str, Any]:
@@ -338,13 +384,16 @@ class EMLDocument:
 
     # -- sections ---------------------------------------------------------------------------------
 
+    def free_text(self, section: str) -> str | None:
+        """Plain text of one free-text section, or None if the document lacks it."""
+        parts: list[str] = []
+        for el in self.dataset.findall(FREE_TEXT_SECTIONS[section]):
+            _walk(el, parts)
+            parts.append("\n\n")
+        return _clean("".join(parts)) or None
+
     def methods_text(self) -> str | None:
-        parts = []
-        for m in self.dataset.findall("methods"):
-            for step in m:
-                if text := _plain(step):
-                    parts.append(text)
-        return "\n\n".join(parts) or None
+        return self.free_text("methods")
 
     def coverage(self) -> dict[str, Any]:
         geo, temporal, taxa = [], [], []

@@ -1,9 +1,9 @@
 """Export water-timeseries-v2 test fixtures into the small JSON files the water tools serve.
 
 All processing goes through the water_timeseries library, so the data matches what its dashboard
-shows: DWDataset/JRCDataset masking and normalization, SimpleBreakpoint break detection (the
-dashboard's "Historical" mode uses break_method=simple), and the dashboard's own Plotly figures
-(``plot_timeseries_interactive`` with the variables the dashboard passes). The MCP server then only
+shows: DWDataset/JRCDataset masking and normalization and SimpleBreakpoint break detection (the
+dashboard's "Historical" mode uses break_method=simple). The series are exported as plain data; the
+time series view (ui/lake_timeseries.html) draws the dashboard's charts from them. The MCP server only
 reads plain JSON, so it does not depend on the library or its geo/Earth Engine stack.
 
 The library needs its full environment; water-timeseries-v2's lockfile currently pins numpy<2 with
@@ -28,8 +28,6 @@ from water_timeseries.dataset import DWDataset, JRCDataset
 from water_timeseries.map_utils import geohash_to_human_readable_name
 from water_timeseries.utils.plotting import prepare_data_for_plot_dw
 
-# Variables the dashboard plots for Dynamic World (map_viewer.py, plot_time_series_data call).
-DW_PLOT_VARIABLES = ["water", "vegetation", "bare"]
 # Lake attributes carried into the GeoJSON, under the dashboard's column names.
 LAKE_COLUMNS = ["id_geohash", "Area_start_ha", "Area_end_ha", "NetChange_ha", "NetChange_perc"]
 BREAK_COLUMNS = [
@@ -59,7 +57,8 @@ def _series(df: pd.DataFrame) -> dict:
     wide = df.pivot_table(index="date", columns="variable", values="value", aggfunc="first").sort_index()
     out: dict = {"dates": [_date(d) for d in wide.index]}
     for col in wide.columns:
-        out[col] = [_num(v) for v in wide[col]]
+        # 6 decimals (about 1 mm2): the chart's relative-area hover text divides these, so 3 would show.
+        out[col] = [None if pd.isna(v) else round(float(v), 6) for v in wide[col]]
     return out
 
 
@@ -71,7 +70,6 @@ def export_timeseries(src: Path) -> tuple[dict, pd.DataFrame]:
     lakes = {}
     for lake in dw.object_ids_:
         brk = breaks.loc[lake] if lake in breaks.index else None
-        break_date = brk["date_break"] if brk is not None else None
         # The dashboard titles the time series with this name ("<geohash> | lat : lon").
         entry: dict = {"name": geohash_to_human_readable_name(lake), "break": None}
         if brk is not None:
@@ -85,17 +83,14 @@ def export_timeseries(src: Path) -> tuple[dict, pd.DataFrame]:
 
         # Same masked frame and vegetation grouping DWDataset.plot_timeseries_interactive uses.
         df = dw.ds.sel(id_geohash=lake).load().to_dataframe().dropna()
-        fig = dw.plot_timeseries_interactive(lake, breakpoints=break_date, plot_variables=DW_PLOT_VARIABLES)
         entry["dw"] = {
             "source": "Dynamic World V1, monthly (June-September)",
             "unit": "ha",
-            "normalization_factor": _num(df["area_data"].max()),
+            "normalization_factor": round(float(df["area_data"].max()), 6),
             "data": _series(prepare_data_for_plot_dw(df, group_vegetation=True)),
-            "figure": json.loads(fig.to_json()),
         }
         if lake in jrc.object_ids_:
             jdf = jrc.ds.sel(id_geohash=lake).load().to_dataframe().dropna()
-            jfig = jrc.plot_timeseries_interactive(lake, breakpoints=break_date)
             jlong = jdf.reset_index().melt(
                 id_vars="date",
                 value_vars=["area_water_permanent", "area_water_seasonal", "area_land"],
@@ -105,7 +100,6 @@ def export_timeseries(src: Path) -> tuple[dict, pd.DataFrame]:
                 "source": "JRC Global Surface Water, annual",
                 "unit": "ha",
                 "data": _series(jlong),
-                "figure": json.loads(jfig.to_json()),
             }
         lakes[lake] = entry
     return {"lakes": lakes}, breaks

@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lake time series</title>
 <!--
-  Mirrors the water-timeseries dashboard's time series section (map_viewer.py): the
-  figures are the ones DWDataset/JRCDataset.plot_timeseries_interactive build, exported
-  as Plotly JSON by scripts/export_water_fixtures.py, so this page only renders them.
+  Mirrors the water-timeseries dashboard's time series section (map_viewer.py): the figures are
+  rebuilt here from the raw series (scripts/export_water_fixtures.py) to look like the ones
+  DWDataset/JRCDataset.plot_timeseries_interactive make: same traces, colors, hover text, axes and
+  breakpoint line. Traces are plain SVG "scatter" (not the WebGL variant), so a chart takes no WebGL context.
 -->
 <style>
   html, body { margin: 0; background: #fff; font: 13px/1.4 system-ui, sans-serif; color: #222; }
@@ -40,6 +41,63 @@
   const fmt = (v) => (v == null ? "N/A" : Number(v).toFixed(2));
   const app = new App({ name: "water-lake-timeseries", version: "0.2.0" });
 
+  // --- Figure builder: port of plot_timeseries_interactive (water-timeseries-v2) ---------------------------
+  // [data key, legend name, color, line width, marker size] of the three plotted series of each source.
+  const SERIES = {
+    dw: [["water", "Water", "#4a90e2", 2.5, 8], ["vegetation", "Vegetation", "#228B22", 1.5, 6],
+      ["bare", "Bare", "#8B4513", 1.5, 6]],
+    jrc: [["area_water_permanent", "Water Permanent", "#4a90e2", 2.5, 8],
+      ["area_water_seasonal", "Water Seasonal", "#a6bddb", 1.5, 6], ["area_land", "Land", "#8B4513", 1.5, 6]],
+  };
+  // The parts of Plotly's "plotly_white" template that the dashboard's figures inherit.
+  const TEMPLATE_LAYOUT = {
+    paper_bgcolor: "white", plot_bgcolor: "white", font: { color: "#2a3f5f" }, hoverlabel: { align: "left" },
+    hovermode: "closest", title: { x: 0.05 }, autotypenumbers: "strict",
+    xaxis: { automargin: true, gridcolor: "#EBF0F8", linecolor: "#EBF0F8", ticks: "", title: { standoff: 15 },
+      zerolinecolor: "#EBF0F8", zerolinewidth: 2 },
+    yaxis: { automargin: true, gridcolor: "#EBF0F8", linecolor: "#EBF0F8", ticks: "", title: { standoff: 15 },
+      zerolinecolor: "#EBF0F8", zerolinewidth: 2 },
+  };
+
+  // kind: "dw" or "jrc"; src: that source's entry of the tool result ({ data, normalization_factor? }).
+  function buildFigure(kind, src, lakeId, breakDate) {
+    const series = SERIES[kind];
+    const cols = series.map(([key]) => src.data[key]);
+    // Relative area [%]: Dynamic World is normalized by the lake's largest area, JRC by the sum of the three
+    // series at each date.
+    const total = (i) => kind === "dw" ? src.normalization_factor : cols.reduce((a, c) => a + (c[i] ?? 0), 0);
+    const traces = series.map(([key, name, color, width, size], k) => ({
+      type: "scatter", mode: "lines+markers", name, x: src.data.dates, y: cols[k], connectgaps: true,
+      customdata: cols[k].map((v, i) => (v == null || !total(i) ? null : (v / total(i)) * 100)),
+      hovertemplate: "%{y:.2f} ha | %{customdata:.1f}%<extra></extra>",
+      line: { color, width }, marker: { size, symbol: "circle" }, xaxis: "x", yaxis: "y",
+    }));
+    // Empty trace that gives the figure its right-hand "Relative Area [%]" axis.
+    traces.push({ type: "scatter", mode: "lines", name: "Normalized", x: [], y: [], showlegend: false,
+      line: { color: "gray", dash: "dot", width: 1 }, xaxis: "x", yaxis: "y2" });
+    const values = cols.flat().filter((v) => v != null);
+    if (breakDate && values.length) {
+      traces.push({ type: "scatter", mode: "lines", name: "Breakpoint", x: [breakDate, breakDate],
+        y: [Math.min(...values), Math.max(...values)], showlegend: true, hoverinfo: "x",
+        line: { color: "black", dash: "dash", width: 3 } });
+    }
+    const layout = {
+      template: { layout: TEMPLATE_LAYOUT },
+      xaxis: kind === "dw"
+        ? { anchor: "y", domain: [0, 0.94], title: { text: "Date" }, dtick: "M12", ticklabelmode: "period",
+          tickformat: "%Y", hoverformat: "%Y-%m", showgrid: true, gridwidth: 1, gridcolor: "#cccccc" }
+        : { anchor: "y", domain: [0, 0.94], title: { text: "Date" }, dtick: "M12", tick0: `${src.data.dates[0]}T00:00:00`,
+          tickmode: "linear", tickformat: "%Y", hoverformat: "%Y" },
+      yaxis: { anchor: "x", domain: [0, 1], title: { text: "Area [ha]" }, showgrid: true, gridwidth: 1,
+        gridcolor: "#aaaaaa" },
+      yaxis2: { anchor: "x", overlaying: "y", side: "right", title: { text: "Relative Area [%]" }, range: [0, 100] },
+      title: { text: `Lake ${lakeId}`, x: 0.5 }, hoverlabel: { namelength: -1 },
+      legend: { yanchor: "top", y: 0.99, xanchor: "left", x: 1.02 }, height: 500, hovermode: "x unified",
+    };
+    return { data: traces, layout };
+  }
+  // --------------------------------------------------------------------------------------------------------
+
   // Same file the dashboard's "Save Interactive Plot (HTML)" button produces
   // (fig.to_html(include_plotlyjs="cdn")), built from the figure JSON.
   function figureHtml(fig, title) {
@@ -62,7 +120,7 @@
   }
 
   app.ontoolresult = ({ structuredContent: d }) => {
-    if (!d?.dw?.figure) {
+    if (!d?.dw?.data?.dates?.length) {
       $("title").textContent = "No time series in the tool result.";
       return;
     }
@@ -72,8 +130,9 @@
       ? `Break ${b.date_break.slice(0, 7)} · water area before ${fmt(b.pre_break_median)} ha, after ${fmt(b.post_break_median)} ha`
       : "No drainage break detected";
 
-    Plotly.newPlot("dw", d.dw.figure.data, d.dw.figure.layout, { responsive: true, displaylogo: false });
-    addSaveButton($("dw-actions"), d.dw.figure, d.lake_id, "");
+    const dwFigure = buildFigure("dw", d.dw, d.lake_id, b?.date_break);
+    Plotly.newPlot("dw", dwFigure.data, dwFigure.layout, { responsive: true, displaylogo: false });
+    addSaveButton($("dw-actions"), dwFigure, d.lake_id, "");
     const explain = document.createElement("button");
     explain.textContent = "Ask Claude to explain this series";
     explain.onclick = () => app.sendMessage({
@@ -84,10 +143,11 @@
     });
     $("dw-actions").appendChild(explain);
 
-    if (d.jrc?.figure) {
+    if (d.jrc?.data?.dates?.length) {
+      const jrcFigure = buildFigure("jrc", d.jrc, d.lake_id, b?.date_break);
       $("jrc-section").hidden = false;
-      Plotly.newPlot("jrc", d.jrc.figure.data, d.jrc.figure.layout, { responsive: true, displaylogo: false });
-      addSaveButton($("jrc-actions"), d.jrc.figure, d.lake_id, "jrc");
+      Plotly.newPlot("jrc", jrcFigure.data, jrcFigure.layout, { responsive: true, displaylogo: false });
+      addSaveButton($("jrc-actions"), jrcFigure, d.lake_id, "jrc");
     } else {
       $("jrc-missing").hidden = false;
     }

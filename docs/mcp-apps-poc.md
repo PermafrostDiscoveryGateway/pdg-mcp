@@ -55,11 +55,12 @@ the data and charts come from the water_timeseries library itself.
 | Tool | View | Matches the dashboard's |
 |---|---|---|
 | `show_lakes(north?, south?, east?, west?, only_drained?, only_with_timeseries?, limit?, offset?)` | `ui://water/lake-map.html` | drainage-year coloring (`get_style_pmtiles_drainage_year`), stable lakes in grey, *Hide stable lakes* toggle, hover fields and labels (`map_utils.py`), *Drainage Year* legend, ESRI / Dark Matter / TCVIS base layers, points below zoom 8 and polygons above, click popup with *Select for time series* |
-| `get_lake_timeseries(lake_id)` | `ui://water/lake-timeseries.html` | *Time Series Plot of Lake* section: the Dynamic World figure (water, vegetation, bare, breakpoint line, relative-area axis) and the JRC figure, both built by `plot_timeseries_interactive`, plus *Save Interactive Plot (HTML)* buttons (via the host's download) |
+| `get_lake_timeseries(lake_id)` | `ui://water/lake-timeseries.html` | *Time Series Plot of Lake* section: the Dynamic World chart (water, vegetation, bare, breakpoint line, relative-area axis) and the JRC chart, drawn from the raw series to match `plot_timeseries_interactive`, plus *Save Interactive Plot (HTML)* buttons (via the host's download) |
 
 *Select for time series* and *Ask Claude to explain this series* send a message into the chat instead of
-rerunning a Streamlit page. Geometry and Plotly figures go only in `structuredContent` (for the views); the text
-result the model reads holds the lake attributes, break statistics and the masked series.
+rerunning a Streamlit page. Lake geometry goes only in `structuredContent` (for the view); the text
+result the model reads holds the lake attributes. `get_lake_timeseries` returns the same data to both: break statistics
+and the masked series.
 
 Not mirrored: the Near Real-Time mode, the monthly drainage statistics heatmap, recent imagery, yearly
 thumbnails and timelapses (all Earth Engine), on-demand downloads, shareable links and the tutorial.
@@ -71,9 +72,10 @@ thumbnails and timelapses (all Earth Engine), on-demand downloads, shareable lin
 
 - `DWDataset` / `JRCDataset` masking (no-data and snow months dropped) and the dashboard's vegetation grouping;
 - `SimpleBreakpoint` breaks (the Historical mode's `break_method=simple`) with pre/post-break medians and change;
-- the dashboard's figures, `plot_timeseries_interactive(lake, breakpoints=break_date, plot_variables=["water",
-  "vegetation", "bare"])` for DW and the JRC equivalent, saved as Plotly JSON;
 - the dashboard's lake name (`geohash_to_human_readable_name`).
+
+The series are plain data: dates and one array per variable (6 decimals, since the chart's hover text divides them),
+plus the Dynamic World `normalization_factor`. The view draws the charts itself (below).
 
 The bundled sample is 121 lakes on the Seward Peninsula, 5 with time series, 3 of them drained. The server only reads the
 JSON, so it doesn't depend on the library. Point `[water] data_dir` at another export to swap the data. The
@@ -84,6 +86,18 @@ needs numpy 2, so run the export in an isolated env:
 uv run --no-project --python 3.12 --with ../water-timeseries-v2 --with "pyarrow<18" \
     python scripts/export_water_fixtures.py ../water-timeseries-v2/tests/data src/arcticdata_mcp/data/water
 ```
+
+### Time series charts
+
+`lake_timeseries.html` builds each chart from the raw series (`buildFigure`), as a port of
+`DWDataset` / `JRCDataset.plot_timeseries_interactive`: the same traces, colors, hover text (`value ha | share %`),
+axes, breakpoint line and `plotly_white` styling. Dynamic World shows each class as a share of the lake's
+`normalization_factor`. JRC shows it as a share of the three series at that date. A lake with no break has no
+breakpoint line. Traces are SVG `scatter`, so a chart takes no WebGL context (#17).
+
+This replaced precomputed Plotly figures, which were about 26 KB per lake against 1 KB of data. Changing the chart
+style means editing the view, not re-running the library. `buildFigure` was checked against the library's figures
+for all 5 lakes (traces, values, hover shares to 0.01 point, breakpoint lines, axes and template).
 
 ### Lakes at scale: the GeoParquet store
 
@@ -144,5 +158,6 @@ view sits in another copy.
 
 - The map is capped at 2000 dots or 300 polygons per view and every move replaces the whole payload (#16, next
   step: vector tiles such as the dashboard's PMTiles).
-- Time series are still precomputed Plotly figures for 5 lakes, not built from raw series (#16).
+- Only 5 lakes have a time series: the local data has no per-lake series for the full layer, so a source for them
+  is still needed before `get_lake_timeseries` can cover more lakes (#16).
 - Lakes without a time series in the sample show as stable; in the dashboard every lake has been analysed.

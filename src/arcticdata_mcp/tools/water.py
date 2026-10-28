@@ -2,8 +2,8 @@
 
 Serves water-timeseries-v2 lakes from a DuckDB-queried GeoParquet store (scripts/build_water_store.py) or the
 small bundled fixture, plus per-lake time series that scripts/export_water_fixtures.py precomputes with the
-water_timeseries library (masking, breaks and the dashboard's Plotly figures). Both tools render an
-interactive view in clients that support MCP Apps; others get the JSON result.
+water_timeseries library (masking and breaks). Both tools render an interactive view in clients that support
+MCP Apps (the time series view draws the dashboard's charts from the data); others get the JSON result.
 """
 
 from __future__ import annotations
@@ -158,7 +158,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         annotations=LOCAL_READ_ONLY, tags={"water", "temporal"}, app=AppConfig(resource_uri=LAKE_TIMESERIES_URI)
     )
     def get_lake_timeseries(lake_id: LakeId) -> ToolResult:
-        """Water-area time series of one lake, shown as the water-timeseries dashboard's interactive charts.
+        """Water-area time series of one lake, drawn as the water-timeseries dashboard's interactive charts.
 
         Dynamic World (monthly, June-September): water, vegetation (flooded vegetation + grass + shrub/scrub
         + trees), bare and snow/ice area in ha, with invalid months (no-data or snow) already masked out.
@@ -170,22 +170,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if entry is None:
             available = ", ".join(sorted(data.timeseries["lakes"]))
             raise ToolError(f"No time series for lake {lake_id!r}. Lakes with data: {available}.")
-        lake = data.lake(lake_id)
         dw = entry["dw"]
-        summary: dict[str, Any] = {
+        result: dict[str, Any] = {
             "lake_id": lake_id,
             "name": entry["name"],
-            "lake": lake,
+            "lake": data.lake(lake_id),
             "break": entry["break"],
             "summary": _summary(dw["data"]["dates"], dw["data"]["water"]),
-            "dw": {k: v for k, v in dw.items() if k != "figure"},
+            "dw": dw,
         }
         if "jrc" in entry:
-            summary["jrc"] = {k: v for k, v in entry["jrc"].items() if k != "figure"}
-        structured = {
-            **summary,
-            "dw": dw,
-            **({"jrc": entry["jrc"]} if "jrc" in entry else {}),
-        }
-        # The model gets the data; the Plotly figures are only for the chart view.
-        return ToolResult(content=_text(summary), structured_content=structured)
+            result["jrc"] = entry["jrc"]
+        # The chart view draws the figures from this same data, so model and view get one result.
+        return ToolResult(content=_text(result), structured_content=result)

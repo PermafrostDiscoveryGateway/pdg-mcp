@@ -1,9 +1,11 @@
 import base64
+import json
 
 import httpx
 import pytest
 from fastmcp.exceptions import ToolError
 
+from arcticdata_mcp.waterdata import JsonWaterData
 from conftest import MN
 
 SYSMETA = """<?xml version="1.0"?>
@@ -174,10 +176,33 @@ async def test_get_lake_timeseries(client):
     # Masked months are dropped, and vegetation is the dashboard's grouped class.
     assert len(dw["dates"]) == len(dw["water"]) < 41
     assert {"water", "vegetation", "bare", "snow_and_ice"} <= set(dw)
-    assert [t["name"] for t in d["dw"]["figure"]["data"]] == ["Water", "Vegetation", "Bare", "Normalized", "Breakpoint"]
-    assert d["jrc"]["figure"]["data"]
-    # Figures go to the view only, not into the model's text result.
-    assert '"figure"' not in r.content[0].text and '"water"' in r.content[0].text
+    assert d["dw"]["normalization_factor"] > 0 and d["dw"]["unit"] == "ha"
+    assert {"area_water_permanent", "area_water_seasonal", "area_land"} <= set(d["jrc"]["data"])
+    # The chart view draws its figures from this data, so there are no figures in the result and the model's
+    # text result carries the same series.
+    assert "figure" not in d["dw"] and "figure" not in d["jrc"]
+    assert json.loads(r.content[0].text) == d
+
+
+async def test_bundled_series_are_plain_aligned_arrays():
+    series = JsonWaterData("").timeseries["lakes"]
+    assert len(series) == 5
+    for lake_id, entry in series.items():
+        for source in ("dw", "jrc"):
+            if source not in entry:
+                continue
+            data = entry[source]["data"]
+            assert "figure" not in entry[source], (lake_id, source)
+            assert data["dates"] == sorted(data["dates"])
+            assert all(len(v) == len(data["dates"]) for v in data.values()), (lake_id, source)
+
+
+async def test_lake_timeseries_view_builds_svg_charts_from_data(client):
+    [content] = await client.read_resource("ui://water/lake-timeseries.html")
+    html = content.text
+    assert "buildFigure" in html and 'type: "scatter"' in html
+    assert "scattergl" not in html  # SVG traces: no WebGL context per chart (#17)
+    assert ".figure" not in html  # nothing reads a precomputed figure any more
 
 
 async def test_get_lake_timeseries_unknown_lake(client):

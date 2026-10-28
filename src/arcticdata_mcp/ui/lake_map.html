@@ -109,7 +109,7 @@
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     { maxZoom: 19, attribution: "Imagery &copy; Esri" },
   );
-  const map = L.map("map", { layers: [esri] }).setView([66.5, -163], 8);
+  const map = L.map("map", { layers: [esri], worldCopyJump: true }).setView([66.5, -163], 8);
   L.control.layers({
     "ESRI World Imagery": esri,
     "Dark Matter (CartoDB)": darkMatter,
@@ -182,32 +182,47 @@
       weight: hidden ? 0 : 0.6, opacity: 1 };
   }
 
+  // Leaflet repeats the base map across world copies but draws vector layers only where their coordinates are,
+  // so a view in another copy (e.g. across the Bering Strait) would show no lakes. Draw each lake once per copy
+  // the view overlaps: offsets of 360 degrees longitude.
+  function worldOffsets() {
+    const b = map.getBounds();
+    const out = [];
+    for (let k = -3; k <= 3; k++) if (b.getEast() >= -180 + 360 * k && b.getWest() <= 180 + 360 * k) out.push(360 * k);
+    return out.length ? out : [0];
+  }
+  const shift = (c, d) => (typeof c[0] === "number" ? [c[0] + d, c[1]] : c.map((x) => shift(x, d)));
+
   function render() {
     polygons.clearLayers();
     points.clearLayers();
+    const offsets = worldOffsets();
     for (const f of features) {
       const p = f.properties;
       if (hideStable.checked && !isDrained(p)) continue;
-      // Zoomed-out results carry centroids only (geometry "point"); zoomed-in ones carry polygons as well.
-      let center;
-      if (f.geometry.type === "Point") {
-        center = L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]);
-      } else {
-        const poly = L.geoJSON(f, { style: () => polygonStyle(p) });
-        bind(poly, p, true);
-        polygons.addLayer(poly);
-        center = poly.getBounds().getCenter();
+      for (const d of offsets) {
+        // Zoomed-out results carry centroids only (geometry "point"); zoomed-in ones carry polygons as well.
+        let center;
+        if (f.geometry.type === "Point") {
+          center = L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0] + d);
+        } else {
+          const geometry = { ...f.geometry, coordinates: shift(f.geometry.coordinates, d) };
+          const poly = L.geoJSON({ ...f, geometry }, { style: () => polygonStyle(p) });
+          bind(poly, p, true);
+          polygons.addLayer(poly);
+          center = poly.getBounds().getCenter();
+        }
+        // Below the switch zoom the dashboard draws centroids, colored like the polygon fill.
+        const dot = L.circleMarker(center, {
+          radius: isDrained(p) ? 5 : 3,
+          fillColor: isDrained(p) ? ramp(FILL_STOPS, p.date_break_year) : STABLE_LINE,
+          fillOpacity: isDrained(p) ? 0.9 : 0.5,
+          color: isDrained(p) ? ramp(LINE_STOPS, p.date_break_year) : STABLE_LINE,
+          weight: 1,
+        });
+        bind(dot, p, false);
+        points.addLayer(dot);
       }
-      // Below the switch zoom the dashboard draws centroids, colored like the polygon fill.
-      const dot = L.circleMarker(center, {
-        radius: isDrained(p) ? 5 : 3,
-        fillColor: isDrained(p) ? ramp(FILL_STOPS, p.date_break_year) : STABLE_LINE,
-        fillOpacity: isDrained(p) ? 0.9 : 0.5,
-        color: isDrained(p) ? ramp(LINE_STOPS, p.date_break_year) : STABLE_LINE,
-        weight: 1,
-      });
-      bind(dot, p, false);
-      points.addLayer(dot);
     }
     updateZoomLayers();
   }
@@ -228,14 +243,17 @@
   async function reload() {
     const seq = ++requestSeq;
     const b = map.getBounds();
-    const clampLon = (x) => Math.max(-180, Math.min(180, x));
+    // Leaflet repeats the world, so bounds can run past +-180: wrap them, and send west > east when the view
+    // crosses the antimeridian (or the whole range when it spans a full world).
+    const wrapLon = (x) => ((((x + 180) % 360) + 360) % 360) - 180;
+    const [west, east] = b.getEast() - b.getWest() >= 360 ? [-180, 180] : [wrapLon(b.getWest()), wrapLon(b.getEast())];
     status.textContent = "Loading lakes…";
     try {
       const res = await app.callServerTool({
         name: "lakes_in_view",
         arguments: {
           north: Math.min(90, b.getNorth()), south: Math.max(-90, b.getSouth()),
-          east: clampLon(b.getEast()), west: clampLon(b.getWest()), zoom: Math.round(map.getZoom()),
+          east, west, zoom: Math.round(map.getZoom()),
           only_drained: hideStable.checked, only_with_timeseries: onlyWithTimeseries,
         },
       });
@@ -271,18 +289,19 @@
   };
 
   app.ontoolresult = ({ structuredContent: data }) => {
-    features = data?.geojson?.features ?? [];
-    if (!features.length) {
+    const first = data?.geojson?.features ?? [];
+    if (!first.length) {
       status.textContent = "No lakes in the tool result.";
       return;
     }
-    draw(data);
-    // Fit the first result; the moveend this fires is not a reload. Later moves reload through lakes_in_view.
-    const bounds = L.geoJSON({ type: "FeatureCollection", features }).getBounds();
+    // Fit the first result, then draw it for that view. The moveend the fit fires is not a reload; later moves
+    // reload through lakes_in_view.
     fitting = true;
-    map.fitBounds(bounds, { padding: [10, 10], maxZoom: 12, animate: false }); // fires moveend synchronously
+    map.fitBounds(L.geoJSON({ type: "FeatureCollection", features: first }).getBounds(),
+      { padding: [10, 10], maxZoom: 12, animate: false }); // fires moveend synchronously
     fitting = false;
     loaded = true;
+    draw(data);
   };
 
   await app.connect();

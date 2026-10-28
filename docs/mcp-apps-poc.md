@@ -130,6 +130,12 @@ counts, `map_note`) and uses the map's real zoom instead of one derived from the
 `only_drained`, so the feature cap is spent on drained lakes. A response that arrives after a newer move is dropped.
 The first draw (`show_lakes`) fits the map to its result and does not trigger a reload.
 
+Longitudes: Leaflet repeats the base map across world copies but draws vector layers only at their own
+coordinates. The map therefore sends wrapped longitudes (`west > east` when the view crosses 180 degrees, which the
+server treats as `[west, 180]` plus `[-180, east]`) and draws each lake once per world copy the view overlaps, with
+`worldCopyJump` on. Without that, lakes near the antimeridian (Alaska, Canada, far-eastern Siberia) vanish when the
+view sits in another copy.
+
 ### Try it
 
 > Show me the drained lakes in the water timeseries sample, then the time series of the biggest one.

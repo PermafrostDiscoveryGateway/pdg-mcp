@@ -93,7 +93,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Drained lakes are colored by the year of their drainage break and carry the break date, the median
         water area before and after the break and the change of water area. Every lake also has its area in
         2000 and 2020 and the net change (Area_start_ha, Area_end_ha, NetChange_ha, NetChange_perc). Omit the
-        bounding box to get every lake. Lakes are ranked drained-first (largest water change first), then
+        bounding box to get every lake (west > east gives a box across the 180th meridian). Lakes are ranked drained-first (largest water change first), then
         stable lakes by size. The result lists `limit` lakes from `offset` and the total counts; the map shows
         the top lakes of the same ranking, as dots when the box is wide and as polygons when it is zoomed in,
         so give a bounding box to see more of a dense area. Lakes with has_timeseries=true can be passed to
@@ -132,7 +132,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         north: Annotated[float, Field(ge=-90, le=90, description="Top of the map view (WGS84).")],
         south: Annotated[float, Field(ge=-90, le=90, description="Bottom of the map view (WGS84).")],
         east: Annotated[float, Field(ge=-180, le=180, description="Right edge of the map view (WGS84).")],
-        west: Annotated[float, Field(ge=-180, le=180, description="Left edge of the map view (WGS84).")],
+        west: Annotated[
+            float,
+            Field(ge=-180, le=180, description="Left edge of the map view (WGS84); west > east crosses 180 degrees."),
+        ],
         zoom: Annotated[int, Field(ge=0, le=22, description="The map's zoom level; picks dots or polygons.")],
         only_drained: bool = False,
         only_with_timeseries: bool = False,

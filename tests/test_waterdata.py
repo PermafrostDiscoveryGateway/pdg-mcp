@@ -194,3 +194,15 @@ async def test_lakes_in_view_rejects_inverted_box(parquet_dir):
     async with Client(create_server(settings, require_auth=False)) as c:
         with pytest.raises(ToolError, match="south must be"):
             await c.call_tool("lakes_in_view", {"north": 1, "south": 2, "east": 1, "west": 0, "zoom": 5})
+
+
+def test_antimeridian_box_is_both_sides(data):
+    """west > east means [west, 180] plus [-180, east]; the fixture lakes sit at about -164 to -161."""
+    ids = lambda bbox: {  # noqa: E731
+        p["id_geohash"] for p in data.search(**{**SEARCH, "bbox": bbox, "limit": 500, "zoom": 3}).page
+    }
+    east_side, west_side = ids((-162.0, 66.0, 180.0, 67.0)), ids((-180.0, 66.0, -164.0, 67.0))
+    wrapped = ids((-162.0, 66.0, -164.0, 67.0))
+    assert east_side and west_side and wrapped == east_side | west_side
+    assert ids((170.0, 66.0, -170.0, 67.0)) == set()  # a wrapped box far from the lakes
+    assert zoom_for_bbox((170.0, 0, -170.0, 1)) == zoom_for_bbox((0.0, 0, 20.0, 1))

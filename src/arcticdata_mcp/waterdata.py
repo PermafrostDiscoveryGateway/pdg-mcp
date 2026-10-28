@@ -23,7 +23,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-BBox = tuple[float, float, float, float]  # west, south, east, north
+BBox = tuple[float, float, float, float]  # west, south, east, north; west > east crosses the antimeridian
 
 # lake_map.html draws centroids below this zoom and polygons from here up (POINT_POLY_SWITCH_ZOOM).
 POINT_POLY_SWITCH_ZOOM = 8
@@ -45,7 +45,10 @@ def zoom_for_bbox(bbox: BBox | None) -> int:
     """Web-mercator zoom at which ``bbox`` fills the map view (0 when there is no box: the whole layer)."""
     if bbox is None:
         return 0
-    width = max(bbox[2] - bbox[0], 1e-6)
+    width = bbox[2] - bbox[0]
+    if width < 0:  # crosses the antimeridian
+        width += 360
+    width = max(width, 1e-6)
     return max(0, min(18, int(math.log2(360 * VIEWPORT_PX / 256 / width))))
 
 
@@ -123,6 +126,13 @@ def _bounds(coords: Any) -> BBox:
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _lon_overlaps(w: float, e: float, west: float, east: float) -> bool:
+    """Does the lake's [w, e] overlap the box's longitudes, which wrap when west > east?"""
+    if west <= east:
+        return e >= west and w <= east
+    return e >= west or w <= east
+
+
 class JsonWaterData(WaterData):
     """lakes.geojson held in memory."""
 
@@ -154,7 +164,7 @@ class JsonWaterData(WaterData):
                 continue
             if bbox is not None:
                 w, s, e, n = f["bbox"]
-                if e < bbox[0] or w > bbox[2] or n < bbox[1] or s > bbox[3]:
+                if n < bbox[1] or s > bbox[3] or not _lon_overlaps(w, e, bbox[0], bbox[2]):
                     continue
             matches.append(f)
         features = []
@@ -212,7 +222,8 @@ class ParquetWaterData(WaterData):
         params: list[Any] = []
         if bbox is not None:
             west, south, east, north = bbox
-            clauses.append("east >= ? AND west <= ? AND north >= ? AND south <= ?")
+            lon = "east >= ? AND west <= ?" if west <= east else "(east >= ? OR west <= ?)"
+            clauses.append(f"{lon} AND north >= ? AND south <= ?")
             params += [west, east, south, north]
         if only_drained:
             clauses.append("date_break_year IS NOT NULL")

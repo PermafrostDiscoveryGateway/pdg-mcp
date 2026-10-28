@@ -135,6 +135,7 @@
   const status = document.getElementById("status");
   const hideStable = document.getElementById("hide-stable");
   let features = [];
+  let hasPolygons = false;
 
   function selectLake(p) {
     app.sendMessage({
@@ -182,11 +183,18 @@
     for (const f of features) {
       const p = f.properties;
       if (hideStable.checked && !isDrained(p)) continue;
-      const poly = L.geoJSON(f, { style: () => polygonStyle(p) });
-      bind(poly, p, true);
-      polygons.addLayer(poly);
+      // Zoomed-out results carry centroids only (geometry "point"); zoomed-in ones carry polygons as well.
+      let center;
+      if (f.geometry.type === "Point") {
+        center = L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]);
+      } else {
+        const poly = L.geoJSON(f, { style: () => polygonStyle(p) });
+        bind(poly, p, true);
+        polygons.addLayer(poly);
+        center = poly.getBounds().getCenter();
+      }
       // Below the switch zoom the dashboard draws centroids, colored like the polygon fill.
-      const dot = L.circleMarker(poly.getBounds().getCenter(), {
+      const dot = L.circleMarker(center, {
         radius: isDrained(p) ? 5 : 3,
         fillColor: isDrained(p) ? ramp(FILL_STOPS, p.date_break_year) : STABLE_LINE,
         fillOpacity: isDrained(p) ? 0.9 : 0.5,
@@ -200,7 +208,7 @@
   }
 
   function updateZoomLayers() {
-    const usePolygons = map.getZoom() >= POINT_POLY_SWITCH_ZOOM;
+    const usePolygons = hasPolygons && map.getZoom() >= POINT_POLY_SWITCH_ZOOM;
     (usePolygons ? polygons : points).addTo(map);
     map.removeLayer(usePolygons ? points : polygons);
   }
@@ -222,10 +230,12 @@
       status.textContent = "No lakes in the tool result.";
       return;
     }
+    hasPolygons = data.geometry === "polygon";
     render();
-    status.textContent = `${data.returned} of ${data.numFound} lakes · ${data.drained} drained`;
+    status.textContent = `${data.shown} of ${data.numFound} lakes shown · ${data.drained} drained` +
+      (data.map_note ? ` · ${data.map_note}` : "");
     const bounds = L.geoJSON({ type: "FeatureCollection", features }).getBounds();
-    map.fitBounds(bounds, { padding: [10, 10] });
+    map.fitBounds(bounds, { padding: [10, 10], maxZoom: 12 });
   };
 
   await app.connect();

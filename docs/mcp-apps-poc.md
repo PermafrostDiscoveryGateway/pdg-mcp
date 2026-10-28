@@ -54,11 +54,11 @@ the data and charts come from the water_timeseries library itself.
 
 | Tool | View | Matches the dashboard's |
 |---|---|---|
-| `show_lakes(north?, south?, east?, west?, only_drained?, only_with_timeseries?)` | `ui://water/lake-map.html` | drainage-year coloring (`get_style_pmtiles_drainage_year`), stable lakes in grey, *Hide stable lakes* toggle, hover fields and labels (`map_utils.py`), *Drainage Year* legend, ESRI / Dark Matter / TCVIS base layers, points below zoom 8 and polygons above, click popup with *Select for time series* |
+| `show_lakes(north?, south?, east?, west?, only_drained?, only_with_timeseries?, limit?, offset?)` | `ui://water/lake-map.html` | drainage-year coloring (`get_style_pmtiles_drainage_year`), stable lakes in grey, *Hide stable lakes* toggle, hover fields and labels (`map_utils.py`), *Drainage Year* legend, ESRI / Dark Matter / TCVIS base layers, points below zoom 8 and polygons above, click popup with *Select for time series* |
 | `get_lake_timeseries(lake_id)` | `ui://water/lake-timeseries.html` | *Time Series Plot of Lake* section: the Dynamic World figure (water, vegetation, bare, breakpoint line, relative-area axis) and the JRC figure, both built by `plot_timeseries_interactive`, plus *Save Interactive Plot (HTML)* buttons (via the host's download) |
 
 *Select for time series* and *Ask Claude to explain this series* send a message into the chat instead of
-rerunning a Streamlit page. Polygons and Plotly figures go only in `structuredContent` (for the views); the text
+rerunning a Streamlit page. Geometry and Plotly figures go only in `structuredContent` (for the views); the text
 result the model reads holds the lake attributes, break statistics and the masked series.
 
 Not mirrored: the Near Real-Time mode, the monthly drainage statistics heatmap, recent imagery, yearly
@@ -75,7 +75,7 @@ thumbnails and timelapses (all Earth Engine), on-demand downloads, shareable lin
   "vegetation", "bare"])` for DW and the JRC equivalent, saved as Plotly JSON;
 - the dashboard's lake name (`geohash_to_human_readable_name`).
 
-The sample is 121 lakes on the Seward Peninsula, 5 with time series, 3 of them drained. The server only reads the
+The bundled sample is 121 lakes on the Seward Peninsula, 5 with time series, 3 of them drained. The server only reads the
 JSON, so it doesn't depend on the library. Point `[water] data_dir` at another export to swap the data. The
 library needs its full environment, and water-timeseries-v2's lockfile currently pins numpy<2 with a pyarrow that
 needs numpy 2, so run the export in an isolated env:
@@ -85,12 +85,50 @@ uv run --no-project --python 3.12 --with ../water-timeseries-v2 --with "pyarrow<
     python scripts/export_water_fixtures.py ../water-timeseries-v2/tests/data src/arcticdata_mcp/data/water
 ```
 
+### Lakes at scale: the GeoParquet store
+
+`[water] data_dir` (or `ARCTICDATA_MCP_WATER_DATA_DIR`) picks the backend from what the directory holds
+(`arcticdata_mcp/waterdata.py`):
+
+- `lakes.parquet`: lakes are queried with [DuckDB](https://duckdb.org), a Python package that runs inside the server
+  (nothing to install or run besides `uv sync`). A bounding box reads only the row groups that overlap it, so the
+  full layer is never loaded into memory.
+- `lakes.geojson`, or an empty `data_dir` (the bundled fixture): the whole file is held in memory and filtered in
+  Python. Same results, for tests and small exports.
+
+`scripts/build_water_store.py` writes `lakes.parquet` from the water-timeseries-v2 lake layer, or from the sample cut
+by `scripts/make_water_sample.py`. It keeps the columns `show_lakes` returns, adds `west/south/east/north` and
+`lon/lat` (so the server needs no DuckDB spatial extension, which downloads at runtime), stores simplified
+GeoJSON geometry, and sorts by `id_geohash` (a geohash prefix is a map tile) in 20k-row groups:
+
+```bash
+uv run --group ingest python scripts/build_water_store.py \
+    ../water-timeseries-v2/data/DW_historicalbp_simple_merged_breaks_with_allgeoms_v4.parquet data/water-store
+ARCTICDATA_MCP_WATER_DATA_DIR=data/water-store uv run arcticdata-mcp --transport http --insecure
+```
+
+`timeseries.json` is copied next to it and still holds only the 5 test lakes.
+
+What `show_lakes` returns:
+
+- **Ranking.** Drained lakes first, largest water change first, then stable lakes by area. A capped result keeps
+  the lakes that matter.
+- **Model text.** Counts (`numFound`, `drained` over every match), a `limit`/`offset` page of lake attributes
+  (default 50) and `next_offset`.
+- **Map geometry follows the zoom the box implies.** With no box, or one wider than about 4 degrees (zoom below 8),
+  the view gets one centroid per lake, up to 2000. Zoomed in, it gets simplified polygons, up to 300. Both stay
+  around 1 MB. `map_note` says when the map shows fewer lakes than match, and the status line under the title
+  shows it.
+
+The map still only shows what the call returned; panning to load more is the `lakes_in_view` step of #16.
+
 ### Try it
 
 > Show me the drained lakes in the water timeseries sample, then the time series of the biggest one.
 
 ### Limitations
 
-- Sample data only. Pan-Arctic scale needs PMTiles (as the dashboard uses) rather than GeoJSON in the tool
-  result, and a hosted data source instead of bundled files.
+- The map is capped at 2000 dots or 300 polygons per call and does not load more on pan/zoom (#16, next steps:
+  an app-only `lakes_in_view` tool, then vector tiles such as the dashboard's PMTiles).
+- Time series are still precomputed Plotly figures for 5 lakes, not built from raw series (#16).
 - Lakes without a time series in the sample show as stable; in the dashboard every lake has been analysed.

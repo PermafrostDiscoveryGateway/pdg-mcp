@@ -132,9 +132,9 @@ the first bytes or lines of any file, however large.
 (from the DataONE CN), `get_server_config`.
 
 ### Water timeseries (MCP Apps PoC)
-`show_lakes` (lake map) and `get_lake_timeseries` (water-area chart) serve a small sample of
-[water-timeseries-v2](https://github.com/PermafrostDiscoveryGateway/water-timeseries-v2) lake data bundled with the
-package. See [docs/mcp-apps-poc.md](docs/mcp-apps-poc.md).
+`show_lakes` (lake map) and `get_lake_timeseries` (water-area chart) serve
+[water-timeseries-v2](https://github.com/PermafrostDiscoveryGateway/water-timeseries-v2) lake data: a small sample
+bundled with the package, or a GeoParquet store queried with DuckDB for the whole layer. See [docs/mcp-apps-poc.md](docs/mcp-apps-poc.md).
 
 ### Not exposed
 MNStorage (create, update, delete, archive), MNReplication, `/log`, and `/generate` are left out on purpose.

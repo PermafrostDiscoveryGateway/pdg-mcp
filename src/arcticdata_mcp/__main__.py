@@ -16,6 +16,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--insecure", action="store_true", help="Allow HTTP transport without authentication (NOT recommended)")
+    parser.add_argument(
+        "--cors-origin",
+        action="append",
+        default=[],
+        help="Allow browser calls from this origin, e.g. http://localhost:8080 for the ext-apps basic-host (repeatable)",
+    )
     args = parser.parse_args(argv)
 
     config_path = args.config
@@ -38,7 +44,22 @@ def main(argv: list[str] | None = None) -> None:
             "or ARCTICDATA_MCP_AUTH_REALM_URL (or pass --insecure for local testing)."
         )
     server = create_server(settings, require_auth=bool(settings.auth.realm_url))
-    server.run(transport="http", host=host, port=port, path=settings.server.path)
+    extra: dict = {}
+    if args.cors_origin:
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+
+        extra["middleware"] = [
+            Middleware(
+                CORSMiddleware,
+                allow_origins=args.cors_origin,
+                allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                allow_headers=["*"],
+                expose_headers=["mcp-session-id"],
+            )
+        ]
+        extra["allowed_origins"] = args.cors_origin
+    server.run(transport="http", host=host, port=port, path=settings.server.path, **extra)
 
 
 if __name__ == "__main__":

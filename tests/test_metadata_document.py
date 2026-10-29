@@ -158,6 +158,16 @@ def test_page_items():
     assert eml.page_items(items, 9, 30) == ([{"n": 9}], None)
     # One item is always returned, even if it is larger than the budget.
     assert eml.page_items([{"x": "y" * 100}], 0, 10)[0] == [{"x": "y" * 100}]
+    assert eml.page_items([], 0, 10) == ([], None)
+    with pytest.raises(ToolError, match="offset 10 is past the end"):
+        eml.page_items(items, 10, 30)
+
+
+def test_page_text():
+    assert eml.page_text("abcdef", 2, 3) == ("cde", 5)
+    assert eml.page_text("abcdef", 5, 3) == ("f", None)
+    with pytest.raises(ToolError, match=r"offset 50000 is past the end \(6 chars\)"):
+        eml.page_text("abcdef", 50_000, 3)
 
 
 async def test_tool_defaults_to_outline(client, mock_api):

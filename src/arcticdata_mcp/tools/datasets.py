@@ -180,7 +180,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         schema_id: Annotated[str | None, Field(description="section='attributes': schema to describe, from the outline's entity_groups.")] = None,
         entity: Annotated[str | None, Field(description="section='attributes': entity name, file name, id or index instead of schema_id.")] = None,
         offset: Annotated[int, Field(ge=0, description="Where to resume: pass the previous response's next_offset.")] = 0,
-        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Approximate size limit per response for raw, methods, entities and attributes.")] = 200_000,
+        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Approximate size limit per response for raw, methods, entities and attributes.")] = 50_000,
     ) -> dict[str, Any]:
         """Read a dataset's science-metadata document (EML, sometimes ISO 19115) in navigable pieces.
 
@@ -189,7 +189,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         section='attributes' with schema_id (each column's name, definition, unit, missing-value codes, annotations),
         'methods', 'coverage', 'people', 'project', 'entities' (every file with its schema_id), 'annotations'
         (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
-        offset=next_offset. Non-EML documents are returned as raw XML.
+        offset=next_offset. Raw XML is paged by character, so a page is not valid XML on its own.
+        Non-EML documents are returned as raw XML.
         Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
         text = await client.get_text(client.object_url(pid))
@@ -201,8 +202,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             if section == "outline":
                 out["format"] = eml.root_name(text)
                 out["note"] = "Not EML, so no outline is available; returning the raw XML."
-            end = offset + max_chars
-            out.update({"offset": offset, "next_offset": end if end < len(text) else None, "document": text[offset:end]})
+            page, nxt = eml.page_text(text, offset, max_chars)
+            out.update({"offset": offset, "next_offset": nxt, "document": page})
             return out
         if section == "outline":
             out.update(doc.outline())
@@ -210,8 +211,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             methods = doc.methods_text()
             if methods is None:
                 raise ToolError(f"'{pid}' has no methods section.")
-            end = offset + max_chars
-            out.update({"chars": len(methods), "offset": offset, "next_offset": end if end < len(methods) else None, "text": methods[offset:end]})
+            page, nxt = eml.page_text(methods, offset, max_chars)
+            out.update({"chars": len(methods), "offset": offset, "next_offset": nxt, "text": page})
         elif section == "coverage":
             out.update(doc.coverage())
         elif section == "people":

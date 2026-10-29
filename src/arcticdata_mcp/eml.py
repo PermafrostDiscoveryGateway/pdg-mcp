@@ -391,8 +391,18 @@ def root_name(xml_text: str) -> str:
         return "unparseable"
 
 
+def page_text(text: str, offset: int, max_chars: int) -> tuple[str, int | None]:
+    """One page of ``text`` and the offset of the next page (None on the last page)."""
+    if offset and offset >= len(text):
+        raise ToolError(f"offset {offset} is past the end ({len(text)} chars).")
+    end = offset + max_chars
+    return text[offset:end], end if end < len(text) else None
+
+
 def page_items(items: list[Any], offset: int, max_chars: int) -> tuple[list[Any], int | None]:
     """Take items from ``offset`` until their JSON size reaches ``max_chars`` (always at least one)."""
+    if offset and offset >= len(items):
+        raise ToolError(f"offset {offset} is past the end ({len(items)} items).")
     page, used = [], 0
     for item in items[offset:]:
         size = len(json.dumps(item))

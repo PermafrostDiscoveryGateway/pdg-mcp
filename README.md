@@ -66,6 +66,9 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `ratelimit.per_user_burst` | `20` | Back-to-back calls allowed before the per-user rate applies |
 | `ratelimit.max_retries` | `3` | Retries on 429/502/503/504 from ADC |
 | `ratelimit.retry_backoff` / `retry_max_delay` | `1.0` / `30` | Exponential backoff base and cap, in seconds |
+| `portals.portal_url` | `https://arcticdata.io/catalog/portals` | Base of portal web pages (`<portal_url>/<label>`) |
+| `portals.cache_ttl` | `3600` | Seconds to cache the portal list and dataset counts (0 = no cache) |
+| `portals.exclude_labels` | empty | Portal labels to hide, such as test or spam portals |
 
 ### Rate limiting
 
@@ -88,7 +91,7 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (49)
+## Tools (53)
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
@@ -117,6 +120,22 @@ the first bytes or lines of any file, however large.
 | `get_facet_counts` | Top values and counts of any field |
 | `list_search_fields` | All index fields and their types |
 | `advanced_solr_query` | Raw q/fq/fl/sort/facets |
+
+### Project portals
+Portals are curated project collections on arcticdata.io (for example
+[PerCS-Net](https://arcticdata.io/catalog/portals/PerCS-Net)). The indexer turns each portal's dataset rules into a
+Solr `collectionQuery`, and these tools reuse it, so results match the portal's own page.
+
+| Tool | Purpose |
+|------|---------|
+| `search_portals` | List public portals or match keywords (same fields as the website's portal search), with dataset counts |
+| `get_portal` | Description, content sections as markdown, people, awards, logo, dataset rules and collection query |
+| `search_portal_datasets` | A portal's datasets, optionally narrowed by text, bounding box (map view) and collection period |
+| `find_portals_for_dataset` | Which portals include a dataset |
+
+Dataset counts and reverse lookups run every portal's query as batched `facet.query` requests (a few Solr calls in
+total). The portal list and counts are cached for `portals.cache_ttl`. A count of `0` is normal for a new portal. A
+`null` count (or an entry in `unchecked_portals`) means Solr rejected that portal's query.
 
 ### Datasets and packages
 `get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML XML), `get_metadata_html`
@@ -149,7 +168,7 @@ uv run pytest -m live    # smoke tests against arcticdata.io
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`
-(`search`, `datasets`, `objects`, `node`).
+(`search`, `datasets`, `objects`, `node`, `portals`).
 
 ## Deployment (software-dev)
 

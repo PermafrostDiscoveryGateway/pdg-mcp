@@ -66,6 +66,14 @@ class WaterSettings:
 
 
 @dataclass
+class PortalSettings:
+    # Public landing page of a portal is <portal_url>/<label>.
+    portal_url: str = "https://arcticdata.io/catalog/portals"
+    cache_ttl: float = 3600.0  # seconds to keep the portal list and dataset counts; 0 = refetch every call
+    exclude_labels: list[str] = field(default_factory=list)  # portal labels to hide (test or spam portals)
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
@@ -73,6 +81,7 @@ class Settings:
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
+    portals: PortalSettings = field(default_factory=PortalSettings)
 
 
 def _coerce(value: str, target: type) -> Any:

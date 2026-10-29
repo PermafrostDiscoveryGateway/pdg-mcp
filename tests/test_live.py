@@ -29,3 +29,14 @@ async def test_search_list_download(live):
     pid = small["results"][0]["id"]
     dl = await live.call_tool("download_file", {"pid": pid})
     assert dl.structured_content["delivery"] == "inline"
+
+
+async def test_portals(live):
+    found = (await live.call_tool("search_portals", {"query": "PerCS-Net"})).structured_content
+    assert found["portals"][0]["label"] == "PerCS-Net" and found["portals"][0]["dataset_count"] > 0
+    portal = (await live.call_tool("get_portal", {"portal": "PerCS-Net"})).structured_content
+    assert portal["collection_query"] and portal["sections"]
+    data = (await live.call_tool("search_portal_datasets", {"portal": "PerCS-Net", "rows": 1})).structured_content
+    pid = data["results"][0]["id"]
+    owners = (await live.call_tool("find_portals_for_dataset", {"pid": pid})).structured_content
+    assert "PerCS-Net" in [p["label"] for p in owners["portals"]]

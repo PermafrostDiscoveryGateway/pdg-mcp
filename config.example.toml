@@ -51,3 +51,11 @@ retry_max_delay = 30.0
 # Lake data for the water-timeseries MCP Apps PoC (show_lakes, get_lake_timeseries): a directory with
 # lakes.geojson and timeseries.json written by scripts/export_water_fixtures.py. Empty = bundled fixtures.
 data_dir = ""
+
+[portals]
+# Project portals (search_portals, get_portal, search_portal_datasets, find_portals_for_dataset).
+portal_url = "https://arcticdata.io/catalog/portals"
+# Seconds to cache the portal list and each portal's dataset count (0 = refetch on every call).
+cache_ttl = 3600.0
+# Labels of portals to hide, e.g. test or spam portals.
+exclude_labels = []

@@ -138,26 +138,21 @@ total). The portal list and counts are cached for `portals.cache_ttl`. A count o
 `null` count (or an entry in `unchecked_portals`) means Solr rejected that portal's query.
 
 ### Datasets and packages
-`get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML outline and sections, with an optional
-client-written summary; see below), `get_metadata_html` (MNView), `get_resource_map` (OAI-ORE),
-`get_package_download_info` (BagIt zip), `get_dataset_citation`, `get_version_history`.
+`get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML outline and sections; see below),
+`get_metadata_html` (MNView), `get_resource_map` (OAI-ORE), `get_package_download_info` (BagIt zip),
+`get_dataset_citation`, `get_version_history`.
 
 EML documents can be far larger than a model's context, mostly because packages repeat the same attribute list once
 per data file. `get_metadata_document(pid)` therefore returns an **outline**: title, creators, abstract, coverage, a
 methods preview, dataset annotations and `entity_groups`, where entities with identical attribute lists share one
 `schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `coverage`, `people`, `project`,
 `entities`, `annotations`, a free-text section, or `raw` for the XML. Long responses are paged with
-`offset=next_offset`. Structured content is deduplicated, never summarized. Non-EML documents
+`offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents
 (for example ISO 19115) come back as paged raw XML.
 `get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
 
 Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text
 with headings and lists kept, for example `get_metadata_document(pid, section="methods")`.
-With `summarize=true`, sections over 4,000 characters are summarized by the **client's** model through MCP sampling
-(`src/arcticdata_mcp/sampling.py`), so no model is hosted here. Sampling needs a client that supports it on a
-handshake-era protocol (2025-11-25 or earlier). The 2026-07-28 protocol removed the server-to-client channel and
-deprecated sampling (SEP-2577), so on those sessions, and when the client declines, the tool returns the full text and
-sets `summary_status`. Summaries are labelled as model-generated, and structured metadata is never summarized.
 
 ### Objects and files (MNRead / MNAuthorization)
 `download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,

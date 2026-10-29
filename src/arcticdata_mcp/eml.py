@@ -51,7 +51,7 @@ _BLOCK = {"para", "section", "listitem", "markdown", "description", "methodStep"
           "studyExtent", "samplingDescription", "instrumentation", "software", "protocol", "literalLayout"}
 _HEADINGS = {"title"}
 # Whole datasets cited as data sources can be nested in methods; they are not narrative text.
-_SKIP = {"dataSource", "coverage", "spatialSamplingUnits", "citation"}
+_SKIP = {"dataSource", "coverage", "spatialSamplingUnits"}
 _STEP_TITLES = {"sampling": "Sampling", "qualityControl": "Quality control"}
 
 
@@ -74,16 +74,29 @@ def _texts(el: Any, path: str) -> list[str]:
     return [t for t in (_plain(x) for x in el.findall(path)) if t]
 
 
+def _citation(el: Any) -> str:
+    """A cited work as one line of plain text: authors (year). Title. Journal or publisher. Identifier."""
+    if len(el) == 0:
+        return _plain(el) or ""
+    authors = [n for n in (_display_name(c) for c in el.findall("creator")) if n]
+    year = _text(el, "pubDate")
+    head = ", ".join(authors) + (f" ({year[:4]})" if year else "")
+    venue = _text(el, "article/journal") or _text(el, "book/publisher/organizationName") or _text(el, "report/publisher/organizationName")
+    parts = [head, _text(el, "title"), venue, _text(el, "alternateIdentifier")]
+    return ". ".join(p for p in parts if p) or (_plain(el) or "")
+
+
 def _walk(el: Any, parts: list[str], depth: int = 0) -> None:
     name = _local(el.tag)
     if name in _SKIP:
+        return
+    if name == "citation":
+        parts.append(f" {_citation(el)} ")
         return
     if name in _STEP_TITLES:
         parts.append(f"\n\n# {_STEP_TITLES[name]}\n")
     if name in _HEADINGS:
         parts.append(f"\n\n{'#' * max(1, min(depth, 4))} {' '.join(''.join(el.itertext()).split())}\n")
-        if el.tail and el.tail.strip():
-            parts.append(el.tail)
         return
     if name == "listitem":
         parts.append("\n\n- ")

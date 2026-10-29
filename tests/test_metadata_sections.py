@@ -70,3 +70,19 @@ async def test_missing_section_errors(client, mock_api):
     mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=EML))
     with pytest.raises(ToolError, match="no purpose section"):
         await client.call_tool("get_metadata_document", {"pid": PID, "section": "purpose"})
+
+
+def methods_of(inner):
+    return eml.parse(f"<eml><dataset><methods><methodStep><description>{inner}</description></methodStep></methods></dataset></eml>").free_text("methods")
+
+
+def test_text_after_a_title_appears_once():
+    assert methods_of("<section><title>Setup</title>TAILTEXT<para>p1</para></section>") == "# Setup\nTAILTEXT\n\np1"
+
+
+def test_citations_are_kept():
+    assert methods_of("<para>See <citation>Smith 2020</citation> ok</para>") == "See Smith 2020 ok"
+    structured = """<para>Following <citation><title>Radar calibration</title>
+      <creator><individualName><givenName>Jane</givenName><surName>Smith</surName></individualName></creator>
+      <pubDate>2020-03-01</pubDate><article><journal>J. Atmos. Ocean. Tech.</journal></article></citation>.</para>"""
+    assert methods_of(structured) == "Following Jane Smith (2020). Radar calibration. J. Atmos. Ocean. Tech. ."

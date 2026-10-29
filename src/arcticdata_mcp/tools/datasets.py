@@ -12,7 +12,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from arcticdata_mcp import downloads, solr
+from arcticdata_mcp import downloads, eml, solr
 from arcticdata_mcp.client import quote_pid
 from arcticdata_mcp.tools.common import READ_ONLY, Pid, Rows, Start, ToolContext
 
@@ -24,6 +24,15 @@ NS = {
     "prov": "http://www.w3.org/ns/prov#",
 }
 BAGIT_FORMAT = "application%2Fbagit-1.0"
+# Default fields for get_dataset_details. Per-attribute fields (attribute, attributeName, ...) are left out:
+# they repeat once per data file and can run to megabytes. Use get_metadata_document(section="attributes").
+DETAIL_FIELDS = [
+    "id", "seriesId", "title", "origin", "pubDate", "datePublished", "dateUploaded", "dateModified",
+    "abstract", "keywords", "site", "beginDate", "endDate", "northBoundCoord", "southBoundCoord",
+    "eastBoundCoord", "westBoundCoord", "scientificName", "project", "funderName", "funderIdentifier",
+    "awardNumber", "awardTitle", "investigator", "contactOrganization", "licenseDescription", "sem_annotation",
+    "formatId", "size", "resourceMap", "obsoletes", "obsoletedBy",
+]
 
 
 class _TextExtractor(HTMLParser):
@@ -119,14 +128,18 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset"})
     async def get_dataset_details(
         pid: Pid,
-        fields: Annotated[str | None, Field(description="Optional comma-separated Solr fields to return (default: all indexed fields).")] = None,
+        fields: Annotated[
+            str | None,
+            Field(description="Comma-separated Solr fields to return. Default: a curated set without per-attribute fields; '*' for every indexed field."),
+        ] = None,
     ) -> dict[str, Any]:
-        """Return the full indexed metadata record for a dataset (title, abstract, authors, coverage, funding,
-        attributes, license, related packages, ...).
+        """Return the indexed metadata record for a dataset (title, abstract, authors, coverage, funding,
+        license, semantic annotations, related packages, ...).
 
+        Attribute definitions are not included by default; use get_metadata_document(section="attributes").
         Example: get_dataset_details(pid="doi:10.18739/A29K4B")
         """
-        doc = await solr_doc(pid, fields or "*")
+        doc = await solr_doc(pid, fields or ",".join(DETAIL_FIELDS))
         doc["landing_url"] = client.landing_url(pid)
         return doc
 
@@ -160,19 +173,71 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "metadata"})
     async def get_metadata_document(
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI).")],
-        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Truncate the XML after this many characters.")] = 200_000,
+        section: Annotated[
+            Literal[*eml.SECTIONS],  # type: ignore[valid-type]
+            Field(description="'outline' (default) = compact overview; or one section; 'raw' = the XML itself."),
+        ] = "outline",
+        schema_id: Annotated[str | None, Field(description="section='attributes': schema to describe, from the outline's entity_groups.")] = None,
+        entity: Annotated[str | None, Field(description="section='attributes': entity name, file name, id or index instead of schema_id.")] = None,
+        offset: Annotated[int, Field(ge=0, description="Where to resume: pass the previous response's next_offset.")] = 0,
+        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Approximate size limit per response for raw, methods, entities and attributes.")] = 200_000,
     ) -> dict[str, Any]:
-        """Fetch the raw science-metadata document (usually EML XML, sometimes ISO 19115) for a dataset.
+        """Read a dataset's science-metadata document (EML, sometimes ISO 19115) in navigable pieces.
 
-        Contains full methods, attribute definitions, units, coverage, and contacts.
+        Start with the default outline: title, creators, abstract, coverage, a methods preview, dataset annotations,
+        and entity_groups, where data files with identical columns share one schema_id. Then request what you need:
+        section='attributes' with schema_id (each column's name, definition, unit, missing-value codes, annotations),
+        'methods', 'coverage', 'people', 'project', 'entities' (every file with its schema_id), 'annotations'
+        (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
+        offset=next_offset. Non-EML documents are returned as raw XML.
+        Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
         text = await client.get_text(client.object_url(pid))
-        return {
-            "pid": pid,
-            "chars": len(text),
-            "truncated": len(text) > max_chars,
-            "document": text[:max_chars],
-        }
+        out: dict[str, Any] = {"pid": pid, "section": section, "document_chars": len(text)}
+        doc = eml.parse(text) if section != "raw" else None
+        if doc is None and section not in ("raw", "outline"):
+            raise ToolError(f"Sections are only available for EML; this document is <{eml.root_name(text)}>. Use section='raw'.")
+        if doc is None:
+            if section == "outline":
+                out["format"] = eml.root_name(text)
+                out["note"] = "Not EML, so no outline is available; returning the raw XML."
+            end = offset + max_chars
+            out.update({"offset": offset, "next_offset": end if end < len(text) else None, "document": text[offset:end]})
+            return out
+        if section == "outline":
+            out.update(doc.outline())
+        elif section == "methods":
+            methods = doc.methods_text()
+            if methods is None:
+                raise ToolError(f"'{pid}' has no methods section.")
+            end = offset + max_chars
+            out.update({"chars": len(methods), "offset": offset, "next_offset": end if end < len(methods) else None, "text": methods[offset:end]})
+        elif section == "coverage":
+            out.update(doc.coverage())
+        elif section == "people":
+            out.update(doc.people())
+        elif section == "project":
+            out["projects"] = doc.project()
+        elif section == "annotations":
+            out.update(doc.annotations())
+        elif section == "entities":
+            page, nxt = eml.page_items(doc.entities, offset, max_chars)
+            out.update({"n_entities": len(doc.entities), "offset": offset, "next_offset": nxt, "entities": page})
+        elif section == "attributes":
+            sid = doc.find_schema(schema_id, entity)
+            used_by = doc.entities_with_schema(sid)
+            attrs = doc.schemas[sid]
+            page, nxt = eml.page_items(attrs, offset, max_chars)
+            out.update({
+                "schema_id": sid,
+                "n_entities": len(used_by),
+                "example_entities": [e.get("name") for e in used_by[:eml.EXAMPLE_ENTITIES]],
+                "n_attributes": len(attrs),
+                "offset": offset,
+                "next_offset": nxt,
+                "attributes": page,
+            })
+        return out
 
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "metadata"})
     async def get_metadata_html(

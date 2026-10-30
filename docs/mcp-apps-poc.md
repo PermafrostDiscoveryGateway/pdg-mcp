@@ -154,10 +154,38 @@ view sits in another copy.
 
 > Show me the drained lakes in the water timeseries sample, then the time series of the biggest one.
 
+### Map rendering decision
+
+The map stays Leaflet with capped GeoJSON from `lakes_in_view` (#16, item 4 deferred), not vector tiles on MapLibre:
+
+- Leaflet draws SVG and image tiles, so a map view takes no WebGL context. MapLibre GL is WebGL: each `show_lakes`
+  result is its own iframe, so a long conversation would hold one context per map, from the same per-browser pool
+  of about 16 that the time series charts used to exhaust (#17). Whether MCP App iframes share that pool is not
+  verified for Claude or ChatGPT.
+- Vector tiles need a public HTTPS tile endpoint (the iframe can't use the server's Keycloak auth), a tile build
+  for the 3 GB layer (tippecanoe) and CSP changes. That is a hosting and data-exposure decision.
+- The cost is coverage: at most 2000 dots or 300 polygons per view, and every move replaces the whole payload.
+
 ### Limitations
 
-- The map is capped at 2000 dots or 300 polygons per view and every move replaces the whole payload (#16, next
-  step: vector tiles such as the dashboard's PMTiles).
+- The map shows the top 2000 dots or 300 polygons of a view (ranked drained-first, largest water change first),
+  so wide views of dense areas show a sample until you zoom in. The status line says when that happens.
 - Only 5 lakes have a time series: the local data has no per-lake series for the full layer, so a source for them
   is still needed before `get_lake_timeseries` can cover more lakes (#16).
 - Lakes without a time series in the sample show as stable; in the dashboard every lake has been analysed.
+
+### Future work
+
+- **Full layer:** run `scripts/build_water_store.py` on the full 4M-lake file and measure build time, memory and
+  `show_lakes` / `lakes_in_view` query speed. Only the 34k-lake sample has been tried.
+- **Deployment:** the image and chart don't ship water data. A deployed server needs `lakes.parquet` on a volume or
+  in the image and `[water] data_dir` (`ARCTICDATA_MCP_WATER_DATA_DIR`) set through `extraEnv`.
+- **Per-lake series source:** find where the full layer's monthly series come from, then add a per-lake store (for
+  example `timeseries.parquet`, queried by `id_geohash`) behind `WaterData`.
+- **Real hosts:** try the views in claude.ai and the desktop app (so far only the ext-apps basic-host), and check
+  that the SVG charts take no WebGL context after many time series in one conversation (#17).
+- **Tiles, if the cap is too tight:** weigh vector tiles on MapLibre (needs a public tile endpoint and one WebGL
+  context per map; release it with `map.remove()` when the view is hidden) against Leaflet vector-tile or
+  server-rendered raster tiles. Settle the tile hosting question first.
+- **Map payloads:** every move replaces the whole payload; a bbox cache or loading state would cut flicker on slow
+  hosts. The top-N ranking favours Eurasia over Canada in whole-Arctic views; balancing by region is open.

@@ -40,3 +40,15 @@ async def test_portals(live):
     pid = data["results"][0]["id"]
     owners = (await live.call_tool("find_portals_for_dataset", {"pid": pid})).structured_content
     assert "PerCS-Net" in [p["label"] for p in owners["portals"]]
+
+
+async def test_search_missing_metadata(live):
+    async def found(**args):
+        return (await live.call_tool("search_missing_metadata", {"rows": 0, **args})).structured_content["numFound"]
+
+    r = (await live.call_tool("search_missing_metadata", {"missing": ["keywords"], "rows": 2})).structured_content
+    assert r["numFound"] > 0 and r["also_missing"]["keywords"] == r["numFound"]
+    assert all("keywords" not in d for d in r["results"])
+    both = ["keywords", "spatial_coverage"]
+    assert await found(missing=both, match="any") >= await found(missing=both)  # "any" can't match fewer than "all"
+    assert await found(missing=["attributes"], eml_only=False) >= await found(missing=["attributes"])

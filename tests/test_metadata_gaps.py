@@ -75,7 +75,7 @@ async def test_options_scope_the_query(client, route):
     assert solr.EML_FORMAT_FQ not in fq and "-obsoletedBy:*" not in fq and "-abstract:*" in fq
 
 
-@pytest.mark.parametrize("args", [{"missing": []}, {"missing": ["license"]}, {"missing": ["keywords"], "match": "some"}])
+@pytest.mark.parametrize("args", [{"missing": []}, {"missing": ["place_names"]}, {"missing": ["keywords"], "match": "some"}])
 async def test_rejects_bad_arguments(client, route, args):
     with pytest.raises(ToolError):
         await client.call_tool("search_missing_metadata", args)

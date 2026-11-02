@@ -54,11 +54,12 @@ def test_bbox_validates():
 def test_missing_clause_negates_the_present_clause():
     assert solr.missing_clause("keywords") == "-keywords:*"
     assert solr.missing_clause("funding") == "-(awardNumber:* OR funderName:* OR fundingText:*)"
+    assert solr.missing_clause("license") == "-licenseName:*"
 
 
 def test_missing_clause_rejects_unknown_field():
-    with pytest.raises(ToolError, match="Unknown metadata field 'license'"):
-        solr.missing_clause("license")
+    with pytest.raises(ToolError, match="Unknown metadata field 'place_names'"):
+        solr.missing_clause("place_names")
 
 
 def test_missing_filters_all_is_one_filter_per_field():

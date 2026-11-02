@@ -116,7 +116,7 @@ the first bytes or lines of any file, however large.
 | `search_data_files` | Data files by name, format, size, or parent dataset |
 | `search_by_format` | Any object by formatId |
 | `find_dataset_by_identifier` | Resolve a DOI, PID, series ID, or file PID to its dataset |
-| `search_missing_metadata` | Datasets lacking attributes, units, keywords, abstract, coverage, funding or annotations (EML only by default), with counts of what else they lack |
+| `search_missing_metadata` | Datasets lacking attributes, units, keywords, abstract, coverage, funding, annotations or license (EML only by default; most records lack a license), with counts of what else they lack |
 | `count_datasets` | Number of matches only |
 | `get_facet_counts` | Top values and counts of any field |
 | `list_search_fields` | All index fields and their types |

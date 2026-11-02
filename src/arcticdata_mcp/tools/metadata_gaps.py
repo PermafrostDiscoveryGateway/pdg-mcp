@@ -13,7 +13,7 @@ from arcticdata_mcp.tools.common import READ_ONLY, LatestOnly, Rows, Sort, Start
 # Keep in step with solr.PRESENT_CLAUSES (a test checks this).
 MissingField = Literal[
     "attributes", "units", "keywords", "abstract", "spatial_coverage", "temporal_coverage", "funding",
-    "semantic_annotations",
+    "semantic_annotations", "license",
 ]  # fmt: skip
 
 
@@ -29,7 +29,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 description=(
                     "Metadata the dataset must lack: attributes (EML data-table attribute descriptions), units, "
                     "keywords, abstract, spatial_coverage (bounding box), temporal_coverage (dates), funding "
-                    "(award number, funder or funding text), semantic_annotations (ontology terms)."
+                    "(award number, funder or funding text), semantic_annotations (ontology terms), license "
+                    "(indexed license name; most records lack it)."
                 ),
             ),
         ],
@@ -55,7 +56,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Returns the matching datasets (newest first by default) and `also_missing`: of all the matches, how many
         also lack each field, which shows where the gaps cluster. A dataset with no tabular data legitimately
         has no `attributes`, so combine with `query` or check results before treating that as a defect.
-        License is not offered: only about 1% of records have an indexed license, so "missing" would be misleading.
+        Only about 1% of records have an indexed license, so `license` matches most records and is rarely a useful
+        filter on its own.
         Example: search_missing_metadata(missing=["keywords", "spatial_coverage"], match="any", query="permafrost")
         """
         fq = solr.missing_filters(missing, match)

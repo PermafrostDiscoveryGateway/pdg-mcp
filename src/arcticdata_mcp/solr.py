@@ -105,8 +105,8 @@ def bbox_clause(north: float, south: float, east: float, west: float, mode: str 
 
 
 # Metadata a record can lack, as the Solr clause that matches records that HAVE it. Checked against the live index:
-# license (licenseName is set on about 1% of records, licenseUrl can't be tested for existence) and the place and
-# GCMD keyword fields (empty for every record) are left out because "missing" would be misleading.
+# The place and GCMD keyword fields (empty for every record) are left out because "missing" would be misleading.
+# license is tested on licenseName, which only about 1% of records have, so most records show as lacking it.
 PRESENT_CLAUSES = {
     "attributes": "attributeName:*",
     "units": "attributeUnit:*",
@@ -116,6 +116,7 @@ PRESENT_CLAUSES = {
     "temporal_coverage": "beginDate:*",
     "funding": "(awardNumber:* OR funderName:* OR fundingText:*)",
     "semantic_annotations": "sem_annotation:*",
+    "license": "licenseName:*",
 }
 # EML records only: portals, ISO 19115, Dublin Core and FGDC records have no EML attributes, funding or annotations.
 EML_FORMAT_FQ = "formatId:(" + " OR ".join(term(p) for p in ("eml://*", "https://eml.ecoinformatics.org/*")) + ")"

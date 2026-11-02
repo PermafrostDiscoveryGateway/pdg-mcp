@@ -60,6 +60,12 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `downloads.max_inline_bytes` | 10 MiB | Largest file returned inline to the agent |
 | `downloads.allow_server_save` | `false` | Allow `delivery="server"` to write files on the server host |
 | `downloads.download_dir` | `./downloads` | Where server-side saves go |
+| `profile.sample_bytes` | 5 MiB | Bytes `profile_file` reads in `scan="sample"` mode |
+| `profile.max_full_bytes` | 100 MiB | Most bytes `profile_file` reads in `scan="full"` mode; bigger files are profiled up to this |
+| `profile.max_columns` | `500` | Columns profiled per file (the rest are listed by name) |
+| `profile.chunk_rows` | `100000` | Rows pandas parses at a time |
+| `profile.max_distinct` / `top_values` | `1000` / `5` | Distinct values tracked per text column, and most common values reported |
+| `profile.sentinels` | `-9999`, `-99999` | Numeric codes counted as missing, comma-separated in env vars |
 | `ratelimit.max_concurrent` | `6` | Global cap on in-flight requests to ADC (0 = unlimited) |
 | `ratelimit.queue_timeout` | `30` | Seconds to wait for a free slot before failing |
 | `ratelimit.per_user_rate` | `2.0` | Sustained tool calls per second per user (0 = unlimited) |
@@ -91,7 +97,16 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (53)
+`profile_file` summarizes a delimited text file (CSV, TSV) for metadata enrichment: per column the guessed type,
+missing values, min/max/mean, distinct or example values and a unit guessed from the column name, plus a spatial
+and temporal extent inferred from latitude, longitude, date and year columns (matched by name, e.g. `lat`,
+`latitude`, `Lon`). The file is streamed to a temporary file and parsed in chunks, so memory stays bounded.
+`scan="sample"` (default) reads the first `sample_bytes`; `scan="full"` reads up to `max_full_bytes`. The result
+says whether it was `complete`; if not, row counts are estimates and the ranges cover only the part read. Empty
+cells, `NA`/`null`/`NaN` and the sentinels `-9999` and `-99999` count as missing; sentinels are excluded from
+statistics but reported as `sentinel_count`. Other formats (NetCDF, GeoTIFF, Parquet, archives) return `supported: false` for now.
+
+## Tools (54)
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
@@ -143,7 +158,7 @@ total). The portal list and counts are cached for `portals.cache_ttl`. A count o
 `get_version_history`.
 
 ### Objects and files (MNRead / MNAuthorization)
-`download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
+`download_file`, `preview_file`, `profile_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
 `get_checksum`, `list_objects`, `is_authorized`.
 
 ### Node and reference
@@ -167,7 +182,7 @@ uv run pytest -m live    # smoke tests against arcticdata.io
 ```
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
-errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`
+errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py` (CSV profiling for `profile_file`), `ratelimit.py` (per-user and upstream limits), and `tools/`
 (`search`, `datasets`, `objects`, `node`, `portals`).
 
 ## Deployment (software-dev)

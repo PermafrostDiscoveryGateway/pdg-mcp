@@ -48,6 +48,17 @@ class DownloadSettings:
 
 
 @dataclass
+class ProfileSettings:
+    sample_bytes: int = 5 * 1024 * 1024  # bytes read in scan="sample" mode
+    max_full_bytes: int = 100 * 1024 * 1024  # most bytes read in scan="full" mode; bigger files are sampled up to this
+    max_columns: int = 500  # columns profiled per file (the rest are listed by name only)
+    chunk_rows: int = 100_000  # rows pandas parses at a time
+    max_distinct: int = 1000  # distinct values tracked per text column; above this the count is a lower bound
+    top_values: int = 5  # most common values reported for low-cardinality text columns
+    sentinels: list[str] = field(default_factory=lambda: ["-9999", "-99999"])  # numeric codes counted as missing
+
+
+@dataclass
 class RateLimitSettings:
     max_concurrent: int = 6  # global cap on in-flight requests to ADC/DataONE; 0 = unlimited
     queue_timeout: float = 30.0  # seconds a request waits for a free slot before failing
@@ -80,6 +91,7 @@ class Settings:
     arcticdata: ArcticDataSettings = field(default_factory=ArcticDataSettings)
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
+    profile: ProfileSettings = field(default_factory=ProfileSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
 

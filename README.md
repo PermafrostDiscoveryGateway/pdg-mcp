@@ -104,7 +104,9 @@ and temporal extent inferred from latitude, longitude, date and year columns (ma
 `scan="sample"` (default) reads the first `sample_bytes`; `scan="full"` reads up to `max_full_bytes`. The result
 says whether it was `complete`; if not, row counts are estimates and the ranges cover only the part read. Empty
 cells, `NA`/`null`/`NaN` and the sentinels `-9999` and `-99999` count as missing; sentinels are excluded from
-statistics but reported as `sentinel_count`. Other formats (NetCDF, GeoTIFF, Parquet, archives) return `supported: false` for now.
+statistics but reported as `sentinel_count`. If the line under the header holds units (short labels above numeric columns), it is read as a
+units row and replaces the name-based unit guess; `header_rows` overrides this (1 = names only). Date columns named like `processing_time`, `created` or `modified` are left out of the temporal extent and listed under
+`ignored_columns`. Other formats (NetCDF, GeoTIFF, Parquet, archives) return `supported: false` for now.
 
 ## Tools (54)
 

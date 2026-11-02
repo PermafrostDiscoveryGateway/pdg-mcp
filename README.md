@@ -66,6 +66,11 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `profile.chunk_rows` | `100000` | Rows pandas parses at a time |
 | `profile.max_distinct` / `top_values` | `1000` / `5` | Distinct values tracked per text column, and most common values reported |
 | `profile.sentinels` | `-9999`, `-99999` | Numeric codes counted as missing, comma-separated in env vars |
+| `profile.sample_blocks` / `sample_block_pixels` | `16` / `65536` | Rasters in `scan="sample"` mode: blocks read, spread over the image, and the pixels each window is grown to |
+| `profile.max_full_pixels` | `25000000` | Raster pixels (times bands) read in `scan="full"` mode; bigger rasters are sampled |
+| `profile.sample_values` | `20000` | Values read per NetCDF variable in `scan="sample"` mode, half from its start and half from its end |
+| `profile.max_full_values` | `50000000` | NetCDF values read in total in `scan="full"` mode; the rest are sampled |
+| `profile.timeout` | `120` | Seconds a raster or NetCDF profile may take |
 | `ratelimit.max_concurrent` | `6` | Global cap on in-flight requests to ADC (0 = unlimited) |
 | `ratelimit.queue_timeout` | `30` | Seconds to wait for a free slot before failing |
 | `ratelimit.per_user_rate` | `2.0` | Sustained tool calls per second per user (0 = unlimited) |
@@ -97,16 +102,34 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-`profile_file` summarizes a delimited text file (CSV, TSV) for metadata enrichment: per column the guessed type,
-missing values, min/max/mean, distinct or example values and a unit guessed from the column name, plus a spatial
-and temporal extent inferred from latitude, longitude, date and year columns (matched by name, e.g. `lat`,
-`latitude`, `Lon`). The file is streamed to a temporary file and parsed in chunks, so memory stays bounded.
-`scan="sample"` (default) reads the first `sample_bytes`; `scan="full"` reads up to `max_full_bytes`. The result
-says whether it was `complete`; if not, row counts are estimates and the ranges cover only the part read. Empty
-cells, `NA`/`null`/`NaN` and the sentinels `-9999` and `-99999` count as missing; sentinels are excluded from
-statistics but reported as `sentinel_count`. If the line under the header holds units (short labels above numeric columns), it is read as a
-units row and replaces the name-based unit guess; `header_rows` overrides this (1 = names only). Date columns named like `processing_time`, `created` or `modified` are left out of the temporal extent and listed under
-`ignored_columns`. Other formats (NetCDF, GeoTIFF, Parquet, archives) return `supported: false` for now.
+`profile_file` summarizes a data file for metadata enrichment, so an agent can compare what a file contains with
+what its EML says. `scan="sample"` (default) reads part of the file and `scan="full"` reads up to the configured
+limits; the result says whether it was `complete`. It supports three kinds of file; other formats (Parquet, Excel,
+archives) return `supported: false` for now.
+
+- **Delimited text (CSV, TSV)** is streamed to a temporary file and parsed in chunks, so memory stays bounded. Per
+  column it reports the guessed type, missing values, min/max/mean, distinct or example values and a guessed unit,
+  plus a spatial and temporal extent inferred from latitude, longitude, date and year columns (matched by name, e.g.
+  `lat`, `latitude`, `Lon`). Empty cells, `NA`/`null`/`NaN` and the sentinels `-9999` and `-99999` count as missing;
+  sentinels are excluded from statistics but reported as `sentinel_count`. If the line under the header holds units
+  (short labels above numeric columns) it is read as a units row, which replaces the name-based guess and may also
+  declare a date format; `header_rows` overrides this (1 = names only). Date columns named like `processing_time`,
+  `created` or `modified` are left out of the temporal extent and listed under `ignored_columns`. In sample mode only
+  the first `sample_bytes` are read, so row counts are estimates and ranges cover just that part.
+- **GeoTIFF and other TIFF rasters** are read over HTTP range requests, so even multi-GB files are fine. The result
+  has the size, driver, CRS (or its definition if it has no EPSG code), pixel size, a latitude/longitude bounding box,
+  tiling and overviews, tags, and per band the data type, nodata value, unit, description and scale/offset. These come
+  from the file itself, not from guesses. Band statistics (min, max, mean, standard deviation, valid fraction, and the
+  distinct values of classified rasters) come from sampled blocks spread over the image unless `complete`. A file with
+  no CRS is reported as such.
+- **NetCDF (classic and NetCDF-4)** is read with `netCDF4` over HTTP range requests. The result has the dimensions,
+  selected global attributes (title, Conventions, history, declared coverage, ...) and, per variable, the dtype,
+  shape, units, long name, standard name, fill value, scaling and statistics (computed after masking fill values and
+  applying scaling). Spatial and temporal extents come from the latitude, longitude and time variables, found by CF
+  attributes or name, with CF time units decoded. Large variables are read from their start and their end in sample
+  mode, so their statistics are estimates.
+
+Raster and NetCDF profiles hold one upstream slot while they run and give up after `profile.timeout` seconds.
 
 ## Tools (54)
 
@@ -184,7 +207,7 @@ uv run pytest -m live    # smoke tests against arcticdata.io
 ```
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
-errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py` (CSV profiling for `profile_file`), `ratelimit.py` (per-user and upstream limits), and `tools/`
+errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py`, `profiling_raster.py` and `profiling_netcdf.py` (the `profile_file` profilers), `ratelimit.py` (per-user and upstream limits), and `tools/`
 (`search`, `datasets`, `objects`, `node`, `portals`).
 
 ## Deployment (software-dev)

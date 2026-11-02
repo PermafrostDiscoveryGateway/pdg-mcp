@@ -43,6 +43,16 @@ max_distinct = 1000
 top_values = 5
 # Numeric codes counted as missing (and excluded from min/max/mean).
 sentinels = ["-9999", "-99999"]
+# Rasters: blocks read in scan="sample" mode (spread over the image) and the pixels each window is grown to;
+# pixels (times bands) read in scan="full" mode, beyond which the raster is sampled.
+sample_blocks = 16
+sample_block_pixels = 65536
+max_full_pixels = 25000000
+# NetCDF: values read per variable in scan="sample" mode, and in total in scan="full" mode.
+sample_values = 20000
+max_full_values = 50000000
+# Seconds a raster or NetCDF profile may take before it is abandoned.
+timeout = 120.0
 
 [ratelimit]
 # ADC does not rate-limit on its side, so these limits are the only thing protecting it from overload.

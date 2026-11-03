@@ -389,3 +389,10 @@ async def test_profile_file_gives_up_after_the_timeout(client, mock_api, monkeyp
 def test_a_long_named_column_with_non_degree_units_is_not_a_longitude(tmp_path):
     r = profile(tmp_path, "latitude,long_wave\ndeg,W/m2\n60.1,200\n61.2,250\n62.3,300\n")
     assert r["inferred_spatial_extent"] is None
+
+
+def test_floats_written_with_a_decimal_point_but_all_whole_are_flagged(tmp_path):
+    r = profile(tmp_path, "depth,ratio,n\n41.0,1.5,1\n52.0,2.0,2\n75.0,3.0,3\n")
+    cols = {c["name"]: c for c in r["columns"]}
+    assert cols["depth"]["type"] == "float" and cols["depth"]["whole_numbers"] is True
+    assert "whole_numbers" not in cols["ratio"] and "whole_numbers" not in cols["n"]

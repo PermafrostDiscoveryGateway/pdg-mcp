@@ -214,6 +214,7 @@ class _Column:
     sentinels: int = 0
     numeric: int = 0
     integers: int = 0
+    whole: int = 0  # numeric values with no fractional part, however they are written ("41.0" counts)
     booleans: int = 0
     datetimes: int = 0
     num_min: float = math.inf
@@ -284,6 +285,7 @@ def _update(col: _Column, raw: pd.Series, sentinels: list[float], limits: Profil
     if finite.any():
         col.integers += int(vals[finite].str.fullmatch(r"[+-]?\d+").sum())
         nums = num[finite]
+        col.whole += int((nums % 1 == 0).sum())
         col.num_min = min(col.num_min, float(nums.min()))
         col.num_max = max(col.num_max, float(nums.max()))
         col.num_sum += float(nums.sum())
@@ -332,6 +334,8 @@ def _summary(col: _Column, limits: ProfileSettings) -> dict[str, Any]:
         out["sentinel_count"] = col.sentinels
     if kind in ("integer", "float"):
         out.update(min=col.num_min, max=col.num_max, mean=round(col.num_sum / col.numeric, 6))
+        if kind == "float" and col.whole == col.numeric:
+            out["whole_numbers"] = True  # written with a decimal point but every value is a whole number
         if col.numeric < col.non_null:
             out["non_numeric_count"] = col.non_null - col.numeric
         if unit := guess_unit(col.name):

@@ -71,6 +71,10 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `profile.sample_values` | `20000` | Values read per NetCDF variable in `scan="sample"` mode, half from its start and half from its end |
 | `profile.max_full_values` | `50000000` | NetCDF values read in total in `scan="full"` mode; the rest are sampled |
 | `profile.timeout` | `120` | Seconds a raster or NetCDF profile may take |
+| `compare.files_per_schema` | `3` | Data files `compare_eml_vs_data` profiles per group of entities that share an attribute list |
+| `compare.max_files` | `24` | Most files profiled in one comparison |
+| `compare.budget` | `300` | Seconds after which `compare_eml_vs_data` starts no further files |
+| `compare.bbox_tolerance` | `0.05` | Degrees data may stray outside the EML bounding box before it is flagged |
 | `ratelimit.max_concurrent` | `6` | Global cap on in-flight requests to ADC (0 = unlimited) |
 | `ratelimit.queue_timeout` | `30` | Seconds to wait for a free slot before failing |
 | `ratelimit.per_user_rate` | `2.0` | Sustained tool calls per second per user (0 = unlimited) |
@@ -131,7 +135,27 @@ archives) return `supported: false` for now.
 
 Raster and NetCDF profiles hold one upstream slot while they run and give up after `profile.timeout` seconds.
 
-## Tools (54)
+### Comparing EML with the data
+
+`compare_eml_vs_data` checks a dataset's EML against what its data files contain. It reads the EML attribute lists,
+profiles a few files per group of entities that share one (`files_per_schema`, default 3, spread evenly over the
+group; `"all"` takes every file up to `compare.max_files`), and returns findings, most severe first. Each has a
+severity (`error`, `warning`, `info`), a confidence in the data side, the EML and data values, and a `suggested_edit`
+naming the EML element to change. Files are matched to entities by the PID in the entity's URL, then by file name.
+
+| Finding | Meaning |
+|---|---|
+| `documented_column_missing`, `undocumented_column`, `no_attribute_list`, `name_mismatch`, `inconsistent_columns` | The attribute list and the columns disagree. Names match exactly, then ignoring case and spacing, then NetCDF leaf names, then by position for tables with the same column count |
+| `type_mismatch`, `number_type_mismatch`, `outside_declared_bounds` | The declared scale, number type or bounds contradict the values |
+| `unit_mismatch`, `missing_unit`, `unit_unverified` | Units differ after normalising spellings (`celsius` = `degree_Celsius`, `metersPerSecond` = `m/s`). Units written in a NetCDF file are high confidence, a CSV units row medium, a name-derived guess low (reported as `info`) |
+| `undocumented_missing_value`, `blank_values_undocumented` | `-9999`/`-99999`, NetCDF fill values or blank cells are not listed as missing-value codes |
+| `date_format_mismatch` | The declared `formatString` has a different shape from the dates in the file; a corrected format is suggested |
+| `data_outside_spatial_coverage`, `data_outside_temporal_coverage`, `coverage_missing_spatial`, `coverage_missing_temporal` | The data fall outside the declared coverage, or the EML has none |
+
+A `scan="sample"` run reads part of each file: findings that data fall outside bounds or coverage are certain, the
+others reflect the sample. Attribute checks cover tables and NetCDF; rasters feed only the coverage check.
+
+## Tools (55)
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
@@ -191,7 +215,7 @@ is deduplicated, never summarized. Non-EML documents (for example ISO 19115) com
 `get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
 
 ### Objects and files (MNRead / MNAuthorization)
-`download_file`, `preview_file`, `profile_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
+`download_file`, `preview_file`, `profile_file`, `compare_eml_vs_data`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
 `get_checksum`, `list_objects`, `is_authorized`.
 
 ### Node and reference
@@ -215,7 +239,7 @@ uv run pytest -m live    # smoke tests against arcticdata.io
 ```
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
-errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py`, `profiling_raster.py` and `profiling_netcdf.py` (the `profile_file` profilers), `ratelimit.py` (per-user and upstream limits), and `tools/`
+errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py`, `profiling_raster.py` and `profiling_netcdf.py` (the `profile_file` profilers), `compare.py` (the `compare_eml_vs_data` checks), `ratelimit.py` (per-user and upstream limits), and `tools/`
 (`search`, `datasets`, `objects`, `node`, `portals`).
 
 ## Deployment (software-dev)

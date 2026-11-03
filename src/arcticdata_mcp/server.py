@@ -12,7 +12,7 @@ from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
-from arcticdata_mcp.tools import apps, datasets, node, objects, portals, profile, search, water
+from arcticdata_mcp.tools import apps, compare, datasets, node, objects, portals, profile, search, water
 from arcticdata_mcp.tools.common import ToolContext
 
 INSTRUCTIONS = """\
@@ -24,7 +24,8 @@ Typical workflow:
 2. Inspect a dataset with get_dataset_details, get_metadata_document (EML) or get_dataset_citation.
 3. List its files with list_dataset_files, peek with preview_file, then fetch with download_file.
    Large files return a direct URL instead of inline bytes (see get_server_config). profile_file summarizes a
-   tabular file's columns, missing values, ranges and inferred extent, to compare against the dataset's metadata.
+   data file (CSV, GeoTIFF, NetCDF): columns, missing values, ranges and inferred extent. compare_eml_vs_data
+   checks a whole dataset's EML against a sample of its files and lists the mismatches as suggested edits.
 Project portals (curated collections such as PerCS-Net or the Permafrost Discovery Gateway) add a project
 layer: search_portals finds them, get_portal describes one, search_portal_datasets searches exactly the
 datasets it collects, and find_portals_for_dataset lists the portals that include a dataset.
@@ -60,6 +61,6 @@ def create_server(
     )
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
-    for module in (search, datasets, objects, profile, node, portals, apps, water):
+    for module in (search, datasets, objects, profile, compare, node, portals, apps, water):
         module.register(mcp, ctx)
     return mcp

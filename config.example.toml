@@ -56,6 +56,15 @@ max_netcdf_download = 67108864
 # Seconds a raster or NetCDF profile may take before it is abandoned.
 timeout = 120.0
 
+[compare]
+# compare_eml_vs_data: files profiled per group of entities that share a column list, and in total.
+files_per_schema = 3
+max_files = 24
+# Seconds after which no further files are started.
+budget = 300.0
+# Degrees by which data may stray outside the EML bounding box before it is flagged.
+bbox_tolerance = 0.05
+
 [ratelimit]
 # ADC does not rate-limit on its side, so these limits are the only thing protecting it from overload.
 # Global cap on requests in flight to arcticdata.io across all users (0 = unlimited).

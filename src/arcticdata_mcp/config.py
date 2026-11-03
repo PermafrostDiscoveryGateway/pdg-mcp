@@ -66,6 +66,14 @@ class ProfileSettings:
 
 
 @dataclass
+class CompareSettings:
+    files_per_schema: int = 3  # data files profiled per group of entities that share a column list
+    max_files: int = 24  # most files profiled in one comparison, however many groups there are
+    budget: float = 300.0  # seconds after which no further files are started
+    bbox_tolerance: float = 0.05  # degrees by which data may stray outside the EML bounding box before it is flagged
+
+
+@dataclass
 class RateLimitSettings:
     max_concurrent: int = 6  # global cap on in-flight requests to ADC/DataONE; 0 = unlimited
     queue_timeout: float = 30.0  # seconds a request waits for a free slot before failing
@@ -99,6 +107,7 @@ class Settings:
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
     profile: ProfileSettings = field(default_factory=ProfileSettings)
+    compare: CompareSettings = field(default_factory=CompareSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
 

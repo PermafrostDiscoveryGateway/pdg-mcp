@@ -13,36 +13,100 @@ from pydantic import Field
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp import downloads, profiling, profiling_netcdf, profiling_raster
+from arcticdata_mcp.client import DataONEClient
+from arcticdata_mcp.config import ProfileSettings
 from arcticdata_mcp.tools.common import READ_ONLY, Pid, ToolContext
+
+
+async def fetch_to_file(client: DataONEClient, url: str, path: Path, limit: int) -> tuple[int, bool]:
+    """Stream a URL into ``path``, stopping after ``limit`` bytes. Returns (bytes written, cut short)."""
+    total, cut = 0, False
+    async with client.stream(url) as resp:
+        with path.open("wb") as fh:
+            async for chunk in resp.aiter_bytes():
+                if total + len(chunk) > limit:
+                    fh.write(chunk[: limit - total])
+                    total, cut = limit, True
+                    break
+                fh.write(chunk)
+                total += len(chunk)
+    return total, cut
+
+
+async def run_remote(client: DataONEClient, limits: ProfileSettings, func: Any, url: str, scan: str) -> dict[str, Any]:
+    """Run a profiler that reads ``url`` itself over HTTP range requests, holding an upstream slot meanwhile."""
+    try:
+        async with client.limiter.slot():
+            return await asyncio.wait_for(asyncio.to_thread(func, url, limits, scan), timeout=limits.timeout)
+    except TimeoutError as exc:
+        raise ToolError(
+            f"Profiling took longer than {limits.timeout:.0f} seconds; try scan='sample' or a smaller file."
+        ) from exc
+
+
+async def profile_object(
+    client: DataONEClient,
+    limits: ProfileSettings,
+    pid: str,
+    scan: str = "sample",
+    header_rows: int | str = "auto",
+) -> dict[str, Any]:
+    """Profile one data object. Shared by ``profile_file`` and ``compare_eml_vs_data``."""
+    info = await downloads.object_info(client, pid)
+    base = {k: info[k] for k in ("pid", "fileName", "formatId", "size")}
+    fmt, name, url = info["formatId"], info["fileName"], info["download_url"]
+    report = None
+    if profiling_raster.is_raster(fmt, name):
+        report = await run_remote(client, limits, profiling_raster.profile_raster, url, scan)
+    elif profiling_netcdf.is_netcdf(fmt, name):
+        if info["size"] and info["size"] <= limits.max_netcdf_download:
+            # HDF5 reads in many small pieces, so over HTTP each one costs a round trip; one download is far faster.
+            with tempfile.TemporaryDirectory(prefix="adc-profile-") as tmp:
+                path = Path(tmp) / "data.nc"
+                try:
+                    await asyncio.wait_for(
+                        fetch_to_file(client, url, path, limits.max_netcdf_download), limits.timeout
+                    )
+                except TimeoutError as exc:
+                    raise ToolError(f"Downloading the file took longer than {limits.timeout:.0f} seconds.") from exc
+                report = await profiling_netcdf.profile_in_subprocess(str(path), limits, scan, limits.timeout)
+        else:
+            async with client.limiter.slot():  # the child process reads the object URL itself
+                report = await profiling_netcdf.profile_in_subprocess(url, limits, scan, limits.timeout)
+    if report is not None:
+        complete = report.pop("complete")
+        return {**base, "supported": True, "scan": scan, "complete": complete, **report}
+    if not profiling.is_delimited(fmt, name):
+        return {
+            **base,
+            "supported": False,
+            "reason": f"Cannot profile format {fmt!r} yet (archives such as zip and gzip included).",
+            "supported_formats": [profiling.SUPPORTED, profiling_raster.SUPPORTED, profiling_netcdf.SUPPORTED],
+            "download_url": url,
+        }
+    limit = limits.sample_bytes if scan == "sample" else limits.max_full_bytes
+    with tempfile.TemporaryDirectory(prefix="adc-profile-") as tmp:
+        path = Path(tmp) / "data"
+        read, cut = await fetch_to_file(client, url, path, limit)
+        if cut:
+            profiling.trim_partial_line(path)
+        report = await asyncio.to_thread(profiling.profile_delimited, path, limits, header_rows)
+    rows = report.pop("rows_profiled")
+    notes = report.pop("notes")
+    scope = {"scan": scan, "complete": not cut, "bytes_read": read, "rows_profiled": rows}
+    if cut:
+        scope["estimated_total_rows"] = round(rows * info["size"] / read) if info["size"] and read else None
+        notes.append(
+            "Only the start of the file was read; row counts are estimates and min/max values, ranges and "
+            "extents cover just that part."
+            + (" Use scan='full' to read more." if scan == "sample" else " The file exceeds the server's limit.")
+        )
+    return {**base, "supported": True, "kind": "table", **scope, **report, "notes": notes}
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     client = ctx.client
     limits = ctx.settings.profile
-
-    async def fetch_to_file(url: str, path: Path, limit: int) -> tuple[int, bool]:
-        """Stream a URL into ``path``, stopping after ``limit`` bytes. Returns (bytes written, cut short)."""
-        total, cut = 0, False
-        async with client.stream(url) as resp:
-            with path.open("wb") as fh:
-                async for chunk in resp.aiter_bytes():
-                    if total + len(chunk) > limit:
-                        fh.write(chunk[: limit - total])
-                        total, cut = limit, True
-                        break
-                    fh.write(chunk)
-                    total += len(chunk)
-        return total, cut
-
-    async def run_remote(func: Any, url: str, scan: str) -> dict[str, Any]:
-        """Run a profiler that reads ``url`` itself over HTTP range requests, holding an upstream slot meanwhile."""
-        try:
-            async with client.limiter.slot():
-                return await asyncio.wait_for(asyncio.to_thread(func, url, limits, scan), timeout=limits.timeout)
-        except TimeoutError as exc:
-            raise ToolError(
-                f"Profiling took longer than {limits.timeout:.0f} seconds; try scan='sample' or a smaller file."
-            ) from exc
 
     @mcp.tool(annotations=READ_ONLY, tags={"files", "metadata-quality"})
     async def profile_file(
@@ -79,51 +143,4 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Check `complete` before trusting row counts, statistics and extents.
         Example: profile_file(pid="urn:uuid:...", scan="full")
         """
-        info = await downloads.object_info(client, pid)
-        base = {k: info[k] for k in ("pid", "fileName", "formatId", "size")}
-        fmt, name, url = info["formatId"], info["fileName"], info["download_url"]
-        report = None
-        if profiling_raster.is_raster(fmt, name):
-            report = await run_remote(profiling_raster.profile_raster, url, scan)
-        elif profiling_netcdf.is_netcdf(fmt, name):
-            if info["size"] and info["size"] <= limits.max_netcdf_download:
-                # HDF5 reads in many small pieces, so over HTTP each one costs a round trip; one download is far faster.
-                with tempfile.TemporaryDirectory(prefix="adc-profile-") as tmp:
-                    path = Path(tmp) / "data.nc"
-                    try:
-                        await asyncio.wait_for(fetch_to_file(url, path, limits.max_netcdf_download), limits.timeout)
-                    except TimeoutError as exc:
-                        raise ToolError(f"Downloading the file took longer than {limits.timeout:.0f} seconds.") from exc
-                    report = await profiling_netcdf.profile_in_subprocess(str(path), limits, scan, limits.timeout)
-            else:
-                async with client.limiter.slot():  # the child process reads the object URL itself
-                    report = await profiling_netcdf.profile_in_subprocess(url, limits, scan, limits.timeout)
-        if report is not None:
-            complete = report.pop("complete")
-            return {**base, "supported": True, "scan": scan, "complete": complete, **report}
-        if not profiling.is_delimited(fmt, name):
-            return {
-                **base,
-                "supported": False,
-                "reason": f"Cannot profile format {fmt!r} yet (archives such as zip and gzip included).",
-                "supported_formats": [profiling.SUPPORTED, profiling_raster.SUPPORTED, profiling_netcdf.SUPPORTED],
-                "download_url": url,
-            }
-        limit = limits.sample_bytes if scan == "sample" else limits.max_full_bytes
-        with tempfile.TemporaryDirectory(prefix="adc-profile-") as tmp:
-            path = Path(tmp) / "data"
-            read, cut = await fetch_to_file(info["download_url"], path, limit)
-            if cut:
-                profiling.trim_partial_line(path)
-            report = await asyncio.to_thread(profiling.profile_delimited, path, limits, header_rows)
-        rows = report.pop("rows_profiled")
-        notes = report.pop("notes")
-        scope = {"scan": scan, "complete": not cut, "bytes_read": read, "rows_profiled": rows}
-        if cut:
-            scope["estimated_total_rows"] = round(rows * info["size"] / read) if info["size"] and read else None
-            notes.append(
-                "Only the start of the file was read; row counts are estimates and min/max values, ranges and "
-                "extents cover just that part."
-                + (" Use scan='full' to read more." if scan == "sample" else " The file exceeds the server's limit.")
-            )
-        return {**base, "supported": True, "kind": "table", **scope, **report, "notes": notes}
+        return await profile_object(client, limits, pid, scan, header_rows)

@@ -122,7 +122,7 @@ archives) return `supported: false` for now.
   from the file itself, not from guesses. Band statistics (min, max, mean, standard deviation, valid fraction, and the
   distinct values of classified rasters) come from sampled blocks spread over the image unless `complete`. A file with
   no CRS is reported as such.
-- **NetCDF (classic and NetCDF-4)** is read with `netCDF4` over HTTP range requests. The result has the dimensions,
+- **NetCDF (classic and NetCDF-4)** is read with `netCDF4`. Files up to `profile.max_netcdf_download` (64 MiB) are downloaded to a temporary file first, because HDF5 reads in many small pieces and over HTTP each costs a round trip; larger files are read over HTTP range requests (usually fine, but slow for some NetCDF-4 layouts and then they may hit the timeout). The result has the dimensions,
   selected global attributes (title, Conventions, history, declared coverage, ...) and, per variable, the dtype,
   shape, units, long name, standard name, fill value, scaling and statistics (computed after masking fill values and
   applying scaling). Spatial and temporal extents come from the latitude, longitude and time variables, found by CF

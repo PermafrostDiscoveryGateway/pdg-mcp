@@ -32,6 +32,30 @@ max_inline_bytes = 10485760
 allow_server_save = false
 download_dir = "./downloads"
 
+[profile]
+# profile_file: bytes read in scan="sample" mode, and the most bytes read in scan="full" mode.
+sample_bytes = 5242880
+max_full_bytes = 104857600
+# Columns profiled per file, rows parsed per chunk, distinct text values tracked per column, top values reported.
+max_columns = 500
+chunk_rows = 100000
+max_distinct = 1000
+top_values = 5
+# Numeric codes counted as missing (and excluded from min/max/mean).
+sentinels = ["-9999", "-99999"]
+# Rasters: blocks read in scan="sample" mode (spread over the image) and the pixels each window is grown to;
+# pixels (times bands) read in scan="full" mode, beyond which the raster is sampled.
+sample_blocks = 16
+sample_block_pixels = 65536
+max_full_pixels = 25000000
+# NetCDF: values read per variable in scan="sample" mode, and in total in scan="full" mode.
+sample_values = 20000
+max_full_values = 50000000
+# NetCDF files up to this many bytes are downloaded and read locally; bigger ones are read over HTTP range requests.
+max_netcdf_download = 67108864
+# Seconds a raster or NetCDF profile may take before it is abandoned.
+timeout = 120.0
+
 [ratelimit]
 # ADC does not rate-limit on its side, so these limits are the only thing protecting it from overload.
 # Global cap on requests in flight to arcticdata.io across all users (0 = unlimited).

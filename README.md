@@ -152,7 +152,11 @@ methods preview, dataset annotations and `entity_groups`, where entities with id
 `get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
 
 Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text
-with headings and lists kept, for example `get_metadata_document(pid, section="methods")`.
+with headings, numbered and bulleted lists, links and `markdown` / `literalLayout` spacing kept, for example
+`get_metadata_document(pid, section="methods")`. Structured elements inside them (protocols, software,
+instrumentation, citations, data sources, sampling coverage) are copied whole next to the text, under `protocols`,
+`citations`, `data_sources` and so on, and marked in the text by a placeholder such as `[protocol 1]`.
+`intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
 `download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,

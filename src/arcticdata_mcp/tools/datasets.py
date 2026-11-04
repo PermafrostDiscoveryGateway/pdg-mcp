@@ -234,11 +234,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         and entity_groups, where data files with identical columns share one schema_id. Then request what you need:
         section='attributes' with schema_id (each column copied whole from the EML: definition, measurementScale with
         units and domains, missing-value codes, annotations), a free-text section as plain text ('abstract', 'methods',
-        'purpose', 'intellectual_rights', 'additional_info'), 'coverage', 'people', 'project', 'entities' (every file
-        with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged:
-        call again with offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted;
-        page all its codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not
-        valid XML on its own. Documents that are not EML datasets are returned as raw XML.
+        'purpose', 'intellectual_rights', 'additional_info'; protocols, citations, data sources and other structured
+        parts are copied whole next to the text and marked in it as e.g. '[protocol 1]'; intellectual_rights also
+        returns EML 2.2 licenses), 'coverage', 'people', 'project', 'entities' (every file with its schema_id),
+        'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
+        offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted; page all its
+        codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not valid XML
+        on its own. Documents that are not EML datasets are returned as raw XML.
         Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
         cached = await documents.get(pid, lambda: client.get_text(client.object_url(pid)))
@@ -257,11 +259,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if section == "outline":
             out.update(doc.outline())
         elif section in eml.FREE_TEXT_SECTIONS:
-            section_text = doc.free_text(section)
-            if section_text is None:
+            free = doc.free_text(section)
+            if free is None:
                 raise ToolError(f"'{pid}' has no {section} section.")
-            page, nxt = eml.page_text(section_text, offset, max_chars)
-            out.update({"chars": len(section_text), "offset": offset, "next_offset": nxt, "text": page})
+            out.update(free.page(offset, max_chars))
         elif section == "coverage":
             out.update(doc.coverage())
         elif section == "people":

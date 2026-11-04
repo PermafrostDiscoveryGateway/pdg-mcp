@@ -184,3 +184,15 @@ def test_intellectual_rights_includes_licensed():
     assert both.text == "Free to use" and len(both.elements["licenses"]) == 1
     assert eml.parse(f"<eml><dataset>{lic}</dataset></eml>")[1].outline()["license"] == \
         "CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/)"
+
+
+def test_reference_cycles_in_copied_elements_stop():
+    m = methods_of('<para>See <citation id="c1"><para>as in <citation><references>c1</references></citation>'
+                   '</para></citation>.</para>')
+    assert m.text == "See [citation 1]."
+    assert {"ref": "citation 2", "reference_cycle": "c1"} in m.elements["citations"]
+
+
+def test_unresolved_reference_is_flagged():
+    m = methods_of("<para>As in <citation><references>nope</references></citation>.</para>")
+    assert m.elements["citations"] == [{"ref": "citation 1", "unresolved_reference": "nope"}]

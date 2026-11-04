@@ -129,6 +129,7 @@ class _FreeTextBuilder:
         self.elements: dict[str, list[dict[str, Any]]] = {}
         self.anchors: dict[int, str] = {}  # id(item) -> the placeholder that places it in the section text
         self.owner: str | None = None  # placeholder of the top-level copy being built, if any
+        self.seen: frozenset[int] = frozenset()  # elements being copied, to stop <references> cycles
 
     def text(self, el: Any) -> str:
         parts: list[str] = []
@@ -189,23 +190,16 @@ class _FreeTextBuilder:
         return f"[{ref}]"
 
     def tree(self, el: Any) -> Any:
-        """Copy an element whole as nested dicts, following <references> and leaving out id/system/scope."""
-        el, missing = self.doc._resolve(el)
-        kids = [c for c in el if not (missing and _local(c.tag) == "references")]
-        if kids and (_mixed(el) or all(_local(c.tag) in _PROSE for c in kids)):
+        """Copy an element whole with :meth:`EMLDocument._tree`, rendering prose inside it as text."""
+        return self.doc._tree(el, self.seen, prose=self._prose)
+
+    def _prose(self, el: Any, seen: frozenset[int]) -> str:
+        # Keep the cycle guard across prose, which can hold further structured elements.
+        outer, self.seen = self.seen, seen
+        try:
             return self.text(el)
-        node: dict[str, Any] = {_local(k): v for k, v in el.attrib.items() if _local(k) not in IDENTITY_ATTRS}
-        if missing:
-            node["unresolved_reference"] = missing
-        for child in kids:
-            node.setdefault(_local(child.tag), []).append(self.tree(child))
-        node = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in node.items()}
-        text = " ".join((el.text or "").split())
-        if text:
-            if not node:
-                return text
-            node["#text"] = text
-        return node
+        finally:
+            self.seen = outer
 
 
 @dataclass
@@ -396,23 +390,29 @@ class EMLDocument:
                     })
         return units
 
-    def _tree(self, el: Any, seen: frozenset[int] = frozenset()) -> Any:
+    def _tree(self, el: Any, seen: frozenset[int] = frozenset(),
+              prose: Callable[[Any, frozenset[int]], str] | None = None) -> Any:
         """Copy an element and everything under it, shaped like the EML.
 
         Children become keys (a list when repeated), XML attributes are kept except identity ones, and
         <references> is followed at every level. A custom unit gets its unitList definition attached.
+        With ``prose``, an element holding only prose (or text mixed with elements) is rendered by it instead.
         """
         el, missing = self._resolve(el)
         if id(el) in seen:
             return {"reference_cycle": el.get("id")}
         seen = seen | {id(el)}
+        if prose is not None:
+            kids = [c for c in el if _local(c.tag) and not (missing and _local(c.tag) == "references")]
+            if kids and (_mixed(el) or all(_local(c.tag) in _PROSE for c in kids)):
+                return prose(el, seen)
         node: dict[str, Any] = {_local(k): v for k, v in el.attrib.items() if _local(k) not in IDENTITY_ATTRS}
         if missing:
             node["unresolved_reference"] = missing
         for child in el:
             tag = _local(child.tag)
             if tag and not (missing and tag == "references"):
-                node.setdefault(tag, []).append(self._tree(child, seen))
+                node.setdefault(tag, []).append(self._tree(child, seen, prose))
         node = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in node.items()}
         text = " ".join(" ".join(p.split()) for p in (el.text, *(c.tail for c in el)) if p and p.strip())
         if _local(el.tag) == "customUnit" and text in self.custom_units:

@@ -8,13 +8,21 @@ so each schema is described once. Values are copied from the document as-is; not
 from __future__ import annotations
 
 import json
+import re
+import time
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import defusedxml.ElementTree as ET
 from fastmcp.exceptions import ToolError
 
 ENTITY_TYPES = ("dataTable", "spatialRaster", "spatialVector", "storedProcedure", "view", "otherEntity")
-SECTIONS = ("outline", "methods", "coverage", "people", "project", "entities", "attributes", "annotations", "raw")
+SECTIONS = ("outline", "methods", "coverage", "people", "project", "entities", "attributes", "codes", "annotations", "raw")
+# Top-level EML resources other than <dataset>; documents describing these have no outline.
+OTHER_RESOURCES = ("citation", "software", "protocol")
+# XML attributes that identify an element rather than describe it; they differ in every copy of a schema.
+IDENTITY_ATTRS = ("id", "system", "scope")
 PEOPLE = {
     "creator": "creators",
     "contact": "contacts",
@@ -27,6 +35,8 @@ METHODS_PREVIEW_CHARS = 600
 MAX_OUTLINE_GROUPS = 25
 EXAMPLE_ENTITIES = 3
 PREVIEW_ATTRIBUTES = 12
+MAX_RAW_DATES = 10
+ISO_DATE = re.compile(r"^\d{4}(-\d{2}(-\d{2}([T ]\d{2}(:\d{2}(:\d{2}(\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?)?)?)?$")
 
 
 def _local(tag: Any) -> str:
@@ -52,6 +62,33 @@ def _compact(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v not in (None, [], {}, "")}
 
 
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _node_text(value: Any) -> str | None:
+    """Text of a node copied by ``EMLDocument._tree``: a string, or the ``#text`` of a dict."""
+    if isinstance(value, dict):
+        value = value.get("#text")
+    return value if isinstance(value, str) else None
+
+
+def _size(value: Any) -> int:
+    return len(json.dumps(value))
+
+
+def _date(el: Any) -> str | None:
+    """A beginDate/endDate/singleDateTime as ISO text, or its raw text for alternativeTimeScale."""
+    if el is None:
+        return None
+    day, clock = _text(el, "calendarDate"), _text(el, "time")
+    if day:
+        return f"{day}T{clock}" if clock else day
+    return " ".join(t.strip() for t in el.itertext() if t.strip()) or None
+
+
 def _annotation(el: Any) -> dict[str, Any]:
     prop, val = el.find("propertyURI"), el.find("valueURI")
     return _compact({
@@ -64,6 +101,67 @@ def _annotation(el: Any) -> dict[str, Any]:
 
 def _annotations(el: Any) -> list[dict[str, Any]]:
     return [_annotation(a) for a in el.findall("annotation")]
+
+
+def _tree_annotation(node: Any) -> dict[str, Any]:
+    """The same shape as :func:`_annotation`, from an annotation copied by ``EMLDocument._tree``."""
+    def part(v: Any) -> tuple[str | None, str | None]:
+        return (v.get("label"), v.get("#text")) if isinstance(v, dict) else (None, v)
+    (pl, pu), (vl, vu) = part(node.get("propertyURI")), part(node.get("valueURI"))
+    return _compact({"property": pl, "value": vl, "property_uri": pu, "value_uri": vu})
+
+
+def attribute_name(attr: dict[str, Any]) -> str | None:
+    return _node_text(attr.get("attributeName"))
+
+
+def _code_lists(node: Any) -> list[dict[str, Any]]:
+    """Every dict in a copied attribute that holds ``codeDefinition`` entries, in document order."""
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        if "codeDefinition" in node:
+            found.append(node)
+        for k, v in node.items():
+            if k != "codeDefinition":
+                found += _code_lists(v)
+    elif isinstance(node, list):
+        for v in node:
+            found += _code_lists(v)
+    return found
+
+
+def attribute_codes(attr: dict[str, Any]) -> list[Any]:
+    """All enumerated codes of an attribute, across every enumeratedDomain."""
+    return [c for holder in _code_lists(attr) for c in _as_list(holder["codeDefinition"])]
+
+
+def fit_codes(attr: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    """Return ``attr`` unchanged if it fits in ``max_chars``; otherwise a copy that keeps only the leading
+    enumerated codes that fit, with ``codeDefinition_omitted`` counting the rest (page them with section='codes')."""
+    if _size(attr) <= max_chars:
+        return attr
+    attr = json.loads(json.dumps(attr))
+    holders = _code_lists(attr)
+    lists = [_as_list(h["codeDefinition"]) for h in holders]
+    total = sum(len(codes) for codes in lists)
+    if not total:
+        return attr
+    for h in holders:
+        h["codeDefinition"] = []
+    budget = max_chars - _size(attr) - len('"codeDefinition_omitted": 1000000, ')
+    kept, full = 0, True
+    for h, codes in zip(holders, lists):
+        if not full:
+            break
+        for code in codes:
+            budget -= _size(code) + 2
+            if budget < 0:
+                full = False
+                break
+            h["codeDefinition"].append(code)
+            kept += 1
+    attr["codeDefinition_omitted"] = total - kept
+    return attr
 
 
 def _person(el: Any) -> dict[str, Any]:
@@ -97,18 +195,24 @@ class EMLDocument:
             raise ToolError("EML document has no <dataset> (it may describe software or a protocol); use section='raw'.")
         self._ids = {el.get("id"): el for el in root.iter() if el.get("id")}
         self.custom_units = self._custom_units()
+        self.unresolved: set[str] = set()
         self.entities: list[dict[str, Any]] = []
         self.schemas: dict[str, list[dict[str, Any]]] = {}
         self._group_entities()
 
     # -- entities and schemas ---------------------------------------------------------------------
 
-    def _resolve(self, el: Any) -> Any:
-        """Follow an EML <references> to the element it points at."""
-        ref = el.find("references") if el is not None else None
-        if ref is not None and ref.text:
-            return self._ids.get(ref.text.strip(), el)
-        return el
+    def _resolve(self, el: Any) -> tuple[Any, str | None]:
+        """Follow an EML <references> to the element it points at. Returns (element, unresolved id)."""
+        ref = el.find("references")
+        rid = (ref.text or "").strip() if ref is not None else ""
+        if not rid:
+            return el, None
+        target = self._ids.get(rid)
+        if target is None:
+            self.unresolved.add(rid)
+            return el, rid
+        return target, None
 
     def _custom_units(self) -> dict[str, dict[str, Any]]:
         units: dict[str, dict[str, Any]] = {}
@@ -122,43 +226,32 @@ class EMLDocument:
                     })
         return units
 
-    def _attribute(self, el: Any) -> dict[str, Any]:
-        el = self._resolve(el)
-        out: dict[str, Any] = {
-            "name": _text(el, "attributeName"),
-            "label": _text(el, "attributeLabel"),
-            "definition": _text(el, "attributeDefinition"),
-            "storage_type": _text(el, "storageType"),
-        }
-        ms = el.find("measurementScale")
-        scale = next(iter(ms), None) if ms is not None else None
-        if scale is not None:
-            out["scale"] = _local(scale.tag)
-            if (std := _text(scale, "unit/standardUnit")) is not None:
-                out["unit"] = std
-            elif (custom := _text(scale, "unit/customUnit")) is not None:
-                out["unit"] = custom
-                out["unit_source"] = "custom"
-                out["unit_definition"] = self.custom_units.get(custom)
-            out["number_type"] = _text(scale, "numericDomain/numberType")
-            bounds = scale.find("numericDomain/bounds")
-            if bounds is not None:
-                out["bounds"] = _compact({"minimum": _text(bounds, "minimum"), "maximum": _text(bounds, "maximum")})
-            out["precision"] = _text(scale, "precision")
-            out["date_format"] = _text(scale, "formatString")
-            out["date_precision"] = _text(scale, "dateTimePrecision")
-            out["text_domain"] = _text(scale, "nonNumericDomain/textDomain/definition")
-            out["pattern"] = _texts(scale, "nonNumericDomain/textDomain/pattern")
-            out["codes"] = [
-                _compact({"code": _text(cd, "code"), "definition": _text(cd, "definition")})
-                for cd in scale.findall("nonNumericDomain/enumeratedDomain/codeDefinition")
-            ]
-        out["missing_values"] = [
-            _compact({"code": _text(m, "code"), "explanation": _text(m, "codeExplanation")})
-            for m in el.findall("missingValueCode")
-        ]
-        out["annotations"] = _annotations(el)
-        return _compact(out)
+    def _tree(self, el: Any, seen: frozenset[int] = frozenset()) -> Any:
+        """Copy an element and everything under it, shaped like the EML.
+
+        Children become keys (a list when repeated), XML attributes are kept except identity ones, and
+        <references> is followed at every level. A custom unit gets its unitList definition attached.
+        """
+        el, missing = self._resolve(el)
+        if id(el) in seen:
+            return {"reference_cycle": el.get("id")}
+        seen = seen | {id(el)}
+        node: dict[str, Any] = {_local(k): v for k, v in el.attrib.items() if _local(k) not in IDENTITY_ATTRS}
+        if missing:
+            node["unresolved_reference"] = missing
+        for child in el:
+            tag = _local(child.tag)
+            if tag and not (missing and tag == "references"):
+                node.setdefault(tag, []).append(self._tree(child, seen))
+        node = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in node.items()}
+        text = " ".join(" ".join(p.split()) for p in (el.text, *(c.tail for c in el)) if p and p.strip())
+        if _local(el.tag) == "customUnit" and text in self.custom_units:
+            node["unit_definition"] = self.custom_units[text]
+        if text:
+            if not node:
+                return text
+            node["#text"] = text
+        return node
 
     def _group_entities(self) -> None:
         keys: dict[str, str] = {}
@@ -166,8 +259,10 @@ class EMLDocument:
             kind = _local(el.tag)
             if kind not in ENTITY_TYPES:
                 continue
-            attr_list = self._resolve(el.find("attributeList"))
-            attrs = [self._attribute(a) for a in attr_list.findall("attribute")] if attr_list is not None else []
+            attr_list, missing = el.find("attributeList"), None
+            if attr_list is not None:
+                attr_list, missing = self._resolve(attr_list)
+            attrs = [self._tree(a) for a in attr_list.findall("attribute")] if attr_list is not None else []
             schema_id = None
             if attrs:
                 key = json.dumps(attrs, sort_keys=True)
@@ -190,6 +285,7 @@ class EMLDocument:
                 "url": _text(el, "physical/distribution/online/url"),
                 "schema_id": schema_id,
                 "n_attributes": len(attrs),
+                "unresolved_reference": missing,
                 "annotations": _annotations(el),
             }))
 
@@ -206,7 +302,7 @@ class EMLDocument:
                 g["example_entities"].append(e.get("name") or e.get("file") or f"#{e['index']}")
         for g in groups.values():
             if g["schema_id"]:
-                names = [a.get("name") for a in self.schemas[g["schema_id"]]]
+                names = [attribute_name(a) for a in self.schemas[g["schema_id"]]]
                 g["attribute_names"] = names[:PREVIEW_ATTRIBUTES] + ([f"... {len(names) - PREVIEW_ATTRIBUTES} more"] if len(names) > PREVIEW_ATTRIBUTES else [])
         return [_compact(g) for g in groups.values()]
 
@@ -230,6 +326,15 @@ class EMLDocument:
 
     def entities_with_schema(self, schema_id: str) -> list[dict[str, Any]]:
         return [e for e in self.entities if e.get("schema_id") == schema_id]
+
+    def find_attribute(self, schema_id: str, attribute: str | None) -> dict[str, Any]:
+        attrs = self.schemas[schema_id]
+        if not attribute:
+            raise ToolError("section='codes' needs attribute (a name or index from section='attributes').")
+        for i, a in enumerate(attrs):
+            if attribute in (attribute_name(a), str(i)):
+                return a
+        raise ToolError(f"Schema {schema_id} has no attribute '{attribute}'. Use section='attributes' to list them.")
 
     # -- sections ---------------------------------------------------------------------------------
 
@@ -256,9 +361,11 @@ class EMLDocument:
                 }))
             for t in cov.findall("temporalCoverage"):
                 for d in t.findall("singleDateTime"):
-                    temporal.append({"date": _plain(d)})
+                    if date := _date(d):
+                        temporal.append({"date": date})
                 for r in t.findall("rangeOfDates"):
-                    temporal.append(_compact({"begin": _text(r, "beginDate"), "end": _text(r, "endDate")}))
+                    if rng := _compact({"begin": _date(r.find("beginDate")), "end": _date(r.find("endDate"))}):
+                        temporal.append(rng)
             for tc in cov.iter("taxonomicClassification"):
                 taxa.append(_compact({
                     "rank": _text(tc, "taxonRankName"), "value": _text(tc, "taxonRankValue"),
@@ -284,9 +391,16 @@ class EMLDocument:
                 "north": max(b["north"] for b in nums), "south": min(b["south"] for b in nums),
             }
         out["places"] = [g["description"] for g in geo[:5] if "description" in g]
-        dates = [d for t in cov.get("temporal", []) for d in t.values()]
+        dates = [d for t in cov.get("temporal", []) for d in t.values() if d]
+        # Only ISO dates compare correctly as text; anything else (e.g. geologic time scales) is listed as-is.
+        iso = sorted((d for d in dates if ISO_DATE.match(d)), key=lambda d: d.replace(" ", "T"))
+        other = [d for d in dates if not ISO_DATE.match(d)]
         if dates:
-            out["temporal"] = {"begin": min(dates), "end": max(dates)}
+            out["temporal"] = _compact({
+                "begin": iso[0] if iso else None, "end": iso[-1] if iso else None,
+                "other_values": other[:MAX_RAW_DATES],
+                "other_values_omitted": len(other) - MAX_RAW_DATES if len(other) > MAX_RAW_DATES else None,
+            })
         if taxa := cov.get("taxonomic"):
             out["n_taxa"] = len(taxa)
         return _compact(out)
@@ -324,7 +438,10 @@ class EMLDocument:
                 if len(s["example_entities"]) < EXAMPLE_ENTITIES:
                     s["example_entities"].append(e.get("name"))
         attributes = {
-            sid: [{"attribute": a.get("name"), "annotations": a["annotations"]} for a in attrs if a.get("annotations")]
+            sid: [
+                {"attribute": attribute_name(a), "annotations": [_tree_annotation(x) for x in _as_list(a["annotation"])]}
+                for a in attrs if a.get("annotation")
+            ]
             for sid, attrs in self.schemas.items()
         }
         # EML 2.2 can also annotate any element by id from a top-level <annotations> block.
@@ -366,29 +483,62 @@ class EMLDocument:
             "n_entities": len(self.entities),
             "n_schemas": len(self.schemas),
             "entity_groups": groups[:MAX_OUTLINE_GROUPS],
+            "unresolved_references": sorted(self.unresolved),
         })
         if len(groups) > MAX_OUTLINE_GROUPS:
             out["entity_groups_omitted"] = len(groups) - MAX_OUTLINE_GROUPS
         return out
 
 
-def parse(xml_text: str) -> EMLDocument | None:
-    """Parse an EML document, or return None if the XML is not EML (e.g. ISO 19115)."""
+def parse(xml_text: str) -> tuple[str, EMLDocument | None]:
+    """Parse a metadata document into (kind, document). ``document`` is None unless it is an EML dataset;
+    ``kind`` then describes it, e.g. 'MI_Metadata' (ISO 19115) or 'eml/software'."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
         raise ToolError(f"Metadata document is not well-formed XML: {exc}; use section='raw'.") from exc
-    if _local(root.tag) != "eml":
-        return None
-    return EMLDocument(root)
+    kind = _local(root.tag)
+    if kind != "eml":
+        return kind, None
+    if root.find("dataset") is None:
+        other = next((r for r in OTHER_RESOURCES if root.find(r) is not None), "no dataset")
+        return f"eml/{other}", None
+    return "eml", EMLDocument(root)
 
 
-def root_name(xml_text: str) -> str:
-    """Local name of the root element, for describing non-EML documents."""
-    try:
-        return _local(ET.fromstring(xml_text).tag)
-    except ET.ParseError:
-        return "unparseable"
+class CachedDocument:
+    """A fetched metadata document, parsed on first use."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self._parsed: tuple[str, EMLDocument | None] | None = None
+
+    def parsed(self) -> tuple[str, EMLDocument | None]:
+        if self._parsed is None:
+            self._parsed = parse(self.text)
+        return self._parsed
+
+
+class DocumentCache:
+    """The last few metadata documents by PID, so paging through one does not refetch and reparse it."""
+
+    def __init__(self, max_entries: int = 4, ttl: float = 600.0) -> None:
+        self.max_entries = max_entries
+        self.ttl = ttl
+        self._entries: OrderedDict[str, tuple[float, CachedDocument]] = OrderedDict()
+
+    async def get(self, pid: str, fetch: Callable[[], Awaitable[str]]) -> CachedDocument:
+        now = time.monotonic()
+        hit = self._entries.get(pid)
+        if hit and now - hit[0] < self.ttl:
+            self._entries.move_to_end(pid)
+            return hit[1]
+        doc = CachedDocument(await fetch())
+        self._entries[pid] = (now, doc)
+        self._entries.move_to_end(pid)
+        while len(self._entries) > self.max_entries:
+            self._entries.popitem(last=False)
+        return doc
 
 
 def page_text(text: str, offset: int, max_chars: int) -> tuple[str, int | None]:
@@ -403,9 +553,9 @@ def page_items(items: list[Any], offset: int, max_chars: int) -> tuple[list[Any]
     """Take items from ``offset`` until their JSON size reaches ``max_chars`` (always at least one)."""
     if offset and offset >= len(items):
         raise ToolError(f"offset {offset} is past the end ({len(items)} items).")
-    page, used = [], 0
+    page, used = [], 2  # the list's brackets
     for item in items[offset:]:
-        size = len(json.dumps(item))
+        size = _size(item) + (2 if page else 0)  # and the ", " separating it from the previous item
         if page and used + size > max_chars:
             break
         page.append(item)

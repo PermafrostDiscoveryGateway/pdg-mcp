@@ -2,12 +2,11 @@ import base64
 
 import httpx
 import pytest
+from conftest import MN
+from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from fastmcp import Client
-
 from arcticdata_mcp.server import create_server
-from conftest import MN
 
 SYSMETA = """<?xml version="1.0"?>
 <ns3:systemMetadata xmlns:ns3="http://ns.dataone.org/service/types/v2.0">

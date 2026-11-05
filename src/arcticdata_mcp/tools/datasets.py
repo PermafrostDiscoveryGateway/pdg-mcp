@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import re
-import defusedxml.ElementTree as ET
 from html.parser import HTMLParser
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
+import defusedxml.ElementTree as ET
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field

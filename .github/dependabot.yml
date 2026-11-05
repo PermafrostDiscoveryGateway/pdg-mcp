@@ -1,5 +1,4 @@
 version: 2
-# `uv` is left out for now: its lockfile updates would conflict with open pull requests that also change uv.lock.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -12,3 +11,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Updates uv.lock (and the pyproject.toml constraints). Grouped and capped so the first run doesn't open a pile of
+  # PRs; expect uv.lock conflicts with open PRs, which `uv lock` resolves. Live tests don't run on these PRs, so check
+  # that fastmcp bumps still work.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      python-dependencies:
+        patterns: ["*"]

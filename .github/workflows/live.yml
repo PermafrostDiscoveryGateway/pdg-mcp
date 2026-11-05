@@ -1,0 +1,35 @@
+name: live
+# Runs the tests marked `live`, which call the real arcticdata.io API. Kept off pull requests so we don't add load to ADC.
+# Scheduled workflows only run from the default branch, use UTC, and are disabled by GitHub after 60 days without
+# repository activity (re-enable from the Actions tab).
+on:
+  schedule:
+    - cron: "17 14 * * 1" # Mondays 14:17 UTC; off the hour to avoid scheduling delays
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest -m live
+      # Open one issue per outage: skip if a previous failure's issue is still open.
+      - if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Live ADC check failed in:title" --json number --jq length)
+          if [ "$open" = "0" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Live ADC check failed ($(date -u +%F))" \
+              --body "Scheduled live tests failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            echo "An open 'Live ADC check failed' issue already exists; not opening another."
+          fi

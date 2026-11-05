@@ -1,0 +1,14 @@
+version: 2
+# `uv` is left out for now: its lockfile updates would conflict with open pull requests that also change uv.lock.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

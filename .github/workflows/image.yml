@@ -8,7 +8,13 @@ env:
   HUB_IMAGE: hub.ncsa.illinois.edu/pdg/pdg-mcp
   GHCR_IMAGE: ghcr.io/permafrostdiscoverygateway/pdg-mcp
 jobs:
+  # Tests and chart checks (ci.yml). The image is only built and pushed if they pass.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
   build:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read

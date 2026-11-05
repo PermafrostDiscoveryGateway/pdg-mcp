@@ -1,0 +1,26 @@
+name: ci
+# Reusable workflow: called from image.yml so that the image build can `needs:` it. It has no triggers of its own,
+# which keeps tests from running twice on a pull request.
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      # Live tests (-m live) are deselected by pyproject.toml; they run weekly in live.yml instead.
+      - run: uv run pytest
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: helm lint charts/pdg-mcp
+      - run: helm template charts/pdg-mcp > /dev/null

@@ -85,7 +85,13 @@ def parse_resource_map(xml_text: str) -> dict[str, Any]:
             elif tag == f"{{{NS['cito']}}}documents" and obj:
                 documents.setdefault(_pid_from_uri(subj), []).append(_pid_from_uri(obj))
             elif tag.startswith(f"{{{NS['prov']}}}") and obj:
-                prov.append({"subject": _pid_from_uri(subj), "predicate": "prov:" + tag.split("}")[1], "object": _pid_from_uri(obj)})
+                prov.append(
+                    {
+                        "subject": _pid_from_uri(subj),
+                        "predicate": "prov:" + tag.split("}")[1],
+                        "object": _pid_from_uri(obj),
+                    }
+                )
     metadata = sorted(documents)
     return {
         "aggregation": aggregation,
@@ -119,7 +125,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset"})
     async def get_dataset_details(
         pid: Pid,
-        fields: Annotated[str | None, Field(description="Optional comma-separated Solr fields to return (default: all indexed fields).")] = None,
+        fields: Annotated[
+            str | None,
+            Field(description="Optional comma-separated Solr fields to return (default: all indexed fields)."),
+        ] = None,
     ) -> dict[str, Any]:
         """Return the full indexed metadata record for a dataset (title, abstract, authors, coverage, funding,
         attributes, license, related packages, ...).
@@ -135,7 +144,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI) or resource-map PID of the dataset.")],
         rows: Rows = 100,
         start: Start = 0,
-        file_name: Annotated[str | None, Field(description="Optional file-name filter (wildcards allowed, e.g. '*.csv').")] = None,
+        file_name: Annotated[
+            str | None, Field(description="Optional file-name filter (wildcards allowed, e.g. '*.csv').")
+        ] = None,
     ) -> dict[str, Any]:
         """List the data files in a dataset package: file name, size, format, checksum and direct download URL.
 
@@ -160,7 +171,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "metadata"})
     async def get_metadata_document(
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI).")],
-        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Truncate the XML after this many characters.")] = 200_000,
+        max_chars: Annotated[
+            int, Field(ge=1000, le=2_000_000, description="Truncate the XML after this many characters.")
+        ] = 200_000,
     ) -> dict[str, Any]:
         """Fetch the raw science-metadata document (usually EML XML, sometimes ISO 19115) for a dataset.
 
@@ -177,7 +190,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "metadata"})
     async def get_metadata_html(
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI).")],
-        max_chars: Annotated[int, Field(ge=1000, le=500_000, description="Truncate after this many characters.")] = 50_000,
+        max_chars: Annotated[
+            int, Field(ge=1000, le=500_000, description="Truncate after this many characters.")
+        ] = 50_000,
     ) -> dict[str, Any]:
         """Render a dataset's metadata through the MNView 'metacatui' view (GET /views/metacatui/{pid}),
         returned as readable plain text. A human-friendly alternative to the raw XML.
@@ -186,7 +201,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         parser = _TextExtractor()
         parser.feed(html)
         text = parser.text()
-        return {"pid": pid, "truncated": len(text) > max_chars, "text": text[:max_chars], "landing_url": client.landing_url(pid)}
+        return {
+            "pid": pid,
+            "truncated": len(text) > max_chars,
+            "text": text[:max_chars],
+            "landing_url": client.landing_url(pid),
+        }
 
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "package"})
     async def get_resource_map(
@@ -207,7 +227,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "package", "download"})
     async def get_package_download_info(
         pid: Annotated[str, Field(description="Resource map PID, or the dataset's metadata PID.")],
-        save_to_server: Annotated[bool, Field(description="Stream the zip to the server's download directory (only if enabled in config).")] = False,
+        save_to_server: Annotated[
+            bool, Field(description="Stream the zip to the server's download directory (only if enabled in config).")
+        ] = False,
     ) -> dict[str, Any]:
         """Get the URL to download an entire dataset package as a BagIt zip (MNPackage GET /packages),
         plus the estimated total size. Optionally save the zip on the MCP server host.
@@ -215,10 +237,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Packages can be very large; check the size before downloading.
         """
         rm = await resource_map_pid(pid)
-        data = await client.solr([
-            ("q", f"resourceMap:{solr.phrase(rm)}"), ("fl", "size"), ("rows", 0),
-            ("stats", "true"), ("stats.field", "size"),
-        ])
+        data = await client.solr(
+            [
+                ("q", f"resourceMap:{solr.phrase(rm)}"),
+                ("fl", "size"),
+                ("rows", 0),
+                ("stats", "true"),
+                ("stats.field", "size"),
+            ]
+        )
         stats = data.get("stats", {}).get("stats_fields", {}).get("size") or {}
         url = client.mn(f"packages/{BAGIT_FORMAT}/{quote_pid(rm)}")
         info: dict[str, Any] = {
@@ -276,10 +303,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         and identify the latest version.
         """
         fl = "id,seriesId,obsoletes,obsoletedBy,dateUploaded,title,formatType"
-        data = await client.solr([
-            ("q", f"id:{solr.phrase(pid)} OR seriesId:{solr.phrase(pid)}"),
-            ("fl", fl), ("rows", 100), ("sort", "dateUploaded asc"),
-        ])
+        data = await client.solr(
+            [
+                ("q", f"id:{solr.phrase(pid)} OR seriesId:{solr.phrase(pid)}"),
+                ("fl", fl),
+                ("rows", 100),
+                ("sort", "dateUploaded asc"),
+            ]
+        )
         docs = {d["id"]: d for d in data.get("response", {}).get("docs", [])}
         if not docs:
             raise ToolError(f"No public object with id or seriesId '{pid}'")

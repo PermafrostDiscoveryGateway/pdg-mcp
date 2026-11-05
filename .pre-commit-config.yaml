@@ -1,0 +1,9 @@
+# Optional local hooks: `uvx pre-commit install` (or `pip install pre-commit && pre-commit install`).
+# CI runs the same ruff checks, so the hooks only catch problems earlier.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

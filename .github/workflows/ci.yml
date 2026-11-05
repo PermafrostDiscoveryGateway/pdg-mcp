@@ -18,17 +18,18 @@ jobs:
       - run: uv sync --frozen
       # Live tests (-m live) are deselected by pyproject.toml; they run weekly in live.yml instead.
       - run: uv run pytest
-  # Report-only: findings show up in the logs and as annotations, but never fail the workflow or block the image build.
-  # Config is in ruff.toml. Make these steps blocking (drop continue-on-error) once the code has been reformatted.
+  # Config is in ruff.toml; the ruff version is pinned by uv.lock (and by rev in .pre-commit-config.yaml).
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff@0.17.4 check --output-format=github .
-        continue-on-error: true
-      - run: uvx ruff@0.17.4 format --check --diff .
-        continue-on-error: true
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check --output-format=github .
+      - run: uv run ruff format --check --diff .
   chart:
     runs-on: ubuntu-latest
     steps:

@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -100,7 +101,7 @@ def test_attributes_are_copied_whole(doc):
     assert time["missingValueCode"] == {"code": "-999", "codeExplanation": "No data"}
     assert time["annotation"]["valueURI"] == {"label": "time of measurement", "#text": "http://purl.dataone.org/odo/ECSO_00002040"}
     assert refl["measurementScale"]["ratio"]["unit"]["customUnit"] == {
-        "#text": "dBZ", "unit_definition": {"name": "dBZ", "unit_type": "dimensionless", "description": "Decibels relative to Z"},
+        "#text": "dBZ", "unit_definition": {"name": "dBZ", "unitType": "dimensionless", "description": "Decibels relative to Z"},
     }
     [site] = doc.schemas["S2"]
     assert eml.attribute_codes(site) == [{"code": "SUM", "definition": "Summit"}]
@@ -197,11 +198,11 @@ def test_find_schema(doc):
 
 def test_sections(doc):
     people = doc.people()
-    assert people["creators"][0]["user_id"] == ["https://orcid.org/0000-0000-0000-0001"]
-    assert people["contacts"] == [{"organization": "NOAA", "email": ["x@noaa.gov"]}]
+    assert people["creators"][0]["userId"] == {"directory": "https://orcid.org", "#text": "https://orcid.org/0000-0000-0000-0001"}
+    assert people["contacts"] == [{"organizationName": "NOAA", "electronicMailAddress": "x@noaa.gov"}]
     [project] = doc.project()
-    assert project["awards"] == [{"funder": "National Science Foundation", "award_number": "1303879", "title": "ICECAPS award"}]
-    assert project["personnel"] == [{"name": "Neely", "role": "coPrincipalInvestigator"}]
+    assert project["award"] == {"funderName": "National Science Foundation", "awardNumber": "1303879", "title": "ICECAPS award"}
+    assert project["personnel"] == {"individualName": {"surName": "Neely"}, "role": "coPrincipalInvestigator"}
     anns = doc.annotations()
     assert [a["attribute"] for a in anns["attributes"]["S1"]] == ["time", "reflectivity"]
     assert anns["dataset"][0]["property"] == "theme"
@@ -263,8 +264,10 @@ async def test_tool_entities_and_methods(client, mock_api):
     ents = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "entities"})).structured_content
     assert ents["n_entities"] == 6 and ents["next_offset"] is None
     assert ents["entities"][0] == {
-        "index": 0, "type": "dataTable", "name": "radar.20220101.nc", "id": "t1", "description": "Day 1",
-        "format": "netCDF-4", "size": "100", "schema_id": "S1", "n_attributes": 2,
+        "index": 0, "type": "dataTable", "id": "t1", "schema_id": "S1", "n_attributes": 2,
+        "entityName": "radar.20220101.nc", "entityDescription": "Day 1",
+        "physical": {"objectName": "radar.20220101.nc", "size": "100",
+                     "dataFormat": {"externallyDefinedFormat": {"formatName": "netCDF-4"}}},
     }
     first = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "max_chars": 1000})).structured_content
     rest = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "offset": 1000})).structured_content
@@ -318,24 +321,92 @@ async def test_tool_fetches_each_document_once_while_paging(client, mock_api):
     assert route.call_count == 1
 
 
-def test_document_cache_evicts_oldest_and_expired():
-    import asyncio
+def fetcher(log, text):
+    async def fetch():
+        log.append(text)
+        await asyncio.sleep(0)
+        return text
+    return fetch
 
-    async def run():
-        cache, fetched = eml.DocumentCache(max_entries=2, ttl=60), []
 
-        def fetcher(pid):
-            async def fetch():
-                fetched.append(pid)
-                return pid
-            return fetch
-        for pid in ("a", "b", "a", "c", "b"):
-            await cache.get(pid, fetcher(pid))
-        assert fetched == ["a", "b", "c", "b"]  # "b" was evicted when "c" arrived
-        cache.ttl = 0
-        await cache.get("b", fetcher("b"))
-        assert fetched[-1] == "b" and len(fetched) == 5
-    asyncio.run(run())
+async def test_document_cache_is_bounded_by_size():
+    cache, fetched = eml.DocumentCache(max_chars=10, ttl=60), []
+    for pid in ("aaaa", "bbbb", "aaaa", "cccc", "bbbb"):
+        await cache.get(pid, fetcher(fetched, pid))
+    assert fetched == ["aaaa", "bbbb", "cccc", "bbbb"]  # "bbbb" was evicted to make room for "cccc"
+    assert cache.cached_chars <= 10
+    big = "x" * 11
+    await cache.get(big, fetcher(fetched, big))
+    await cache.get(big, fetcher(fetched, big))
+    assert fetched.count(big) == 2 and big not in cache._entries  # larger than the budget: never cached
+    cache.ttl = 0
+    await cache.get("cccc", fetcher(fetched, "cccc"))
+    assert fetched[-1] == "cccc"
+
+
+async def test_document_cache_shares_one_download_and_one_parse():
+    cache, fetched = eml.DocumentCache(), []
+    docs = await asyncio.gather(*(cache.get(PID, fetcher(fetched, EML)) for _ in range(3)))
+    assert fetched == [EML] and docs[0] is docs[1] is docs[2]
+    calls = []
+    real_parse = eml.parse
+
+    def counting_parse(text):
+        calls.append(1)
+        return real_parse(text)
+    eml.parse = counting_parse
+    try:
+        results = await asyncio.gather(*(docs[0].parsed() for _ in range(3)))
+    finally:
+        eml.parse = real_parse
+    assert len(calls) == 1 and results[0] is results[1] is results[2] and results[0][0] == "eml"
+
+
+async def test_document_cache_failed_fetch_is_not_cached():
+    cache, attempts = eml.DocumentCache(), []
+
+    async def failing():
+        attempts.append(1)
+        raise ToolError("down")
+    for _ in range(2):
+        with pytest.raises(ToolError, match="down"):
+            await cache.get(PID, failing)
+    assert len(attempts) == 2
+
+
+def test_values_beyond_attributes_are_copied_whole():
+    d = load("""<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title>
+      <creator><individualName><surName>Doe</surName></individualName><phone phonetype="voice">555-0100</phone>
+        <userId directory="https://orcid.org">0000-0001</userId></creator>
+      <keywordSet><keyword keywordType="place">Utqiagvik</keyword><keywordThesaurus>GCMD</keywordThesaurus></keywordSet>
+      <distribution><online><url function="information">https://example.org/project</url></online></distribution>
+      <project><title>P</title><personnel><individualName><surName>Roe</surName></individualName><phone>555-0101</phone>
+        <role>PI</role></personnel></project>
+      <otherEntity id="e1"><entityName>a.zip</entityName>
+        <physical><objectName>a_v2.zip</objectName><size unit="bytes">42</size>
+          <authentication method="MD5">abc123</authentication>
+          <distribution><online><url function="download">https://example.org/a.zip</url></online></distribution></physical>
+        <entityType>application/zip</entityType></otherEntity>
+      <dataTable><entityName>t</entityName><attributeList><attribute><attributeName>x</attributeName>
+        <measurementScale><ratio><unit><customUnit>dBZ</customUnit></unit></ratio></measurementScale></attribute></attributeList></dataTable>
+      </dataset><additionalMetadata><metadata><unitList>
+        <unit id="dBZ" name="dBZ" abbreviation="dBZ" unitType="dimensionless"/></unitList></metadata></additionalMetadata></eml:eml>""")
+    people = d.people()["creators"][0]
+    assert people["phone"] == {"phonetype": "voice", "#text": "555-0100"}
+    assert people["userId"] == {"directory": "https://orcid.org", "#text": "0000-0001"}
+    assert d.project()[0]["personnel"]["phone"] == "555-0101"
+    o = d.outline()
+    assert o["keyword_sets"] == [{"keyword": {"keywordType": "place", "#text": "Utqiagvik"}, "keywordThesaurus": "GCMD"}]
+    assert o["distribution"] == [{"online": {"url": {"function": "information", "#text": "https://example.org/project"}}}]
+    ent = d.entities[0]
+    assert ent["entityType"] == "application/zip" and ent["id"] == "e1"
+    assert ent["physical"]["size"] == {"unit": "bytes", "#text": "42"}
+    assert ent["physical"]["authentication"] == {"method": "MD5", "#text": "abc123"}
+    assert ent["physical"]["distribution"]["online"]["url"]["function"] == "download"
+    assert d.find_schema(None, "t") == "S1" and eml.entity_file(ent) == "a_v2.zip"
+    assert "attributeList" not in d.entities[1]
+    [attr] = d.schemas["S1"]
+    assert attr["measurementScale"]["ratio"]["unit"]["customUnit"]["unit_definition"]["abbreviation"] == "dBZ"
 
 
 FIELD_LIST = """<queryEngineDescription><name>solr</name>

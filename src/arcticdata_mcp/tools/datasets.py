@@ -147,7 +147,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     client = ctx.client
     settings = ctx.settings
     index_fields = IndexFields(client)
-    documents = eml.DocumentCache()
+    documents = eml.DocumentCache(max_chars=settings.metadata.cache_max_chars, ttl=settings.metadata.cache_ttl)
 
     async def solr_doc(pid: str, fl: str = "*") -> dict[str, Any]:
         data = await client.solr([("q", f"id:{solr.phrase(pid)}"), ("fl", fl), ("rows", 1)])
@@ -243,7 +243,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         cached = await documents.get(pid, lambda: client.get_text(client.object_url(pid)))
         text = cached.text
         out: dict[str, Any] = {"pid": pid, "section": section, "document_chars": len(text)}
-        kind, doc = cached.parsed() if section != "raw" else ("", None)
+        kind, doc = await cached.parsed() if section != "raw" else ("", None)
         if doc is None and section not in ("raw", "outline"):
             raise ToolError(f"Sections are only available for EML datasets; this document is <{kind}>. Use section='raw'.")
         if doc is None:
@@ -282,7 +282,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             out.update({
                 "schema_id": sid,
                 "n_entities": len(used_by),
-                "example_entities": [e.get("name") for e in used_by[:eml.EXAMPLE_ENTITIES]],
+                "example_entities": [eml.entity_name(e) for e in used_by[:eml.EXAMPLE_ENTITIES]],
                 "n_attributes": len(attrs),
                 "offset": offset,
                 "next_offset": nxt,

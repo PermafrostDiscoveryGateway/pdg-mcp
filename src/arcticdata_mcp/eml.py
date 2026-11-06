@@ -7,6 +7,7 @@ so each schema is described once. Values are copied from the document as-is; not
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -115,6 +116,16 @@ def attribute_name(attr: dict[str, Any]) -> str | None:
     return _node_text(attr.get("attributeName"))
 
 
+def entity_name(entity: dict[str, Any]) -> str | None:
+    return _node_text(entity.get("entityName"))
+
+
+def entity_file(entity: dict[str, Any]) -> str | None:
+    """The objectName of an entity's first <physical>."""
+    physical = _as_list(entity.get("physical"))
+    return _node_text(physical[0].get("objectName")) if physical and isinstance(physical[0], dict) else None
+
+
 def _code_lists(node: Any) -> list[dict[str, Any]]:
     """Every dict in a copied attribute that holds ``codeDefinition`` entries, in document order."""
     found: list[dict[str, Any]] = []
@@ -164,25 +175,11 @@ def fit_codes(attr: dict[str, Any], max_chars: int) -> dict[str, Any]:
     return attr
 
 
-def _person(el: Any) -> dict[str, Any]:
+def _display_name(el: Any) -> str | None:
+    """A person's name, else their organization or position, for the outline."""
     given = " ".join(_texts(el, "individualName/givenName"))
     name = " ".join(x for x in (_text(el, "individualName/salutation"), given, _text(el, "individualName/surName")) if x)
-    address = el.find("address")
-    return _compact({
-        "name": name or None,
-        "organization": _text(el, "organizationName"),
-        "position": _text(el, "positionName"),
-        "role": _text(el, "role"),
-        "email": _texts(el, "electronicMailAddress"),
-        "user_id": _texts(el, "userId"),
-        "online_url": _texts(el, "onlineUrl"),
-        "address": ", ".join(_plain(c) or "" for c in address if _plain(c)) if address is not None else None,
-    })
-
-
-def _display_name(el: Any) -> str | None:
-    p = _person(el)
-    return p.get("name") or p.get("organization") or p.get("position")
+    return name or _text(el, "organizationName") or _text(el, "positionName")
 
 
 class EMLDocument:
@@ -194,8 +191,9 @@ class EMLDocument:
         if self.dataset is None:
             raise ToolError("EML document has no <dataset> (it may describe software or a protocol); use section='raw'.")
         self._ids = {el.get("id"): el for el in root.iter() if el.get("id")}
-        self.custom_units = self._custom_units()
         self.unresolved: set[str] = set()
+        self.custom_units: dict[str, Any] = {}
+        self.custom_units = self._custom_units()
         self.entities: list[dict[str, Any]] = []
         self.schemas: dict[str, list[dict[str, Any]]] = {}
         self._group_entities()
@@ -214,23 +212,20 @@ class EMLDocument:
             return el, rid
         return target, None
 
-    def _custom_units(self) -> dict[str, dict[str, Any]]:
-        units: dict[str, dict[str, Any]] = {}
-        for am in self.root.findall("additionalMetadata"):
-            for u in am.iter():
-                if _local(u.tag) == "unit" and u.get("id"):
-                    desc = next((_plain(c) for c in u if _local(c.tag) == "description"), None)
-                    units[u.get("id")] = _compact({
-                        "name": u.get("name"), "unit_type": u.get("unitType"), "parent_si": u.get("parentSI"),
-                        "multiplier_to_si": u.get("multiplierToSI"), "description": desc,
-                    })
-        return units
+    def _custom_units(self) -> dict[str, Any]:
+        """Each unitList <unit> under additionalMetadata, copied whole and keyed by its id."""
+        return {
+            u.get("id"): self._tree(u)
+            for am in self.root.findall("additionalMetadata") for u in am.iter()
+            if _local(u.tag) == "unit" and u.get("id")
+        }
 
-    def _tree(self, el: Any, seen: frozenset[int] = frozenset()) -> Any:
+    def _tree(self, el: Any, seen: frozenset[int] = frozenset(), skip: tuple[str, ...] = ()) -> Any:
         """Copy an element and everything under it, shaped like the EML.
 
         Children become keys (a list when repeated), XML attributes are kept except identity ones, and
         <references> is followed at every level. A custom unit gets its unitList definition attached.
+        Direct children named in ``skip`` are left out.
         """
         el, missing = self._resolve(el)
         if id(el) in seen:
@@ -241,7 +236,7 @@ class EMLDocument:
             node["unresolved_reference"] = missing
         for child in el:
             tag = _local(child.tag)
-            if tag and not (missing and tag == "references"):
+            if tag and tag not in skip and not (missing and tag == "references"):
                 node.setdefault(tag, []).append(self._tree(child, seen))
         node = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in node.items()}
         text = " ".join(" ".join(p.split()) for p in (el.text, *(c.tail for c in el)) if p and p.strip())
@@ -259,7 +254,8 @@ class EMLDocument:
             kind = _local(el.tag)
             if kind not in ENTITY_TYPES:
                 continue
-            attr_list, missing = el.find("attributeList"), None
+            target, _ = self._resolve(el)
+            attr_list, missing = target.find("attributeList"), None
             if attr_list is not None:
                 attr_list, missing = self._resolve(attr_list)
             attrs = [self._tree(a) for a in attr_list.findall("attribute")] if attr_list is not None else []
@@ -270,23 +266,18 @@ class EMLDocument:
                     keys[key] = f"S{len(keys) + 1}"
                     self.schemas[keys[key]] = attrs
                 schema_id = keys[key]
-            name, file = _text(el, "entityName"), _text(el, "physical/objectName")
+            # Everything but the attribute list (described once per schema) is copied whole.
+            tree = self._tree(el, skip=("attributeList",))
+            tree = tree if isinstance(tree, dict) else {"#text": tree}
+            missing = missing or tree.pop("unresolved_reference", None)
             self.entities.append(_compact({
                 "index": len(self.entities),
                 "type": kind,
-                "name": name,
-                "id": el.get("id"),
-                "description": _text(el, "entityDescription"),
-                "file": file if file != name else None,
-                "format": _text(el, "physical/dataFormat/externallyDefinedFormat/formatName")
-                or ("text" if el.find("physical/dataFormat/textFormat") is not None else None),
-                "size": _text(el, "physical/size"),
-                "rows": _text(el, "numberOfRecords"),
-                "url": _text(el, "physical/distribution/online/url"),
+                "id": target.get("id") or el.get("id"),
                 "schema_id": schema_id,
                 "n_attributes": len(attrs),
                 "unresolved_reference": missing,
-                "annotations": _annotations(el),
+                **tree,
             }))
 
     def entity_groups(self) -> list[dict[str, Any]]:
@@ -299,7 +290,7 @@ class EMLDocument:
             g["entity_types"][e["type"]] = g["entity_types"].get(e["type"], 0) + 1
             g["n_entities"] += 1
             if len(g["example_entities"]) < EXAMPLE_ENTITIES:
-                g["example_entities"].append(e.get("name") or e.get("file") or f"#{e['index']}")
+                g["example_entities"].append(entity_name(e) or entity_file(e) or f"#{e['index']}")
         for g in groups.values():
             if g["schema_id"]:
                 names = [attribute_name(a) for a in self.schemas[g["schema_id"]]]
@@ -313,7 +304,7 @@ class EMLDocument:
             return schema_id
         if entity:
             for e in self.entities:
-                if entity in (e.get("name"), e.get("id"), e.get("file"), str(e["index"])):
+                if entity in (entity_name(e), e.get("id"), entity_file(e), str(e["index"])):
                     if not e.get("schema_id"):
                         raise ToolError(f"Entity '{entity}' has no attribute list.")
                     return e["schema_id"]
@@ -406,37 +397,25 @@ class EMLDocument:
         return _compact(out)
 
     def people(self) -> dict[str, Any]:
-        out: dict[str, list[dict[str, Any]]] = {}
+        """Every creator, contact, metadata provider, associated party and publisher, copied whole."""
+        out: dict[str, list[Any]] = {}
         for tag, key in PEOPLE.items():
-            if found := [_person(p) for p in self.dataset.findall(tag)]:
+            if found := [self._tree(p) for p in self.dataset.findall(tag)]:
                 out[key] = found
         return out
 
-    def project(self) -> list[dict[str, Any]]:
-        projects = []
-        for p in [*self.dataset.findall("project"), *self.dataset.findall("project/relatedProject")]:
-            projects.append(_compact({
-                "titles": _texts(p, "title"),
-                "personnel": [_person(x) for x in p.findall("personnel")],
-                "abstract": _text(p, "abstract"),
-                "funding": _text(p, "funding"),
-                "awards": [_compact({
-                    "funder": _text(a, "funderName"), "funder_identifier": _texts(a, "funderIdentifier"),
-                    "award_number": _text(a, "awardNumber"), "title": _text(a, "title"), "url": _text(a, "awardUrl"),
-                }) for a in p.findall("award")],
-                "study_area": _text(p, "studyAreaDescription"),
-                "design": _text(p, "designDescription"),
-            }))
-        return projects
+    def project(self) -> list[Any]:
+        """Each <project> copied whole, with personnel, awards and any relatedProject nested inside."""
+        return [self._tree(p) for p in self.dataset.findall("project")]
 
     def annotations(self) -> dict[str, Any]:
         entity_sets: dict[str, dict[str, Any]] = {}
         for e in self.entities:
-            if anns := e.get("annotations"):
+            if anns := [_tree_annotation(a) for a in _as_list(e.get("annotation"))]:
                 s = entity_sets.setdefault(json.dumps(anns, sort_keys=True), {"annotations": anns, "n_entities": 0, "example_entities": []})
                 s["n_entities"] += 1
                 if len(s["example_entities"]) < EXAMPLE_ENTITIES:
-                    s["example_entities"].append(e.get("name"))
+                    s["example_entities"].append(entity_name(e))
         attributes = {
             sid: [
                 {"attribute": attribute_name(a), "annotations": [_tree_annotation(x) for x in _as_list(a["annotation"])]}
@@ -472,9 +451,10 @@ class EMLDocument:
             "alternate_identifiers": _texts(d, "alternateIdentifier"),
             "pub_date": _text(d, "pubDate"),
             "creators": [n for n in (_display_name(c) for c in d.findall("creator")) if n],
-            "keywords": _texts(d, "keywordSet/keyword"),
+            "keyword_sets": [self._tree(k) for k in d.findall("keywordSet")],
             "abstract": _text(d, "abstract"),
             "license": _plain(rights),
+            "distribution": [self._tree(x) for x in d.findall("distribution")],
             "coverage": self.coverage_summary(),
             "methods_preview": methods[:METHODS_PREVIEW_CHARS] + (" ..." if len(methods) > METHODS_PREVIEW_CHARS else "") if methods else None,
             "methods_chars": len(methods) if methods else None,
@@ -512,33 +492,70 @@ class CachedDocument:
     def __init__(self, text: str) -> None:
         self.text = text
         self._parsed: tuple[str, EMLDocument | None] | None = None
+        self._lock = asyncio.Lock()
 
-    def parsed(self) -> tuple[str, EMLDocument | None]:
+    async def parsed(self) -> tuple[str, EMLDocument | None]:
+        """Parse in a worker thread (a large document takes seconds), once even when several calls wait for it."""
         if self._parsed is None:
-            self._parsed = parse(self.text)
+            async with self._lock:
+                if self._parsed is None:
+                    self._parsed = await asyncio.to_thread(parse, self.text)
         return self._parsed
 
 
 class DocumentCache:
-    """The last few metadata documents by PID, so paging through one does not refetch and reparse it."""
+    """Recent metadata documents by PID, so paging through one does not refetch and reparse it.
 
-    def __init__(self, max_entries: int = 4, ttl: float = 600.0) -> None:
-        self.max_entries = max_entries
+    Bounded by the total length of the cached texts (a parsed EML document takes several times its text size in
+    memory): the least recently used are evicted to make room, and a document larger than the whole budget is not
+    cached. Concurrent first calls for the same PID share one download.
+    """
+
+    def __init__(self, max_chars: int = 20_000_000, ttl: float = 600.0) -> None:
+        self.max_chars = max_chars
         self.ttl = ttl
         self._entries: OrderedDict[str, tuple[float, CachedDocument]] = OrderedDict()
+        self._loading: dict[str, asyncio.Task[CachedDocument]] = {}
+
+    @property
+    def cached_chars(self) -> int:
+        return sum(len(doc.text) for _, doc in self._entries.values())
 
     async def get(self, pid: str, fetch: Callable[[], Awaitable[str]]) -> CachedDocument:
-        now = time.monotonic()
         hit = self._entries.get(pid)
-        if hit and now - hit[0] < self.ttl:
+        if hit and time.monotonic() - hit[0] < self.ttl:
             self._entries.move_to_end(pid)
             return hit[1]
-        doc = CachedDocument(await fetch())
-        self._entries[pid] = (now, doc)
-        self._entries.move_to_end(pid)
-        while len(self._entries) > self.max_entries:
-            self._entries.popitem(last=False)
+        task = self._loading.get(pid)
+        if task is None:
+            task = asyncio.ensure_future(self._load(pid, fetch))
+            self._loading[pid] = task
+            # Retrieve the exception even if every caller was cancelled, so it is not logged as unhandled.
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        # A cancelled caller must not cancel the download others are waiting on.
+        return await asyncio.shield(task)
+
+    async def _load(self, pid: str, fetch: Callable[[], Awaitable[str]]) -> CachedDocument:
+        try:
+            doc = CachedDocument(await fetch())
+        finally:
+            self._loading.pop(pid, None)
+        self._store(pid, doc)
         return doc
+
+    def _store(self, pid: str, doc: CachedDocument) -> None:
+        now = time.monotonic()
+        self._entries.pop(pid, None)
+        for key in [k for k, (at, _) in self._entries.items() if now - at >= self.ttl]:
+            del self._entries[key]
+        size = len(doc.text)
+        if size > self.max_chars:
+            return
+        used = self.cached_chars
+        while self._entries and used + size > self.max_chars:
+            _, (_, old) = self._entries.popitem(last=False)
+            used -= len(old.text)
+        self._entries[pid] = (now, doc)
 
 
 def page_text(text: str, offset: int, max_chars: int) -> tuple[str, int | None]:

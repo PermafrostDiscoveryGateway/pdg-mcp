@@ -27,6 +27,8 @@ BIOPORTAL_ONTOLOGY = "ECSO"
 # A concept scoring at least this well is used automatically by search_by_variable.
 STRONG_MATCH = 0.72
 MIN_SCORE = 0.3
+# Broad/narrow/related synonyms rank below an exact label or exact synonym (which score 1.0).
+RELATED_PENALTY = 0.9
 
 _ODO_ID = re.compile(r"^(?:(?:https?://(?:www\.)?purl\.dataone\.org/odo/)|(?:ecso:))?(ECSO_\d{8})$", re.IGNORECASE)
 _NON_WORD = re.compile(r"[^a-z0-9]+")
@@ -39,6 +41,7 @@ class Concept:
     synonyms: list[str] = field(default_factory=list)
     definition: str | None = None
     parents: list[str] = field(default_factory=list)
+    related_synonyms: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -115,6 +118,11 @@ def best_name(query: str, concept: Concept) -> tuple[float, str]:
         s = score_name(query, name)
         if s > best[0]:
             best = (s, name)
+    # Broad/narrow/related synonyms count, but rank below an exact label or exact synonym.
+    for name in concept.related_synonyms:
+        s = score_name(query, name) * RELATED_PENALTY
+        if s > best[0]:
+            best = (s, name)
     return best
 
 
@@ -122,7 +130,10 @@ def best_name(query: str, concept: Concept) -> tuple[float, str]:
 def load_concepts() -> tuple[Concept, ...]:
     raw = json.loads(files("arcticdata_mcp").joinpath("data/ecso/concepts.json").read_text())
     return tuple(
-        Concept(c["uri"], c["label"], c.get("synonyms", []), c.get("definition"), c.get("parents", []))
+        Concept(
+            c["uri"], c["label"], c.get("synonyms", []), c.get("definition"), c.get("parents", []),
+            related_synonyms=c.get("related_synonyms", []),
+        )
         for c in raw["concepts"]
     )
 

@@ -29,10 +29,10 @@ ECSO_PREFIX = "http://purl.dataone.org/odo/ECSO_"
 RDF_ABOUT = f"{{{NS['rdf']}}}about"
 RDF_RESOURCE = f"{{{NS['rdf']}}}resource"
 LABEL_TAGS = ["rdfs:label", "skos:prefLabel"]
-SYNONYM_TAGS = [
-    "skos:altLabel", "skos:hiddenLabel", "oboInOwl:hasExactSynonym",
-    "oboInOwl:hasRelatedSynonym", "oboInOwl:hasBroadSynonym", "oboInOwl:hasNarrowSynonym",
-]
+# Same meaning as the label: treated as an exact match.
+EXACT_SYNONYM_TAGS = ["skos:altLabel", "skos:hiddenLabel", "oboInOwl:hasExactSynonym"]
+# Broader, narrower or related terms: kept for lookup, but scored lower.
+RELATED_SYNONYM_TAGS = ["oboInOwl:hasRelatedSynonym", "oboInOwl:hasBroadSynonym", "oboInOwl:hasNarrowSynonym"]
 DEFINITION_TAG = "obo:IAO_0000115"
 DEFINITION_CHARS = 300
 
@@ -60,7 +60,11 @@ def export(owl_path: Path) -> list[dict]:
         if not labels:
             continue
         label = labels[0]
-        synonyms = [s for s in _texts(cls, SYNONYM_TAGS) + labels[1:] if s.lower() != label.lower()]
+        exact = list(dict.fromkeys(
+            s for s in _texts(cls, EXACT_SYNONYM_TAGS) + labels[1:] if s.lower() != label.lower()
+        ))
+        seen = {label.lower(), *(s.lower() for s in exact)}
+        related = [s for s in _texts(cls, RELATED_SYNONYM_TAGS) if s.lower() not in seen]
         definition = " ".join((cls.findtext(DEFINITION_TAG, "", NS) or "").split())
         if len(definition) > DEFINITION_CHARS:
             definition = definition[:DEFINITION_CHARS].rsplit(" ", 1)[0] + "…"
@@ -69,8 +73,10 @@ def export(owl_path: Path) -> list[dict]:
             if (p.get(RDF_RESOURCE) or "").startswith(ECSO_PREFIX)
         ]
         concept = {"uri": uri, "label": label}
-        if synonyms:
-            concept["synonyms"] = list(dict.fromkeys(synonyms))
+        if exact:
+            concept["synonyms"] = exact
+        if related:
+            concept["related_synonyms"] = related
         if definition:
             concept["definition"] = definition
         if parents:

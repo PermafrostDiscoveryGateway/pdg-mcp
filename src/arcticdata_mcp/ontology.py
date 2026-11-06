@@ -200,6 +200,20 @@ def merge(*groups: list[Match]) -> list[Match]:
     return sorted(by_uri.values(), key=lambda m: (-m.score, len(m.concept.label)))
 
 
+def top_matches(query: str, matches: list[Match]) -> list[Match]:
+    """Concepts to use automatically for ``query`` from ranked ``matches`` (best first); [] if none is strong.
+
+    Takes the concepts tied for the top score. When some of those match through their own label rather than
+    a synonym, only those are kept: "albedo" should use the concept labelled "albedo", not concepts that merely
+    list "albedo" as a synonym. If no tied concept matches by label (e.g. a synonym-only match), all are kept.
+    """
+    if not matches or matches[0].score < STRONG_MATCH:
+        return []
+    tied = [m for m in matches if m.score == matches[0].score]
+    by_label = [m for m in tied if score_name(query, m.concept.label) == 1.0]
+    return by_label or tied
+
+
 async def dataset_counts(client: DataONEClient, uris: list[str], latest_only: bool = True) -> dict[str, int]:
     """Number of datasets annotated with each concept, in a single Solr request."""
     if not uris:

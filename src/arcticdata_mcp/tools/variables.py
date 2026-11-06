@@ -99,8 +99,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             resolution = "explicit"
         else:
             candidates, warning = await resolve(variable, 10)
-            top = candidates[0].score if candidates else 0.0
-            uris = [m.concept.uri for m in candidates if m.score == top][:MAX_AUTO_CONCEPTS] if top >= ontology.STRONG_MATCH else []
+            uris = [m.concept.uri for m in ontology.top_matches(variable, candidates)][:MAX_AUTO_CONCEPTS]
             resolution = "concept" if uris else "free_text_fallback"
 
         annotation = ontology.annotation_clause(uris) if uris else None

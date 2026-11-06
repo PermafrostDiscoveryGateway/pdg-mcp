@@ -45,6 +45,37 @@ def test_match_local_weak_match_stays_below_auto_threshold():
     assert matches and matches[0].score < ontology.STRONG_MATCH
 
 
+@pytest.mark.parametrize(
+    ("term", "labels"),
+    [
+        ("albedo", ["albedo"]),  # not Longwave_/Shortwave_Albedo_MOV, which only list it as a synonym
+        ("flux", ["Flux"]),  # not Radiative Flux
+        ("active layer thickness", ["Soil Active Layer Depth"]),  # synonym-only match is still used
+    ],
+)
+def test_top_matches_prefers_concepts_whose_own_label_matches(term, labels):
+    assert [m.concept.label for m in ontology.top_matches(term, ontology.match_local(term, 10))] == labels
+
+
+def test_top_matches_empty_when_best_match_is_weak():
+    assert ontology.top_matches("permafrost temperature", ontology.match_local("permafrost temperature", 10)) == []
+
+
+def test_top_matches_keeps_all_label_ties():
+    labels = {m.concept.label.lower() for m in ontology.top_matches("depth", ontology.match_local("depth", 10))}
+    assert labels == {"depth"}
+    assert len(ontology.top_matches("depth", ontology.match_local("depth", 10))) == 2
+
+
+async def test_search_by_variable_uses_only_label_match_for_ties(client, mock_api):
+    mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=solr_json([], facet_queries={})))
+    r = await client.call_tool("search_by_variable", {"variable": "albedo", "rows": 0})
+    sc = r.structured_content
+    assert sc["resolution"] == "concept"
+    assert [c["label"] for c in sc["concepts_used"]] == ["albedo"]
+    assert {"Longwave_Albedo_MOV", "Shortwave_Albedo_MOV"} <= {c["label"] for c in sc["other_candidates"]}
+
+
 def test_merge_combines_sources_and_keeps_best_score():
     c = ontology.concept_by_uri(SOIL_DEPTH)
     merged = ontology.merge([ontology.Match(c, 0.7, "x")], [ontology.Match(c, 0.9, "y", ["bioportal"])])

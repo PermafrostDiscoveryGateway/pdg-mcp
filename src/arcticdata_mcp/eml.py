@@ -212,13 +212,30 @@ class FreeText:
     positions: dict[int, int] = field(default_factory=dict, repr=False)
 
     def page(self, offset: int, max_chars: int) -> dict[str, Any]:
-        """One page of text plus the elements whose placeholders start on that page."""
-        page, nxt = page_text(self.text, offset, max_chars)
-        end = nxt if nxt is not None else float("inf")
-        out: dict[str, Any] = {"chars": len(self.text), "offset": offset, "next_offset": nxt, "text": page}
+        """One page of text plus the elements whose placeholders start on that page.
+
+        The copies count toward ``max_chars``: the text page ends early enough that it and the copies its
+        placeholders bring fit, so a placeholder and its copy are always on the same page. A copy too big
+        to fit on its own is still returned, at the start of its page.
+        """
+        page_text(self.text, offset, max_chars)  # rejects an offset past the end
+        anchored = [(self.positions.get(id(it), 0), _size(it)) for items in self.elements.values() for it in items]
+        end = min(len(self.text), offset + max_chars)
+
+        def on_page(pos: int) -> bool:  # the last page also takes copies anchored at the very end
+            return offset <= pos and (pos < end or end == len(self.text))
+
+        while True:
+            on = [(pos, size) for pos, size in anchored if on_page(pos)]
+            last = max((pos for pos, _ in on), default=offset)
+            if (end - offset) + sum(size for _, size in on) <= max_chars or last <= offset:
+                break
+            end = last  # move the last placeholder, and its copy, to the next page
+        nxt = end if end < len(self.text) else None
+        out: dict[str, Any] = {"chars": len(self.text), "offset": offset, "next_offset": nxt, "text": self.text[offset:end]}
         for key, items in self.elements.items():
-            if on_page := [it for it in items if offset <= self.positions.get(id(it), 0) < end]:
-                out[key] = on_page
+            if here := [it for it in items if on_page(self.positions.get(id(it), 0))]:
+                out[key] = here
         return out
 
 

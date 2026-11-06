@@ -196,3 +196,39 @@ def test_reference_cycles_in_copied_elements_stop():
 def test_unresolved_reference_is_flagged():
     m = methods_of("<para>As in <citation><references>nope</references></citation>.</para>")
     assert m.elements["citations"] == [{"ref": "citation 1", "unresolved_reference": "nope"}]
+
+
+def test_copies_count_toward_max_chars():
+    cites = "".join(
+        f"<para>Step {i} follows <citation><title>Paper number {i} on radar calibration</title>"
+        f"<creator><individualName><givenName>Jane</givenName><surName>Smith{i}</surName></individualName></creator>"
+        f"<pubDate>2020</pubDate></citation>.</para>"
+        for i in range(60)
+    )
+    m = methods_of(cites)
+    max_chars = 2000
+    offset, text, refs = 0, "", []
+    while offset is not None:
+        page = m.page(offset, max_chars)
+        copies = page.get("citations", [])
+        assert len(page["text"]) + sum(eml._size(c) for c in copies) <= max_chars
+        # Each copy is on the same page as its placeholder.
+        for c in copies:
+            assert f"[{c['ref']}]" in page["text"]
+        text += page["text"]
+        refs += [c["ref"] for c in copies]
+        offset = page["next_offset"]
+    assert text == m.text
+    assert refs == [f"citation {i}" for i in range(1, 61)]
+
+
+def test_oversized_copy_is_still_returned():
+    big = "x" * 3000
+    m = methods_of(f"<para>A <citation><title>{big}</title><pubDate>2020</pubDate></citation> B</para>")
+    first = m.page(0, 1000)
+    # The copy can't fit on any page, so the page ends before its placeholder ...
+    assert first["text"] == "A " and "citations" not in first
+    # ... and the next page starts with it, oversized.
+    second = m.page(first["next_offset"], 1000)
+    assert second["text"].startswith("[citation 1]") and second["citations"][0]["title"] == big
+    assert second["next_offset"] is None

@@ -98,8 +98,9 @@ Loki. Set `[observability] log_format = "text"` for a readable form during devel
 - `status` is `ok`, `error` (the tool raised a `ToolError`), `rate_limited`, `upstream_busy` (no ADC slot within
   `queue_timeout`), `cancelled` or `exception`. Failures add `error_type`.
 - `user_hash` is a keyed HMAC-SHA256 of the Keycloak `sub`, truncated to 16 hex characters. Set
-  `observability.user_hash_key` to a secret that is the same on every pod; without it the hash is unkeyed and the
-  server logs a warning at startup. Changing the key makes new hashes unlinkable to old ones. Calls without auth
+  `observability.user_hash_key` to a secret that is the same on every pod. Without it the server uses a random key
+  per process and logs a warning at startup, so hashes change on restart and differ between pods. Changing the
+  key makes new hashes unlinkable to old ones. Calls without auth
   log `anonymous`.
 - `adc_calls` lists each request made to ADC (`endpoint`, `method`, `status`, `ms`, and `retried` or `error` when
   they apply), capped at 25. `endpoint` is the first path segment (`query`, `object`, `meta`, ...), never the URL.

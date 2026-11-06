@@ -23,7 +23,8 @@ auth:
   requiredScopes: openid
 
 # Usage logging. userHashKeySecret names a Secret key holding the HMAC key that hashes Keycloak user IDs in logs;
-# keep it identical across pods and do not rotate it casually. Empty = unkeyed hash (a warning is logged).
+# keep it identical across pods and do not rotate it casually. Empty = a random key per process (a warning is
+# logged): hashes change on restart and differ between pods, so per-user counts over time are unreliable.
 observability:
   userHashKeySecret: {}   # e.g. {name: pdg-mcp-observability, key: user-hash-key}
 

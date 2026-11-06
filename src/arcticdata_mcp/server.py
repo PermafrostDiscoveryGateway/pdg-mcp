@@ -62,7 +62,10 @@ def create_server(
         lifespan=lifespan,
     )
     if auth is not None and settings.observability.log_tool_calls and not settings.observability.user_hash_key:
-        log.warning("observability.user_hash_key is not set; user hashes in logs are unkeyed")
+        log.warning(
+            "observability.user_hash_key is not set: using a random key for this process, so user_hash "
+            "values in logs change on restart and differ between pods"
+        )
     # Logging goes first (outermost) so it also records calls the rate limiter rejects.
     mcp.add_middleware(ToolCallLogMiddleware(settings.observability))
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))

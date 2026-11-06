@@ -70,7 +70,9 @@ The per-user and global limits are set through `extraEnv` in the chart values, f
 Each tool call logs one JSON line with the tool, latency, outcome, a hashed user ID and the ADC requests it made
 (fields are described in the README, "Usage logging"). Tool arguments and error text are never logged.
 
-Set a stable secret for the user hash so one user keeps one hash across pods and restarts. Create it once, then
+Set a stable secret for the user hash so one user keeps one hash across pods and restarts. Without it each
+process uses its own random key: logs still hide user identity, but the same user gets a different hash after a
+restart or on another pod, so per-user and active-user counts over time are unreliable. Create it once, then
 reference it in the chart values:
 
 ```bash

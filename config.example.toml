@@ -66,5 +66,6 @@ log_tool_calls = true
 log_level = "INFO"
 log_format = "json"     # "json" (log shippers) or "text" (readable, for development)
 # Secret key for hashing the Keycloak "sub" into the logged user_hash. Use one value on every pod and keep it
-# stable; empty = unkeyed hash (a warning is logged).
+# stable so a user keeps the same hash. Empty = a random key per process (a warning is logged): hashes still
+# hide the user, but change on restart and differ between pods.
 user_hash_key = ""

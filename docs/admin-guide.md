@@ -87,3 +87,17 @@ observability:
 Do not rotate the key casually: hashes before and after a rotation cannot be matched, which breaks active-user
 counts across the change. Other settings (`ARCTICDATA_MCP_OBSERVABILITY_LOG_LEVEL`, `..._LOG_FORMAT`,
 `..._LOG_TOOL_CALLS`) go through `extraEnv`.
+
+### Metrics (Prometheus)
+
+The pod serves Prometheus metrics on a separate port (`metrics.port`, default 9100), declared as the container port
+`metrics`. The chart's Service and Ingress only route the MCP port, so `/metrics` is not reachable from outside the
+cluster. Keep it that way: do not add the metrics port to the Service or Ingress unless it is protected some other
+way.
+
+Prometheus has to scrape the pods directly. By default the chart adds `prometheus.io/scrape`, `prometheus.io/port`
+and `prometheus.io/path` annotations to the pod, which works if the cluster's Prometheus discovers pods by
+annotation. If it uses a `ServiceMonitor` or a static config instead, set `metrics.scrapeAnnotations: false` and
+point it at the pods' `metrics` port. Counters live in each pod, so scrape every pod (each replica has its own
+limits and counts). Set `metrics.enabled: false` to turn the endpoint off. Metric names are listed in the README.
+

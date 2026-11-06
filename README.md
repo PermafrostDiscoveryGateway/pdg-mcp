@@ -106,6 +106,30 @@ Loki. Set `[observability] log_format = "text"` for a readable form during devel
   they apply), capped at 25. `endpoint` is the first path segment (`query`, `object`, `meta`, ...), never the URL.
 - Tool arguments and error messages are **not** logged, because they can contain users' query text.
 
+### Metrics
+
+With the http transport the server also serves Prometheus metrics at `http://<metrics_host>:<metrics_port>/metrics`
+(default `127.0.0.1:9100`). This is a **separate listener**: the MCP port has no `/metrics` route, so exposing the
+MCP port through a Service or Ingress does not expose the metrics. Set `observability.metrics_enabled = false` to
+turn it off. stdio never opens a port.
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `pdg_mcp_tool_calls_total` | `tool`, `status` | Tool calls by outcome (`ok`, `error`, `rate_limited`, `upstream_busy`, `invalid_arguments`, `not_found`, `cancelled`, `exception`) |
+| `pdg_mcp_tool_call_duration_seconds` | `tool` | Tool call latency histogram |
+| `pdg_mcp_rate_limit_rejections_total` | | Calls rejected by the per-user rate limit |
+| `pdg_mcp_adc_requests_total` | `endpoint`, `method`, `status` | Requests to ADC, one per attempt; `status` is the HTTP code or `error` |
+| `pdg_mcp_adc_retries_total` | `endpoint` | Requests that were retried |
+| `pdg_mcp_adc_request_duration_seconds` | `endpoint` | ADC response time per attempt |
+| `pdg_mcp_adc_queue_wait_seconds` | | Time spent waiting for a free ADC slot |
+| `pdg_mcp_adc_queue_timeouts_total` | | Requests that gave up waiting for a slot |
+| `pdg_mcp_adc_requests_in_flight`, `pdg_mcp_adc_requests_waiting` | | Requests holding / waiting for an ADC slot |
+| `pdg_mcp_process_*` | | Process memory, CPU and open files (Linux) |
+
+ADC failures are `pdg_mcp_adc_requests_total{status=~"4..|5.."}`. Labels never carry user IDs, PIDs or query text,
+and an unknown tool name is counted as `tool="unknown"`. Counters are kept in memory per pod and reset on restart,
+so use `rate()` / `increase()` in queries and scrape every pod.
+
 ### How downloads reach the agent
 
 `download_file` returns files up to `max_inline_bytes` **inline** as an MCP embedded resource: text for

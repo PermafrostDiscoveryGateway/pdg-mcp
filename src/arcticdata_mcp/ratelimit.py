@@ -26,6 +26,7 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolResult
 
 from arcticdata_mcp.config import RateLimitSettings
+from arcticdata_mcp.metrics import Metrics
 
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 ANONYMOUS = "anonymous"
@@ -105,8 +106,9 @@ class UserRateLimitMiddleware(Middleware):
 class UpstreamLimiter:
     """Global concurrency cap and retry policy for requests to ADC / DataONE."""
 
-    def __init__(self, settings: RateLimitSettings):
+    def __init__(self, settings: RateLimitSettings, metrics: Metrics | None = None):
         self.settings = settings
+        self.metrics = metrics or Metrics()
         self._sem = asyncio.Semaphore(settings.max_concurrent) if settings.max_concurrent > 0 else None
 
     @asynccontextmanager
@@ -115,15 +117,25 @@ class UpstreamLimiter:
         if self._sem is None:
             yield
             return
+        m = self.metrics
+        queued = time.perf_counter()
+        m.adc_waiting.inc()
         try:
             await asyncio.wait_for(self._sem.acquire(), timeout=self.settings.queue_timeout)
         except TimeoutError as exc:
+            m.adc_queue_wait.observe(time.perf_counter() - queued)
+            m.adc_queue_timeouts.inc()
             raise UpstreamBusy(
                 "The Arctic Data Center is busy serving other requests; please retry shortly."
             ) from exc
+        finally:
+            m.adc_waiting.dec()
+        m.adc_queue_wait.observe(time.perf_counter() - queued)
+        m.adc_in_flight.inc()
         try:
             yield
         finally:
+            m.adc_in_flight.dec()
             self._sem.release()
 
     def should_retry(self, resp: httpx.Response, attempt: int) -> bool:

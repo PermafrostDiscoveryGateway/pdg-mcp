@@ -69,3 +69,8 @@ log_format = "json"     # "json" (log shippers) or "text" (readable, for develop
 # stable so a user keeps the same hash. Empty = a random key per process (a warning is logged): hashes still
 # hide the user, but change on restart and differ between pods.
 user_hash_key = ""
+# Prometheus metrics on a separate port (never on the MCP port); http transport only. Use host 0.0.0.0 in a
+# container so a scraper can reach the pod, and do not publish this port through a Service or Ingress.
+metrics_enabled = true
+metrics_host = "127.0.0.1"
+metrics_port = 9100

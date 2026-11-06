@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.metrics import Metrics
 from arcticdata_mcp.observability import ToolCallLogMiddleware
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
 from arcticdata_mcp.tools import apps, datasets, node, objects, portals, search, water
@@ -43,9 +44,14 @@ def create_server(
     *,
     require_auth: bool = True,
     transport: httpx.AsyncBaseTransport | None = None,
+    metrics: Metrics | None = None,
 ) -> FastMCP:
-    """Build the MCP server. ``transport`` lets tests inject a mock HTTP transport."""
-    client = DataONEClient(settings, transport=transport)
+    """Build the MCP server. ``transport`` lets tests inject a mock HTTP transport.
+
+    ``metrics`` is the collector set to update; the caller serves it (see ``start_metrics_server``).
+    """
+    metrics = metrics or Metrics()
+    client = DataONEClient(settings, transport=transport, metrics=metrics)
 
     @asynccontextmanager
     async def lifespan(_: FastMCP) -> AsyncIterator[None]:
@@ -67,7 +73,7 @@ def create_server(
             "values in logs change on restart and differ between pods"
         )
     # Logging goes first (outermost) so it also records calls the rate limiter rejects.
-    mcp.add_middleware(ToolCallLogMiddleware(settings.observability))
+    mcp.add_middleware(ToolCallLogMiddleware(settings.observability, metrics))
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node, portals, apps, water):

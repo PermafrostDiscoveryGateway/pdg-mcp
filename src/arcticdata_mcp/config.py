@@ -81,6 +81,11 @@ class ObservabilitySettings:
     # Secret key for the HMAC that turns the Keycloak "sub" into the user_hash in logs. Keep it stable and
     # identical across pods so one user keeps one hash; changing it makes past and future hashes unlinkable.
     user_hash_key: str = ""
+    # Prometheus metrics are served on their own port, never on the MCP port, so the Service/Ingress that expose
+    # the MCP endpoint cannot reach them. Use 0.0.0.0 in a container so a scraper can reach the pod.
+    metrics_enabled: bool = True  # http transport only; stdio never opens a port
+    metrics_host: str = "127.0.0.1"
+    metrics_port: int = 9100
 
 
 @dataclass

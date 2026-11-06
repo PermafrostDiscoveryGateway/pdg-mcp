@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 import xmltodict
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.observability import record_upstream
 from arcticdata_mcp.ratelimit import UpstreamLimiter
 
 USER_AGENT = "arcticdata-mcp/0.1 (+https://arcticdata.io)"
@@ -104,18 +106,33 @@ class DataONEClient:
     def landing_url(self, pid: str) -> str:
         return f"{self.catalog_url}/{quote_pid(pid)}"
 
+    def endpoint_label(self, url: str) -> str:
+        """Coarse, non-identifying name for a URL (``query``, ``object``, ...) for logs; never PIDs or queries."""
+        for base in (self.base_url, self.cn_url, self.catalog_url):
+            if url.startswith(base + "/"):
+                return url[len(base) + 1 :].split("?")[0].split("/")[0] or "root"
+        return urlsplit(url).netloc or "unknown"
+
     # Requests -------------------------------------------------------------
     async def request(
         self, method: str, url: str, *, raise_errors: bool = True, **kwargs: Any
     ) -> httpx.Response:
         attempt = 0
+        endpoint = self.endpoint_label(url)
         while True:
             try:
                 async with self.limiter.slot():
-                    resp = await self._http.request(method, url, **kwargs)
+                    started = time.perf_counter()
+                    try:
+                        resp = await self._http.request(method, url, **kwargs)
+                    except httpx.HTTPError as exc:
+                        record_upstream(endpoint, method, None, started, error=type(exc).__name__)
+                        raise
             except httpx.HTTPError as exc:
                 raise ToolError(f"Request to {url} failed: {exc}") from exc
-            if not self.limiter.should_retry(resp, attempt):
+            retry = self.limiter.should_retry(resp, attempt)
+            record_upstream(endpoint, method, resp.status_code, started, retried=retry)
+            if not retry:
                 break
             await asyncio.sleep(self.limiter.delay(attempt, resp))
             attempt += 1
@@ -145,20 +162,27 @@ class DataONEClient:
     @asynccontextmanager
     async def stream(self, url: str) -> AsyncIterator[httpx.Response]:
         attempt = 0
+        endpoint = self.endpoint_label(url)
+        started = time.perf_counter()
         try:
             while True:
-                async with self.limiter.slot(), self._http.stream("GET", url) as resp:
-                    if self.limiter.should_retry(resp, attempt):
-                        await resp.aread()
-                        delay = self.limiter.delay(attempt, resp)
-                    else:
-                        if resp.status_code >= 400:
+                async with self.limiter.slot():
+                    started = time.perf_counter()
+                    async with self._http.stream("GET", url) as resp:
+                        retry = self.limiter.should_retry(resp, attempt)
+                        record_upstream(endpoint, "GET", resp.status_code, started, retried=retry)
+                        if retry:
                             await resp.aread()
-                            _raise_for_dataone(resp)
-                        yield resp
-                        return
+                            delay = self.limiter.delay(attempt, resp)
+                        else:
+                            if resp.status_code >= 400:
+                                await resp.aread()
+                                _raise_for_dataone(resp)
+                            yield resp
+                            return
                 # Sleep outside the slot so a backing-off request does not block others.
                 await asyncio.sleep(delay)
                 attempt += 1
         except httpx.HTTPError as exc:
+            record_upstream(endpoint, "GET", None, started, error=type(exc).__name__)
             raise ToolError(f"Request to {url} failed: {exc}") from exc

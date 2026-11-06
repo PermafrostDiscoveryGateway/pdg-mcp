@@ -43,6 +43,13 @@ spec:
               value: {{ .Values.auth.requiredRole | quote }}
             - name: ARCTICDATA_MCP_AUTH_REQUIRED_SCOPES
               value: {{ .Values.auth.requiredScopes | quote }}
+            {{- with .Values.observability.userHashKeySecret }}
+            - name: ARCTICDATA_MCP_OBSERVABILITY_USER_HASH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .key }}
+            {{- end }}
             {{- range $k, $v := .Values.extraEnv }}
             - name: {{ $k }}
               value: {{ $v | quote }}

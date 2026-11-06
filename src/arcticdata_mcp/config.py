@@ -74,6 +74,16 @@ class PortalSettings:
 
 
 @dataclass
+class ObservabilitySettings:
+    log_level: str = "INFO"  # level for the arcticdata_mcp loggers; tool-call records are logged at INFO
+    log_format: str = "json"  # "json" (one object per line, for log shippers) or "text" (human readable)
+    log_tool_calls: bool = True  # emit one structured record per tool call
+    # Secret key for the HMAC that turns the Keycloak "sub" into the user_hash in logs. Keep it stable and
+    # identical across pods so one user keeps one hash; changing it makes past and future hashes unlinkable.
+    user_hash_key: str = ""
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
@@ -82,6 +92,7 @@ class Settings:
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
+    observability: ObservabilitySettings = field(default_factory=ObservabilitySettings)
 
 
 def _coerce(value: str, target: type) -> Any:

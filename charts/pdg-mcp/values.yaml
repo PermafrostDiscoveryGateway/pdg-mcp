@@ -22,6 +22,11 @@ auth:
   requiredRole: mcp-user
   requiredScopes: openid
 
+# Usage logging. userHashKeySecret names a Secret key holding the HMAC key that hashes Keycloak user IDs in logs;
+# keep it identical across pods and do not rotate it casually. Empty = unkeyed hash (a warning is logged).
+observability:
+  userHashKeySecret: {}   # e.g. {name: pdg-mcp-observability, key: user-hash-key}
+
 # Extra ARCTICDATA_MCP_* settings, e.g. ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES: "10485760".
 # Rate limits are enforced per pod, so with replicaCount > 1 the effective limits multiply. Example:
 #   ARCTICDATA_MCP_RATELIMIT_MAX_CONCURRENT: "6"

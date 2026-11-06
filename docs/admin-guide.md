@@ -64,3 +64,24 @@ Then set `imagePullSecrets: [ncsa-hub]` in the chart values. To rotate the crede
 ### Rate limits
 
 The per-user and global limits are set through `extraEnv` in the chart values, for example `ARCTICDATA_MCP_RATELIMIT_PER_USER_RATE: "2"`. Limits apply per pod, so with more than one replica the effective limits multiply.
+
+### Usage logs
+
+Each tool call logs one JSON line with the tool, latency, outcome, a hashed user ID and the ADC requests it made
+(fields are described in the README, "Usage logging"). Tool arguments and error text are never logged.
+
+Set a stable secret for the user hash so one user keeps one hash across pods and restarts. Create it once, then
+reference it in the chart values:
+
+```bash
+kubectl create secret generic pdg-mcp-observability --from-literal=user-hash-key="$(openssl rand -hex 32)"
+```
+
+```yaml
+observability:
+  userHashKeySecret: {name: pdg-mcp-observability, key: user-hash-key}
+```
+
+Do not rotate the key casually: hashes before and after a rotation cannot be matched, which breaks active-user
+counts across the change. Other settings (`ARCTICDATA_MCP_OBSERVABILITY_LOG_LEVEL`, `..._LOG_FORMAT`,
+`..._LOG_TOOL_CALLS`) go through `extraEnv`.

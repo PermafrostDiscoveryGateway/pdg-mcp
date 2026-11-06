@@ -31,6 +31,14 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 ANONYMOUS = "anonymous"
 
 
+class RateLimitExceeded(ToolError):
+    """A user exceeded their per-user rate limit."""
+
+
+class UpstreamBusy(ToolError):
+    """No upstream slot became free within ``queue_timeout``."""
+
+
 class TokenBucket:
     """Classic token bucket: ``capacity`` tokens, refilled at ``rate`` tokens per second."""
 
@@ -87,7 +95,7 @@ class UserRateLimitMiddleware(Middleware):
                 bucket = self.buckets[key] = TokenBucket(self.rate, self.burst)
             wait = bucket.try_consume()
             if wait:
-                raise ToolError(
+                raise RateLimitExceeded(
                     f"Rate limit exceeded: at most {self.rate:g} tool calls per second "
                     f"(burst {self.burst}). Retry in {math.ceil(wait)} s."
                 )
@@ -110,7 +118,7 @@ class UpstreamLimiter:
         try:
             await asyncio.wait_for(self._sem.acquire(), timeout=self.settings.queue_timeout)
         except TimeoutError as exc:
-            raise ToolError(
+            raise UpstreamBusy(
                 "The Arctic Data Center is busy serving other requests; please retry shortly."
             ) from exc
         try:

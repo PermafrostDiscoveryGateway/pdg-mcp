@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -11,9 +12,12 @@ from fastmcp import FastMCP
 from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.observability import ToolCallLogMiddleware
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
 from arcticdata_mcp.tools import apps, datasets, node, objects, portals, search, water
 from arcticdata_mcp.tools.common import ToolContext
+
+log = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
 Search and download public data from the NSF Arctic Data Center (arcticdata.io), a DataONE member node.
@@ -57,6 +61,10 @@ def create_server(
         auth=auth,
         lifespan=lifespan,
     )
+    if auth is not None and settings.observability.log_tool_calls and not settings.observability.user_hash_key:
+        log.warning("observability.user_hash_key is not set; user hashes in logs are unkeyed")
+    # Logging goes first (outermost) so it also records calls the rate limiter rejects.
+    mcp.add_middleware(ToolCallLogMiddleware(settings.observability))
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node, portals, apps, water):

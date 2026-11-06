@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from arcticdata_mcp.config import load_settings
+from arcticdata_mcp.observability import configure_logging
 from arcticdata_mcp.server import create_server
 
 
@@ -24,6 +25,7 @@ def main(argv: list[str] | None = None) -> None:
 
         config_path = "config.toml" if Path("config.toml").is_file() else None
     settings = load_settings(config_path)
+    configure_logging(settings.observability)
     transport = args.transport or settings.server.transport
     host = args.host or settings.server.host
     port = args.port or settings.server.port

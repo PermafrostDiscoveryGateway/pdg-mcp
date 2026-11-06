@@ -59,3 +59,12 @@ portal_url = "https://arcticdata.io/catalog/portals"
 cache_ttl = 3600.0
 # Labels of portals to hide, e.g. test or spam portals.
 exclude_labels = []
+
+[observability]
+# One structured record per tool call (tool, latency, status, hashed user, ADC requests), written to stderr.
+log_tool_calls = true
+log_level = "INFO"
+log_format = "json"     # "json" (log shippers) or "text" (readable, for development)
+# Secret key for hashing the Keycloak "sub" into the logged user_hash. Use one value on every pod and keep it
+# stable; empty = unkeyed hash (a warning is logged).
+user_hash_key = ""

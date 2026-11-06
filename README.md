@@ -84,6 +84,27 @@ ADC does not rate-limit on its side, so this server limits itself. There are two
 `get_server_config` reports the active limits to agents. Limits are kept in memory per process, so with several
 replicas the effective limits are multiplied by the replica count.
 
+### Usage logging
+
+Every tool call writes one JSON line to stderr (logger `arcticdata_mcp.toolcalls`), for log shippers such as
+Loki. Set `[observability] log_format = "text"` for a readable form during development.
+
+```json
+{"ts": "2026-11-06T20:54:28.500+00:00", "level": "INFO", "logger": "arcticdata_mcp.toolcalls", "event": "tool_call",
+ "tool": "count_datasets", "status": "ok", "duration_ms": 312, "user_hash": "9f2c0a4be1d37a55",
+ "adc_call_count": 1, "adc_retries": 0, "adc_calls": [{"endpoint": "query", "method": "GET", "status": 200, "ms": 298}]}
+```
+
+- `status` is `ok`, `error` (the tool raised a `ToolError`), `rate_limited`, `upstream_busy` (no ADC slot within
+  `queue_timeout`), `cancelled` or `exception`. Failures add `error_type`.
+- `user_hash` is a keyed HMAC-SHA256 of the Keycloak `sub`, truncated to 16 hex characters. Set
+  `observability.user_hash_key` to a secret that is the same on every pod; without it the hash is unkeyed and the
+  server logs a warning at startup. Changing the key makes new hashes unlinkable to old ones. Calls without auth
+  log `anonymous`.
+- `adc_calls` lists each request made to ADC (`endpoint`, `method`, `status`, `ms`, and `retried` or `error` when
+  they apply), capped at 25. `endpoint` is the first path segment (`query`, `object`, `meta`, ...), never the URL.
+- Tool arguments and error messages are **not** logged, because they can contain users' query text.
+
 ### How downloads reach the agent
 
 `download_file` returns files up to `max_inline_bytes` **inline** as an MCP embedded resource: text for

@@ -1,0 +1,33 @@
+# Local Prometheus + Grafana 12 for trying the dashboard against a server running on this machine.
+# Development only: Grafana runs with anonymous admin access and both ports bind to localhost.
+#
+#   docker compose -f dev/observability/docker-compose.yml up -d
+#   open http://localhost:3000   (dashboard "PDG MCP Usage")
+#   docker compose -f dev/observability/docker-compose.yml down -v
+#
+# If 9090 or 3000 is taken, set PROMETHEUS_PORT / GRAFANA_PORT, e.g. PROMETHEUS_PORT=9091 docker compose ... up -d
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach the server on the host (needed on Linux; Docker Desktop has it)
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    depends_on: [prometheus]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"

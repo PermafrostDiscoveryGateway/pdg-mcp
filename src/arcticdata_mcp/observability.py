@@ -33,6 +33,9 @@ from arcticdata_mcp.metrics import UNKNOWN_TOOL, Metrics
 from arcticdata_mcp.ratelimit import ANONYMOUS, RateLimitExceeded, UpstreamBusy, UserRateLimitMiddleware
 
 LOGGER_NAME = "arcticdata_mcp"
+# HTTP client libraries log the full request URL at INFO, and the URL carries the user's query text.
+# Pin them so query text cannot reach the logs even if someone raises the root log level.
+QUIET_LOGGERS = ("httpx", "httpcore")
 toolcall_log = logging.getLogger(f"{LOGGER_NAME}.toolcalls")
 
 MAX_LOGGED_UPSTREAM_CALLS = 25  # keeps a runaway tool from producing a huge log line
@@ -89,11 +92,13 @@ class ToolCallLogMiddleware(Middleware):
     Add it before the rate limiter so rejected calls are counted too.
     """
 
-    def __init__(self, settings: ObservabilitySettings, metrics: Metrics | None = None):
+    def __init__(
+        self, settings: ObservabilitySettings, metrics: Metrics | None = None, user_hash_key: str = ""
+    ):
         self.metrics = metrics or Metrics()
         # With no configured key, use a random one for this process so hashes are always keyed. They then
         # differ across restarts and pods (see observability.user_hash_key in config.example.toml).
-        self.key = settings.user_hash_key or secrets.token_hex(32)
+        self.key = user_hash_key or settings.user_hash_key or secrets.token_hex(32)
         self.log_enabled = settings.log_tool_calls
 
     async def on_call_tool(
@@ -148,7 +153,7 @@ class ToolCallLogMiddleware(Middleware):
             "adc_call_count": len(calls),
             "adc_retries": sum(c.retried for c in calls),
             "adc_calls": [
-                {k: v for k, v in asdict(c).items() if v not in (None, False)}
+                {k: v for k, v in asdict(c).items() if v is not None and v is not False}  # keep ms=0
                 for c in calls[:MAX_LOGGED_UPSTREAM_CALLS]
             ],
         }
@@ -209,3 +214,5 @@ def configure_logging(settings: ObservabilitySettings) -> None:
     logger.addHandler(handler)
     logger.setLevel(settings.log_level.upper())
     logger.propagate = False
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)

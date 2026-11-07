@@ -39,6 +39,25 @@ async def test_successful_call_is_counted(settings, mock_api, metrics):
     assert sample(metrics, "pdg_mcp_adc_requests_waiting") == 0
 
 
+async def test_tool_series_exist_at_zero_before_any_call(settings, metrics):
+    """So increase()/rate() can see the first call of each tool after a restart."""
+    async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
+        tools = [t.name for t in await c.list_tools()]
+        for tool in tools:
+            for status in ("ok", "error", "rate_limited"):
+                value = metrics.registry.get_sample_value(
+                    "pdg_mcp_tool_calls_total", {"tool": tool, "status": status}
+                )
+                assert value == 0.0, (tool, status)
+            assert metrics.registry.get_sample_value(
+                "pdg_mcp_tool_call_duration_seconds_count", {"tool": tool}
+            ) == 0.0
+    assert len(tools) > 10
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="unknown", status="not_found") == 0
+    # Only the declared tools plus "unknown" exist: no series for anything a client invents.
+    assert b"made_up" not in metrics.render()
+
+
 async def test_adc_errors_and_retries(settings, mock_api, metrics):
     settings.ratelimit.retry_backoff = 0
     mock_api.get(f"{MN}/query/solr/").mock(

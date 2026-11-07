@@ -104,7 +104,9 @@ Loki. Set `[observability] log_format = "text"` for a readable form during devel
   log `anonymous`.
 - `adc_calls` lists each request made to ADC (`endpoint`, `method`, `status`, `ms`, and `retried` or `error` when
   they apply), capped at 25. `endpoint` is the first path segment (`query`, `object`, `meta`, ...), never the URL.
-- Tool arguments and error messages are **not** logged, because they can contain users' query text.
+- Tool arguments and error messages are **not** logged, because they can contain users' query text. The `httpx`
+  loggers are held at WARNING for the same reason (they log request URLs), and the raw Keycloak `sub` is never
+  logged. See "Usage data and privacy" in `docs/admin-guide.md` for the full policy and open questions.
 
 ### Metrics
 
@@ -129,6 +131,9 @@ turn it off. stdio never opens a port.
 ADC failures are `pdg_mcp_adc_requests_total{status=~"4..|5.."}`. Labels never carry user IDs, PIDs or query text,
 and an unknown tool name is counted as `tool="unknown"`. Counters are kept in memory per pod and reset on restart,
 so use `rate()` / `increase()` in queries and scrape every pod.
+
+A Grafana 12 dashboard is in `dashboards/pdg-mcp.json`, and `scripts/usage_report.py` prints the same numbers for
+any period (table, CSV or JSON). See "Dashboard and reports" in `docs/admin-guide.md`.
 
 ### How downloads reach the agent
 

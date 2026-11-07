@@ -82,6 +82,13 @@ Start a new chat with the server turned on and ask:
 
 A working setup returns a list of dataset titles with DOIs (for example `doi:10.18739/A2...`). If the assistant says it couldn't reach the server or offers only general advice, see Troubleshooting.
 
+## What the server records
+
+To report on and improve the service, the server records which tools you call, when, how long each call took
+and whether it worked, along with a pseudonymous ID derived from your account. It does **not** record your search
+terms or other tool inputs. Your searches still go to arcticdata.io as usual, and it keeps its own logs. These
+usage records are currently kept without a set deletion date, and reports use totals only, not individual users.
+
 ## Troubleshooting
 
 Most failures come from a missing approval or the wrong token auth method. For anything not listed, send the PDG team the URL from your browser's address bar.

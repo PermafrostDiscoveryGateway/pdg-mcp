@@ -199,6 +199,20 @@ async def test_unset_key_still_hashes_with_a_random_per_process_key(settings, mo
     assert a != hash_user("sub-1234", "") and b != hash_user("sub-1234", "")  # never the unkeyed hash
 
 
+def test_zero_ms_upstream_call_keeps_ms_field(monkeypatch, caplog):
+    """0 == False in Python, so a naive falsy filter would drop ms=0 from the record."""
+    from arcticdata_mcp.metrics import Metrics
+    from arcticdata_mcp.observability import ToolCallLogMiddleware, UpstreamCall
+
+    caplog.set_level(logging.INFO, logger=observability.toolcall_log.name)
+    mw = ToolCallLogMiddleware(ObservabilitySettings(), Metrics())
+    rec = CallRecorder(calls=[UpstreamCall("query", "GET", 200, 0), UpstreamCall("query", "GET", 503, 7, retried=True)])
+    mw._log("t", "ok", None, observability.time.perf_counter(), rec)
+    first, second = caplog.records[-1].fields["adc_calls"]
+    assert first == {"endpoint": "query", "method": "GET", "status": 200, "ms": 0}
+    assert second == {"endpoint": "query", "method": "GET", "status": 503, "ms": 7, "retried": True}
+
+
 def test_hash_user():
     h = hash_user("sub-1", "k")
     assert len(h) == 16 and h == hash_user("sub-1", "k")
@@ -258,6 +272,34 @@ def test_configure_logging_is_idempotent_and_validates():
         logger.handlers[:] = before[0]
         logger.setLevel(before[1])
         logger.propagate = before[2]
+
+
+async def test_query_text_never_reaches_any_log_even_at_debug(settings, mock_api):
+    """httpx logs full request URLs (query text included) at INFO; configure_logging must silence it."""
+    import io
+
+    saved = {n: logging.getLogger(n).level for n in ("", "httpx", "httpcore", "arcticdata_mcp")}
+    ours = logging.getLogger("arcticdata_mcp")
+    saved_handlers, saved_propagate = list(ours.handlers), ours.propagate
+    buf = io.StringIO()
+    capture = logging.StreamHandler(buf)
+    root = logging.getLogger()
+    try:
+        configure_logging(ObservabilitySettings(log_level="DEBUG"))
+        root.setLevel(logging.DEBUG)  # as if someone turned on verbose logging
+        root.addHandler(capture)
+        ours.addHandler(capture)
+        mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
+        async with Client(create_server(settings, require_auth=False)) as c:
+            await c.call_tool("count_datasets", {"text": SECRET_QUERY})
+    finally:
+        root.removeHandler(capture)
+        ours.handlers[:] = saved_handlers
+        ours.propagate = saved_propagate
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+    assert "tool_call" in buf.getvalue()  # the capture works...
+    assert SECRET_QUERY not in buf.getvalue()  # ...and the query text is absent
 
 
 def test_env_override(monkeypatch):

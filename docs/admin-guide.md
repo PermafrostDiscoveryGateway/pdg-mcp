@@ -101,3 +101,107 @@ annotation. If it uses a `ServiceMonitor` or a static config instead, set `metri
 point it at the pods' `metrics` port. Counters live in each pod, so scrape every pod (each replica has its own
 limits and counts). Set `metrics.enabled: false` to turn the endpoint off. Metric names are listed in the README.
 
+### Dashboard and reports
+
+**Dashboard.** `dashboards/pdg-mcp.json` is a Grafana 12 dashboard ("PDG MCP Usage") built on the metrics above:
+tool calls, success rate and calls per tool for any time range, latency, Arctic Data Center load (status codes,
+retries, queue wait, slots) and process memory. The time picker answers "how many calls, which tools" for any
+period, and the Tool variable filters to specific tools. It shows aggregates only. An Active users panel is
+reserved for a later change.
+
+To use it, in Grafana choose Dashboards, New, Import, upload the JSON, and pick the Prometheus data source. The
+chart does not deploy it automatically, because that depends on how your Grafana loads dashboards.
+
+**Trying it locally.** With Docker running and the server started with
+`uv run arcticdata-mcp --insecure` (metrics on port 9100):
+
+```bash
+docker compose -f dev/observability/docker-compose.yml up -d
+```
+
+Open http://localhost:3000 (no login; localhost only). If port 9090 or 3000 is already in use, set
+`PROMETHEUS_PORT` or `GRAFANA_PORT` (for example `PROMETHEUS_PORT=9091 docker compose ... up -d`) and point the
+report script at that port. Make some tool calls and the panels fill in. Stop and
+delete the data with `docker compose -f dev/observability/docker-compose.yml down -v`. This is for development
+only: Grafana runs with anonymous admin access.
+
+**Numbers for reports.** `scripts/usage_report.py` queries Prometheus and prints totals and a per-tool table for a
+period:
+
+```bash
+uv run python scripts/usage_report.py --prometheus-url http://localhost:9090 --from 2026-10-01 --to 2026-11-01
+uv run python scripts/usage_report.py --from 2026-10-01 --format csv --section tools > tools.csv
+```
+
+`--format` is `table`, `csv` or `json`, and `--section` is `summary`, `tools` or `all`. The default period is the
+last 30 days. `PROMETHEUS_URL` and `PROMETHEUS_TOKEN` (sent as a bearer token) can replace the flags. Output is
+aggregate counts only. The same numbers in PromQL, for a range of `$range`:
+
+| Number | PromQL |
+| --- | --- |
+| Tool calls | `sum(increase(pdg_mcp_tool_calls_total[$range]))` |
+| Calls per tool | `sum by (tool) (increase(pdg_mcp_tool_calls_total[$range]))` |
+| Success rate | `sum(increase(pdg_mcp_tool_calls_total{status="ok"}[$range])) / sum(increase(pdg_mcp_tool_calls_total[$range]))` |
+| ADC 5xx | `sum(increase(pdg_mcp_adc_requests_total{status=~"5.."}[$range]))` |
+
+Things that affect the numbers:
+
+- Prometheus only holds data for its retention period, so a report cannot reach further back than that.
+- `increase()` extrapolates at the edges of the period, by up to about one scrape interval's worth of calls at
+  each end. On a short period that is a few percent (a test showed 70 calls against a true 68); over days or weeks
+  it is negligible. The script rounds to whole calls.
+- Counters live in each pod and reset when a pod restarts. `increase()` handles resets, and the queries sum
+  across pods. Every tool's series is created at zero on startup, so tool-call counts are not affected by
+  restarts. The ADC request counters are created on first use, so after a restart the requests made before
+  Prometheus first scrapes a new series are not counted: ADC totals can run a few requests low per restart.
+
+## Usage data and privacy
+
+This is the interim policy for the usage data described under "Usage logs" and "Metrics". It records what the
+code does today and the decisions made so far. Items marked **open** still need an answer from the project or
+from NCSA.
+
+### What is and is not collected
+
+| Data | Policy |
+| --- | --- |
+| Search terms, tool arguments, error messages | **Never logged.** Not in log lines, not in metrics. |
+| Which tool was called, when, how long, success or failure | Logged and counted. |
+| Which ADC endpoint a call used, with status and timing | Logged and counted. Only the endpoint name (`query`, `object`, ...), never the URL or a PID. |
+| User identity | Only `user_hash`, a keyed HMAC of the Keycloak `sub`. The raw `sub` is never logged, including in the "Rejected user" warning for people who lack the `mcp-user` role. |
+
+How "never log query text" is enforced:
+
+- The call logger records the tool name, outcome, timing and ADC request summary only. It does not read the
+  arguments, and it does not log error text, because that can echo the query.
+- Metric labels come from small fixed sets: tool names the server registers, ADC endpoint names and status codes.
+  A tool name a client invents is counted as `unknown`.
+- The `httpx` and `httpcore` loggers are held at WARNING. HTTP client libraries log full request URLs at INFO, and
+  those URLs contain the search terms. A test fails if query text reaches any log, even with DEBUG logging on.
+
+Two limits to be aware of:
+
+- ADC receives every search, as it always has, and keeps its own logs. This server does not control them.
+- `user_hash` is **pseudonymous, not anonymous**. Anyone holding both the hash key and the list of Keycloak users
+  could work out which hash belongs to whom. Treat the key and the logs as sensitive.
+
+### Decisions so far
+
+1. **Query text is never logged.** An opt-in for debugging may be added later; it needs its own issue and a
+   review of this policy first.
+2. **Retention: logs containing `user_hash` are kept indefinitely for now.** There is no deletion schedule yet.
+   **Open:** agree a retention period with the project and NCSA, and set it on the log store.
+3. **Reporting is aggregate only.** Dashboards and reports show counts of users, tool calls and tools. They do not
+   show per-user tables, per-user panels or exports of individual `user_hash` values.
+4. **The hash key is not rotated for now.** Keep it stable so a user keeps one hash, which active-user counts
+   depend on. **Open:** whether to rotate, and how often. Rotating makes older and newer hashes unlinkable, which
+   is better for privacy and breaks returning-user trends across the rotation.
+
+### Open questions
+
+- Retention period for logs with `user_hash` (decision 2).
+- Key rotation policy (decision 4).
+- Who may read raw logs and the hash Secret.
+- Whether very small counts (for example one user using a tool) should be hidden in reports.
+- Whether the notice in the user guide is enough, or users need to agree to something.
+

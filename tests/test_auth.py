@@ -47,3 +47,30 @@ async def test_missing_role_rejected(monkeypatch):
 
 async def test_empty_required_role_allows_any_user(monkeypatch):
     assert await _verify(monkeypatch, [], required="") is not None
+
+
+async def test_rejection_logs_hashed_user_not_raw_sub(monkeypatch, caplog):
+    import logging
+
+    from fastmcp.server.auth import AccessToken
+    from fastmcp.server.auth.providers.jwt import JWTVerifier
+
+    from arcticdata_mcp.auth import RoleJWTVerifier
+    from arcticdata_mcp.observability import hash_user
+
+    raw_sub = "raw-sub-9876-abcd"
+
+    async def fake(self, token):
+        return AccessToken(token=token, client_id="c", scopes=[], claims={"sub": raw_sub, "realm_access": {"roles": []}})
+
+    monkeypatch.setattr(JWTVerifier, "verify_token", fake)
+    v = RoleJWTVerifier(
+        required_role="mcp-user",
+        user_hash_key="k1",
+        jwks_uri=f"{REALM}/protocol/openid-connect/certs",
+        issuer=REALM,
+    )
+    with caplog.at_level(logging.WARNING, logger="arcticdata_mcp.auth"):
+        assert await v.verify_token("t") is None
+    assert raw_sub not in caplog.text
+    assert hash_user(raw_sub, "k1") in caplog.text

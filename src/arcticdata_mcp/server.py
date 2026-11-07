@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -54,13 +55,19 @@ def create_server(
     client = DataONEClient(settings, transport=transport, metrics=metrics)
 
     @asynccontextmanager
-    async def lifespan(_: FastMCP) -> AsyncIterator[None]:
+    async def lifespan(server: FastMCP) -> AsyncIterator[None]:
+        try:
+            metrics.init_tools(tool.name for tool in await server.list_tools())
+        except Exception:  # metrics are best-effort; never block startup
+            log.warning("Could not pre-create tool metrics", exc_info=True)
         try:
             yield
         finally:
             await client.aclose()
 
-    auth = build_auth(settings.auth) if require_auth else None
+    # One key for every hash in the logs (tool calls and auth rejections). Random per process if not configured.
+    user_hash_key = settings.observability.user_hash_key or secrets.token_hex(32)
+    auth = build_auth(settings.auth, user_hash_key) if require_auth else None
     mcp = FastMCP(
         name="Arctic Data Center",
         instructions=INSTRUCTIONS,
@@ -73,7 +80,7 @@ def create_server(
             "values in logs change on restart and differ between pods"
         )
     # Logging goes first (outermost) so it also records calls the rate limiter rejects.
-    mcp.add_middleware(ToolCallLogMiddleware(settings.observability, metrics))
+    mcp.add_middleware(ToolCallLogMiddleware(settings.observability, metrics, user_hash_key))
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node, portals, apps, water):

@@ -12,6 +12,7 @@ coexist in one process (the tests do this).
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from http.server import HTTPServer
 
 from prometheus_client import (
@@ -31,6 +32,18 @@ log = logging.getLogger(__name__)
 PREFIX = "pdg_mcp"
 UNKNOWN_TOOL = "unknown"  # label for tool names the server does not have, so clients cannot mint new series
 
+# Every value the ``status`` label of pdg_mcp_tool_calls_total can take.
+TOOL_STATUSES = (
+    "ok",
+    "error",
+    "rate_limited",
+    "upstream_busy",
+    "invalid_arguments",
+    "not_found",
+    "cancelled",
+    "exception",
+)
+
 TOOL_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
 UPSTREAM_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
 QUEUE_BUCKETS = (0.001, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30)
@@ -46,8 +59,7 @@ class Metrics:
 
         self.tool_calls = Counter(
             f"{PREFIX}_tool_calls_total",
-            "Tool calls by tool and outcome (ok, error, rate_limited, upstream_busy, invalid_arguments, "
-            "not_found, cancelled, exception).",
+            f"Tool calls by tool and outcome ({', '.join(TOOL_STATUSES)}).",
             ["tool", "status"],
             registry=r,
         )
@@ -101,6 +113,19 @@ class Metrics:
         self.adc_waiting = Gauge(
             f"{PREFIX}_adc_requests_waiting", "Requests currently waiting for an ADC slot.", registry=r
         )
+
+    def init_tools(self, tools: Iterable[str]) -> None:
+        """Create every tool's series at zero.
+
+        Prometheus's ``increase()`` / ``rate()`` cannot see the 0 -> 1 step of a series that first appears
+        already at 1, so without this the first call to each tool after a restart would not be counted.
+        """
+        for tool in tools:
+            self.tool_duration.labels(tool)
+            for status in TOOL_STATUSES:
+                self.tool_calls.labels(tool, status)
+        self.tool_calls.labels(UNKNOWN_TOOL, "not_found")
+        self.tool_duration.labels(UNKNOWN_TOOL)
 
     # Events -------------------------------------------------------------------------------------------
     def observe_tool_call(self, tool: str, status: str, seconds: float) -> None:

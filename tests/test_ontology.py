@@ -57,6 +57,23 @@ def test_top_matches_prefers_concepts_whose_own_label_matches(term, labels):
     assert [m.concept.label for m in ontology.top_matches(term, ontology.match_local(term, 10))] == labels
 
 
+@pytest.mark.parametrize(("term", "label"), [("moisture", "Volumetric Water Content Method"), ("animal", "Multi-Celled Organism")])
+def test_related_synonym_is_a_candidate_but_never_used_automatically(term, label):
+    matches = ontology.match_local(term, 30)
+    m = next(m for m in matches if m.concept.label == label)
+    assert m.score < ontology.STRONG_MATCH
+    assert m.to_dict()["matched_as"] == "related_synonym"
+    assert label not in [t.concept.label for t in ontology.top_matches(term, matches)]
+
+
+def test_to_dict_keeps_exact_and_related_synonyms_apart():
+    c = next(c for c in ontology.load_concepts() if c.label == "dissolved organic carbon")
+    d = ontology.Match(c, 1.0, "DOC").to_dict()
+    assert d["matched_as"] == "synonym"
+    assert "DOC" in d["synonyms"] and "dissolved organic material" not in d["synonyms"]
+    assert d["related_synonyms"] == ["dissolved organic material"]
+
+
 def test_top_matches_empty_when_best_match_is_weak():
     assert ontology.top_matches("permafrost temperature", ontology.match_local("permafrost temperature", 10)) == []
 

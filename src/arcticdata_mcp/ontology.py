@@ -27,8 +27,10 @@ BIOPORTAL_ONTOLOGY = "ECSO"
 # A concept scoring at least this well is used automatically by search_by_variable.
 STRONG_MATCH = 0.72
 MIN_SCORE = 0.3
-# Broad/narrow/related synonyms rank below an exact label or exact synonym (which score 1.0).
-RELATED_PENALTY = 0.9
+# Related/broad/narrow synonyms are not equivalent names (ECSO lists "moisture" under Volumetric Water Content
+# Method, "animal" under Multi-Celled Organism), so a match on one is capped below STRONG_MATCH: it is offered
+# as a candidate but never used automatically.
+RELATED_MAX_SCORE = 0.7
 
 _ODO_ID = re.compile(r"^(?:(?:https?://(?:www\.)?purl\.dataone\.org/odo/)|(?:ecso:))?(ECSO_\d{8})$", re.IGNORECASE)
 _NON_WORD = re.compile(r"[^a-z0-9]+")
@@ -54,8 +56,16 @@ class Match:
     def to_dict(self) -> dict[str, Any]:
         c = self.concept
         out: dict[str, Any] = {"uri": c.uri, "label": c.label, "score": round(self.score, 3), "matched_on": self.matched_on}
+        if self.matched_on == c.label:
+            out["matched_as"] = "label"
+        elif self.matched_on in c.synonyms:
+            out["matched_as"] = "synonym"
+        elif self.matched_on in c.related_synonyms:
+            out["matched_as"] = "related_synonym"
         if c.synonyms:
             out["synonyms"] = c.synonyms
+        if c.related_synonyms:
+            out["related_synonyms"] = c.related_synonyms
         if c.definition:
             out["definition"] = c.definition
         out["source"] = self.sources
@@ -118,9 +128,8 @@ def best_name(query: str, concept: Concept) -> tuple[float, str]:
         s = score_name(query, name)
         if s > best[0]:
             best = (s, name)
-    # Broad/narrow/related synonyms count, but rank below an exact label or exact synonym.
     for name in concept.related_synonyms:
-        s = score_name(query, name) * RELATED_PENALTY
+        s = min(score_name(query, name), RELATED_MAX_SCORE)
         if s > best[0]:
             best = (s, name)
     return best

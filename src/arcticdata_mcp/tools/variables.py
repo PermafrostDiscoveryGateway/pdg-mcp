@@ -45,7 +45,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Map a natural-language variable name to ECSO ontology concepts (PURLs), ranked by match score.
 
         Use the returned uri with search_by_semantic_annotation, or pass several to search_by_variable
-        (concept_uris=[...]). Scores: 1.0 = exact label or synonym, >=0.72 = all words match.
+        (concept_uris=[...]). Scores: 1.0 = exact label or synonym, >=0.72 = all words match;
+        a match on a related/broad/narrow synonym scores at most 0.7 and is never used automatically.
+        matched_as says whether the label, an exact synonym or a related synonym matched.
         dataset_count is the number of datasets annotated with the concept.
         Example: find_variable_concepts(term="soil depth")
         """

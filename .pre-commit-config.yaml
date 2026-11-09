@@ -1,5 +1,7 @@
 # Optional local hooks: `uvx pre-commit install` (or `pip install pre-commit && pre-commit install`).
 # CI runs the same ruff checks, so the hooks only catch problems earlier.
+# Keep `rev` equal to the ruff version in uv.lock (`uv run ruff --version`). Dependabot bumps uv.lock but not this
+# file, and a different ruff version can format differently from CI.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.4

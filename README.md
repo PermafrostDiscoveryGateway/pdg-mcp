@@ -164,7 +164,12 @@ They modify the repository or need a DataONE admin token.
 ```bash
 uv run pytest            # unit and mocked tests
 uv run pytest -m live    # smoke tests against arcticdata.io
+uv run ruff check .      # lint
+uv run ruff format .     # format
 ```
+
+CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the optional
+pre-commit hook.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`

@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --frozen
+      - run: uv sync --locked
       - run: uv run pytest -m live
       # Open one issue per outage: skip if a previous failure's issue is still open.
       - if: failure() && github.event_name == 'schedule'

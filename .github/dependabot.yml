@@ -7,10 +7,15 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  # Patch updates of the base image only. Moving off Python 3.12 is a manual change: the Dockerfile, .python-version
+  # and the workflows' python-version have to move together.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   # Updates uv.lock (and the pyproject.toml constraints). Grouped and capped so the first run doesn't open a pile of
   # PRs; expect uv.lock conflicts with open PRs, which `uv lock` resolves. Live tests don't run on these PRs, so check
   # that fastmcp bumps still work.

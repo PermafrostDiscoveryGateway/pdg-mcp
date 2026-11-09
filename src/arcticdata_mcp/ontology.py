@@ -22,7 +22,10 @@ from arcticdata_mcp import solr
 from arcticdata_mcp.client import DataONEClient
 
 ODO_HTTP = "http://purl.dataone.org/odo/"
-ODO_HTTPS = "https://purl.dataone.org/odo/"
+# Every form of a DataONE ODO PURL found in sem_annotation, canonical first. 42 ECSO classes (the permafrost
+# cluster: Water Content, Depth of Thaw, Freezing Index, ...) were minted as http://www.purl..., and curators
+# copied that spelling into annotations, so the index holds it alongside http:// and https://.
+ODO_FORMS = (ODO_HTTP, "https://purl.dataone.org/odo/", "http://www.purl.dataone.org/odo/")
 BIOPORTAL_ONTOLOGY = "ECSO"
 # A concept scoring at least this well is used automatically by search_by_variable.
 STRONG_MATCH = 0.72
@@ -32,6 +35,7 @@ MIN_SCORE = 0.3
 # as a candidate but never used automatically.
 RELATED_MAX_SCORE = 0.7
 
+_ODO_PREFIX = re.compile(r"^https?://(?:www\.)?purl\.dataone\.org/odo/", re.IGNORECASE)
 _ODO_ID = re.compile(r"^(?:(?:https?://(?:www\.)?purl\.dataone\.org/odo/)|(?:ecso:))?(ECSO_\d{8})$", re.IGNORECASE)
 _NON_WORD = re.compile(r"[^a-z0-9]+")
 
@@ -73,18 +77,19 @@ class Match:
 
 
 def normalize_concept_id(value: str) -> str:
-    """Expand a bare ECSO id ('ECSO_00001207', 'ecso:ECSO_00001207') to its canonical PURL."""
+    """Canonical http://purl.dataone.org/odo/ form of a bare ECSO id ('ECSO_00001207', 'ecso:ECSO_00001207')
+    or of an ODO PURL written with https:// or www.; other URIs are returned unchanged."""
     value = value.strip()
-    m = _ODO_ID.match(value)
-    return f"{ODO_HTTP}{m.group(1).upper()}" if m else value
+    if m := _ODO_ID.match(value):
+        return f"{ODO_HTTP}{m.group(1).upper()}"
+    return _ODO_PREFIX.sub(ODO_HTTP, value)
 
 
 def purl_variants(uri: str) -> list[str]:
-    """All forms of a concept URI found in the index. DataONE PURLs appear as both http:// and https://."""
+    """All forms of a concept URI found in the index (http://, https:// and http://www. for DataONE PURLs)."""
     uri = normalize_concept_id(uri)
-    for a, b in ((ODO_HTTP, ODO_HTTPS), (ODO_HTTPS, ODO_HTTP)):
-        if uri.startswith(a):
-            return [uri, b + uri[len(a):]]
+    if uri.startswith(ODO_HTTP):
+        return [form + uri[len(ODO_HTTP):] for form in ODO_FORMS]
     return [uri]
 
 
@@ -153,11 +158,31 @@ def _concepts_by_uri() -> dict[str, Concept]:
 
 
 def concept_by_uri(uri: str) -> Concept | None:
-    """Bundled concept for a URI or bare ECSO id, in either http:// or https:// form."""
-    uri = normalize_concept_id(uri)
-    if uri.startswith(ODO_HTTPS):
-        uri = ODO_HTTP + uri[len(ODO_HTTPS):]
-    return _concepts_by_uri().get(uri)
+    """Bundled concept for a URI or bare ECSO id, in any of its PURL forms."""
+    return _concepts_by_uri().get(normalize_concept_id(uri))
+
+
+@cache
+def ancestors(uri: str) -> frozenset[str]:
+    """URIs of every bundled ancestor of a concept (parents, their parents, ...)."""
+    out: set[str] = set()
+    stack = list(c.parents) if (c := concept_by_uri(uri)) else []
+    while stack:
+        p = stack.pop()
+        if p not in out:
+            out.add(p)
+            stack += c.parents if (c := concept_by_uri(p)) else []
+    return frozenset(out)
+
+
+def without_descendants(matches: list[Match]) -> list[Match]:
+    """Drop matches whose concept has an ancestor among the other matches.
+
+    The index expands each annotation to its ancestors, so searching the ancestor already finds them:
+    temperature_measurementType matches 706 current datasets, all 24 temperature concepts together 707.
+    """
+    uris = {m.concept.uri for m in matches}
+    return [m for m in matches if not ancestors(m.concept.uri) & uris]
 
 
 def match_local(query: str, limit: int = 10) -> list[Match]:

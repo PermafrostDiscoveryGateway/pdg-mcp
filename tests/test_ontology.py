@@ -5,6 +5,8 @@ from arcticdata_mcp import ontology
 from conftest import MN
 
 SOIL_DEPTH = "http://purl.dataone.org/odo/ECSO_00001207"
+SOIL_DEPTH_FORMS = [SOIL_DEPTH, "https://purl.dataone.org/odo/ECSO_00001207", "http://www.purl.dataone.org/odo/ECSO_00001207"]
+WATER_CONTENT = "http://purl.dataone.org/odo/ECSO_00010077"  # minted as http://www.purl..., 96 current datasets
 
 
 def solr_json(docs, num=None, facet_queries=None):
@@ -14,10 +16,31 @@ def solr_json(docs, num=None, facet_queries=None):
     return out
 
 
-@pytest.mark.parametrize("value", ["ECSO_00001207", "ecso:ECSO_00001207", SOIL_DEPTH, "https://purl.dataone.org/odo/ECSO_00001207"])
-def test_concept_ids_normalize_and_cover_http_and_https(value):
-    assert set(ontology.purl_variants(value)) == {SOIL_DEPTH, "https://purl.dataone.org/odo/ECSO_00001207"}
+@pytest.mark.parametrize("value", ["ECSO_00001207", "ecso:ECSO_00001207", *SOIL_DEPTH_FORMS])
+def test_concept_ids_normalize_and_cover_every_purl_form(value):
+    assert ontology.normalize_concept_id(value) == SOIL_DEPTH
+    assert ontology.purl_variants(value) == SOIL_DEPTH_FORMS
     assert ontology.concept_by_uri(value).label == "Soil Depth"
+
+
+@pytest.mark.parametrize("value", ["ECSO_00010077", WATER_CONTENT, "http://www.purl.dataone.org/odo/ECSO_00010077"])
+def test_www_purl_concepts_are_bundled(value):
+    assert ontology.concept_by_uri(value).label == "Water Content"
+    assert "http://www.purl.dataone.org/odo/ECSO_00010077" in ontology.purl_variants(value)
+
+
+@pytest.mark.parametrize(("term", "label"), [("water content", "Water Content"), ("depth of thaw", "Depth of Thaw"), ("NDVI", "Normalized Difference Vegetation Index")])
+def test_www_purl_concepts_resolve(term, label):
+    assert [m.concept.label for m in ontology.top_matches(term, ontology.match_local(term, 50))] == [label]
+
+
+def test_bundled_table_records_its_ecso_version():
+    import json
+    from importlib.resources import files
+
+    source = json.loads(files("arcticdata_mcp").joinpath("data/ecso/concepts.json").read_text())["source"]
+    assert source["repository"] == "DataONEorg/sem-prov-ontologies" and len(source["commit"]) == 40
+    assert source["exported"]
 
 
 def test_other_uris_pass_through():
@@ -27,7 +50,7 @@ def test_other_uris_pass_through():
 
 def test_annotation_clause_ors_variants():
     clause = ontology.annotation_clause(["ECSO_00001207"])
-    assert clause == f'sem_annotation:("{SOIL_DEPTH}" OR "https://purl.dataone.org/odo/ECSO_00001207")'
+    assert clause == "sem_annotation:(" + " OR ".join(f'"{u}"' for u in SOIL_DEPTH_FORMS) + ")"
 
 
 @pytest.mark.parametrize(
@@ -90,7 +113,34 @@ async def test_search_by_variable_uses_only_label_match_for_ties(client, mock_ap
     sc = r.structured_content
     assert sc["resolution"] == "concept"
     assert [c["label"] for c in sc["concepts_used"]] == ["albedo"]
-    assert {"Longwave_Albedo_MOV", "Shortwave_Albedo_MOV"} <= {c["label"] for c in sc["other_candidates"]}
+    # Longwave_/Shortwave_Albedo_MOV sit under albedo, so searching albedo already finds them.
+    assert not {"Longwave_Albedo_MOV", "Shortwave_Albedo_MOV"} & {c["label"] for c in sc.get("other_candidates", [])}
+    assert "ambiguous" not in sc
+
+
+def test_without_descendants_keeps_the_ancestor():
+    tied = ontology.top_matches("temperature", ontology.match_local("temperature", 50))
+    kept = ontology.without_descendants(tied)
+    assert "temperature_measurementType" in {m.concept.label for m in kept}
+    assert "Soil Temperature" not in {m.concept.label for m in kept}
+    # Every temperature concept sits under temperature_measurementType, so it alone covers them all.
+    assert [m.concept.label for m in kept] == ["temperature_measurementType"]
+    assert all(not ontology.ancestors(m.concept.uri) & {k.concept.uri for k in kept} for m in kept)
+
+
+async def test_search_by_variable_breaks_wide_ties_by_dataset_count(client, mock_api):
+    kept = ontology.without_descendants(ontology.top_matches("soil", ontology.match_local("soil", 50)))
+    assert len(kept) > 5
+    # The last tied concepts have the most datasets, so they are the ones searched.
+    counts = {f"c{i}": i for i in range(len(kept))}
+    mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=solr_json([], facet_queries=counts)))
+    r = await client.call_tool("search_by_variable", {"variable": "soil", "rows": 0})
+    sc = r.structured_content
+    assert sc["resolution"] == "concept" and sc["ambiguous"] is True
+    assert [c["uri"] for c in sc["concepts_used"]] == [m.concept.uri for m in reversed(kept[-5:])]
+    dropped = [c for c in sc["other_candidates"] if "dataset_count" in c]
+    assert [c["uri"] for c in dropped] == [m.concept.uri for m in reversed(kept[:-5])]
+    assert "equally well" in sc["note"]
 
 
 def test_merge_combines_sources_and_keeps_best_score():
@@ -155,7 +205,7 @@ async def test_search_by_variable_explicit_concepts(client, mock_api):
         "search_by_variable", {"variable": "depth", "concept_uris": ["ECSO_00001207"], "include_free_text": False},
     )
     assert r.structured_content["resolution"] == "explicit"
-    assert route.calls.last.request.url.params["q"] == f'(sem_annotation:("{SOIL_DEPTH}" OR "https://purl.dataone.org/odo/ECSO_00001207"))'
+    assert route.calls.last.request.url.params["q"] == "(" + ontology.annotation_clause([SOIL_DEPTH]) + ")"
 
 
 async def test_bioportal_used_when_configured(settings, mock_api):

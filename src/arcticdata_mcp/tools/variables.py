@@ -18,6 +18,7 @@ from arcticdata_mcp.tools.common import READ_ONLY, LatestOnly, Rows, Sort, Start
 
 Term = Annotated[str, Field(description="Variable in plain language, e.g. 'soil depth', 'active layer thickness', 'methane flux'.")]
 MAX_AUTO_CONCEPTS = 5
+CANDIDATE_POOL = 50
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -91,17 +92,27 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Resolves the variable to ECSO concept PURLs and searches the semantic annotations, which catches
         datasets described in other words. Annotated and free-text attribute matches are combined and
         de-duplicated; each result's match_type is "annotation", "free_text" or "both". If no concept
-        matches well, it falls back to free text. counts gives the total per match type.
+        matches well, it falls back to free text. counts gives the total per match type. If more than five
+        concepts match equally well, it searches the five with the most datasets and sets ambiguous=true.
         Example: search_by_variable(variable="soil depth")
         """
         candidates: list[ontology.Match] = []
+        dropped: list[ontology.Match] = []
+        tie_counts: dict[str, int] = {}
         warning = None
         if concept_uris:
             uris = list(dict.fromkeys(ontology.normalize_concept_id(u) for u in concept_uris))
             resolution = "explicit"
         else:
-            candidates, warning = await resolve(variable, 10)
-            uris = [m.concept.uri for m in ontology.top_matches(variable, candidates)][:MAX_AUTO_CONCEPTS]
+            # A wide pool so every concept tied for the top score is seen ("temperature" ties 24 at 0.74).
+            candidates, warning = await resolve(variable, CANDIDATE_POOL)
+            tied = ontology.without_descendants(ontology.top_matches(variable, candidates))
+            if len(tied) > MAX_AUTO_CONCEPTS:
+                # Too many equally good concepts: search the ones with the most datasets and say what was left out.
+                tie_counts = await ontology.dataset_counts(client, [m.concept.uri for m in tied], latest_only)
+                tied.sort(key=lambda m: -tie_counts[m.concept.uri])
+                tied, dropped = tied[:MAX_AUTO_CONCEPTS], tied[MAX_AUTO_CONCEPTS:]
+            uris = [m.concept.uri for m in tied]
             resolution = "concept" if uris else "free_text_fallback"
 
         annotation = ontology.annotation_clause(uris) if uris else None
@@ -154,9 +165,26 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "query": res["query"],
             "results": results,
         }
-        others = [m for m in candidates if m.concept.uri not in uris][:5]
+        if dropped:
+            out["ambiguous"] = True
+            out["note"] = (
+                f"{len(tied) + len(dropped)} ECSO concepts match '{variable}' equally well; searched the "
+                f"{len(tied)} with the most annotated datasets. The rest are listed first in other_candidates: "
+                "pass the ones you want as concept_uris, or use a more specific variable name."
+            )
+        # Concepts under one that was searched are already covered (the index expands annotations to ancestors).
+        others = [
+            m for m in candidates
+            if m.concept.uri not in uris and not ontology.ancestors(m.concept.uri) & set(uris) and m.concept.uri not in {d.concept.uri for d in dropped}
+        ]
+        others = dropped + others[: max(0, 5 - len(dropped))]
         if others:
-            out["other_candidates"] = [{"uri": m.concept.uri, "label": m.concept.label, "score": round(m.score, 3)} for m in others]
+            out["other_candidates"] = []
+            for m in others:
+                c = {"uri": m.concept.uri, "label": m.concept.label, "score": round(m.score, 3)}
+                if m.concept.uri in tie_counts:
+                    c["dataset_count"] = tie_counts[m.concept.uri]
+                out["other_candidates"].append(c)
         if resolution == "free_text_fallback":
             out["note"] = (
                 "No ECSO concept matched well, so only a free-text search (all words in the attribute text) was run. "

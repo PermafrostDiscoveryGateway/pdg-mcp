@@ -46,3 +46,37 @@ async def test_portals(live):
     pid = data["results"][0]["id"]
     owners = (await live.call_tool("find_portals_for_dataset", {"pid": pid})).structured_content
     assert "PerCS-Net" in [p["label"] for p in owners["portals"]]
+
+
+# ECSO ids used in current annotations that the bundled table cannot cover: they are not defined in ECSO8.owl
+# at all (13 dataset annotations in November 2026, summed per concept). The www.purl gap this guards against was 164 datasets.
+MAX_UNCOVERED_DATASETS = 30
+
+
+async def test_bundled_ecso_table_covers_indexed_annotations():
+    """Every well-formed ECSO address in current annotations (http, https or www.) should be in concepts.json.
+
+    Malformed values (ECSO_#PAR, the pulr.dataone.org typo, ...) are curation errors to report to ADC, not
+    concepts to bundle, so they are not counted.
+    """
+    import re
+
+    from arcticdata_mcp import ontology
+    from arcticdata_mcp.client import DataONEClient
+
+    client = DataONEClient(Settings())
+    try:
+        data = await client.solr([
+            ("q", "sem_annotation:*ECSO_*"), ("fq", "-obsoletedBy:*"), ("fq", "formatType:METADATA"), ("rows", 0),
+            ("facet", "true"), ("facet.field", "sem_annotation"), ("facet.limit", -1), ("facet.mincount", 1),
+            ("json.nl", "map"),
+        ])
+    finally:
+        await client.aclose()
+    uncovered: dict[str, int] = {}
+    for value, n in data["facet_counts"]["facet_fields"]["sem_annotation"].items():
+        uri = ontology.normalize_concept_id(value)
+        if re.fullmatch(r"http://purl\.dataone\.org/odo/ECSO_\d{8}", uri) and not ontology.concept_by_uri(uri):
+            uncovered[uri] = uncovered.get(uri, 0) + n
+    worst = sorted(uncovered.items(), key=lambda kv: -kv[1])
+    assert sum(uncovered.values()) <= MAX_UNCOVERED_DATASETS, f"ECSO concepts annotated but not bundled: {worst}"

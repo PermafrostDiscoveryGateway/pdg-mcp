@@ -6,6 +6,8 @@ import argparse
 import sys
 
 from arcticdata_mcp.config import load_settings
+from arcticdata_mcp.metrics import Metrics, start_metrics_server
+from arcticdata_mcp.observability import configure_logging
 from arcticdata_mcp.server import create_server
 
 
@@ -24,6 +26,7 @@ def main(argv: list[str] | None = None) -> None:
 
         config_path = "config.toml" if Path("config.toml").is_file() else None
     settings = load_settings(config_path)
+    configure_logging(settings.observability)
     transport = args.transport or settings.server.transport
     host = args.host or settings.server.host
     port = args.port or settings.server.port
@@ -37,7 +40,9 @@ def main(argv: list[str] | None = None) -> None:
             "Refusing to start: no Keycloak realm configured. Set [auth] realm_url in config.toml "
             "or ARCTICDATA_MCP_AUTH_REALM_URL (or pass --insecure for local testing)."
         )
-    server = create_server(settings, require_auth=bool(settings.auth.realm_url))
+    metrics = Metrics()
+    server = create_server(settings, require_auth=bool(settings.auth.realm_url), metrics=metrics)
+    start_metrics_server(settings.observability, metrics)
     server.run(transport="http", host=host, port=port, path=settings.server.path)
 
 

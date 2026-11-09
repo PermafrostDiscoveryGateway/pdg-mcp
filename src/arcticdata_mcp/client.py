@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 import xmltodict
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.metrics import Metrics
+from arcticdata_mcp.observability import record_upstream
 from arcticdata_mcp.ratelimit import UpstreamLimiter
 
 USER_AGENT = "arcticdata-mcp/0.1 (+https://arcticdata.io)"
@@ -73,12 +76,18 @@ def _raise_for_dataone(resp: httpx.Response) -> None:
 class DataONEClient:
     """Thin wrapper over httpx for the DataONE REST endpoints used by the tools."""
 
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        metrics: Metrics | None = None,
+    ):
         self.settings = settings
+        self.metrics = metrics or Metrics()
         self.base_url = settings.arcticdata.base_url.rstrip("/")
         self.cn_url = settings.arcticdata.cn_url.rstrip("/")
         self.catalog_url = settings.arcticdata.catalog_url.rstrip("/")
-        self.limiter = UpstreamLimiter(settings.ratelimit)
+        self.limiter = UpstreamLimiter(settings.ratelimit, self.metrics)
         max_conn = settings.ratelimit.max_concurrent or None
         self._http = httpx.AsyncClient(
             timeout=settings.arcticdata.timeout,
@@ -104,18 +113,49 @@ class DataONEClient:
     def landing_url(self, pid: str) -> str:
         return f"{self.catalog_url}/{quote_pid(pid)}"
 
+    def endpoint_label(self, url: str) -> str:
+        """Coarse, non-identifying name for a URL (``query``, ``object``, ...) for logs; never PIDs or queries."""
+        if url.startswith(self.catalog_url):  # landing pages: the first path segment is a PID
+            return "catalog"
+        for base in (self.base_url, self.cn_url):
+            if url.startswith(base + "/"):
+                return url[len(base) + 1 :].split("?")[0].split("/")[0] or "root"
+        return urlsplit(url).netloc or "unknown"
+
+    def _record(
+        self,
+        endpoint: str,
+        method: str,
+        status: int | None,
+        started: float,
+        *,
+        retried: bool = False,
+        error: str | None = None,
+    ) -> None:
+        """Note one ADC request in the per-tool-call log record and in the Prometheus metrics."""
+        record_upstream(endpoint, method, status, started, retried=retried, error=error)
+        self.metrics.observe_adc_request(endpoint, method, status, time.perf_counter() - started, retried=retried)
+
     # Requests -------------------------------------------------------------
     async def request(
         self, method: str, url: str, *, raise_errors: bool = True, **kwargs: Any
     ) -> httpx.Response:
         attempt = 0
+        endpoint = self.endpoint_label(url)
         while True:
             try:
                 async with self.limiter.slot():
-                    resp = await self._http.request(method, url, **kwargs)
+                    started = time.perf_counter()
+                    try:
+                        resp = await self._http.request(method, url, **kwargs)
+                    except httpx.HTTPError as exc:
+                        self._record(endpoint, method, None, started, error=type(exc).__name__)
+                        raise
             except httpx.HTTPError as exc:
                 raise ToolError(f"Request to {url} failed: {exc}") from exc
-            if not self.limiter.should_retry(resp, attempt):
+            retry = self.limiter.should_retry(resp, attempt)
+            self._record(endpoint, method, resp.status_code, started, retried=retry)
+            if not retry:
                 break
             await asyncio.sleep(self.limiter.delay(attempt, resp))
             attempt += 1
@@ -145,20 +185,27 @@ class DataONEClient:
     @asynccontextmanager
     async def stream(self, url: str) -> AsyncIterator[httpx.Response]:
         attempt = 0
+        endpoint = self.endpoint_label(url)
+        started = time.perf_counter()
         try:
             while True:
-                async with self.limiter.slot(), self._http.stream("GET", url) as resp:
-                    if self.limiter.should_retry(resp, attempt):
-                        await resp.aread()
-                        delay = self.limiter.delay(attempt, resp)
-                    else:
-                        if resp.status_code >= 400:
+                async with self.limiter.slot():
+                    started = time.perf_counter()
+                    async with self._http.stream("GET", url) as resp:
+                        retry = self.limiter.should_retry(resp, attempt)
+                        self._record(endpoint, "GET", resp.status_code, started, retried=retry)
+                        if retry:
                             await resp.aread()
-                            _raise_for_dataone(resp)
-                        yield resp
-                        return
+                            delay = self.limiter.delay(attempt, resp)
+                        else:
+                            if resp.status_code >= 400:
+                                await resp.aread()
+                                _raise_for_dataone(resp)
+                            yield resp
+                            return
                 # Sleep outside the slot so a backing-off request does not block others.
                 await asyncio.sleep(delay)
                 attempt += 1
         except httpx.HTTPError as exc:
+            self._record(endpoint, "GET", None, started, error=type(exc).__name__)
             raise ToolError(f"Request to {url} failed: {exc}") from exc

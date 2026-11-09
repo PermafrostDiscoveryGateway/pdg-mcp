@@ -13,6 +13,12 @@ spec:
     metadata:
       labels:
         {{- include "pdg-mcp.selector" . | nindent 8 }}
+      {{- if and .Values.metrics.enabled .Values.metrics.scrapeAnnotations }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.metrics.port | quote }}
+        prometheus.io/path: /metrics
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -30,9 +36,20 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+            {{- if .Values.metrics.enabled }}
+            # Not exposed by the Service or Ingress: only a scraper talking to the pod can reach it.
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+            {{- end }}
           env:
             - name: ARCTICDATA_MCP_SERVER_HOST
               value: 0.0.0.0
+            - name: ARCTICDATA_MCP_OBSERVABILITY_METRICS_ENABLED
+              value: {{ .Values.metrics.enabled | quote }}
+            - name: ARCTICDATA_MCP_OBSERVABILITY_METRICS_HOST
+              value: 0.0.0.0
+            - name: ARCTICDATA_MCP_OBSERVABILITY_METRICS_PORT
+              value: {{ .Values.metrics.port | quote }}
             - name: ARCTICDATA_MCP_AUTH_REALM_URL
               value: {{ .Values.auth.realmUrl | quote }}
             - name: ARCTICDATA_MCP_AUTH_BASE_URL
@@ -43,6 +60,13 @@ spec:
               value: {{ .Values.auth.requiredRole | quote }}
             - name: ARCTICDATA_MCP_AUTH_REQUIRED_SCOPES
               value: {{ .Values.auth.requiredScopes | quote }}
+            {{- with .Values.observability.userHashKeySecret }}
+            - name: ARCTICDATA_MCP_OBSERVABILITY_USER_HASH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .key }}
+            {{- end }}
             {{- range $k, $v := .Values.extraEnv }}
             - name: {{ $k }}
               value: {{ $v | quote }}

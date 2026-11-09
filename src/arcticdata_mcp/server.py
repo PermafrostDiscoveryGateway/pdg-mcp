@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -11,9 +13,13 @@ from fastmcp import FastMCP
 from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
+from arcticdata_mcp.metrics import Metrics
+from arcticdata_mcp.observability import ToolCallLogMiddleware
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
 from arcticdata_mcp.tools import apps, datasets, node, objects, portals, search, water
 from arcticdata_mcp.tools.common import ToolContext
+
+log = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
 Search and download public data from the NSF Arctic Data Center (arcticdata.io), a DataONE member node.
@@ -39,24 +45,42 @@ def create_server(
     *,
     require_auth: bool = True,
     transport: httpx.AsyncBaseTransport | None = None,
+    metrics: Metrics | None = None,
 ) -> FastMCP:
-    """Build the MCP server. ``transport`` lets tests inject a mock HTTP transport."""
-    client = DataONEClient(settings, transport=transport)
+    """Build the MCP server. ``transport`` lets tests inject a mock HTTP transport.
+
+    ``metrics`` is the collector set to update; the caller serves it (see ``start_metrics_server``).
+    """
+    metrics = metrics or Metrics()
+    client = DataONEClient(settings, transport=transport, metrics=metrics)
 
     @asynccontextmanager
-    async def lifespan(_: FastMCP) -> AsyncIterator[None]:
+    async def lifespan(server: FastMCP) -> AsyncIterator[None]:
+        try:
+            metrics.init_tools(tool.name for tool in await server.list_tools())
+        except Exception:  # metrics are best-effort; never block startup
+            log.warning("Could not pre-create tool metrics", exc_info=True)
         try:
             yield
         finally:
             await client.aclose()
 
-    auth = build_auth(settings.auth) if require_auth else None
+    # One key for every hash in the logs (tool calls and auth rejections). Random per process if not configured.
+    user_hash_key = settings.observability.user_hash_key or secrets.token_hex(32)
+    auth = build_auth(settings.auth, user_hash_key) if require_auth else None
     mcp = FastMCP(
         name="Arctic Data Center",
         instructions=INSTRUCTIONS,
         auth=auth,
         lifespan=lifespan,
     )
+    if auth is not None and settings.observability.log_tool_calls and not settings.observability.user_hash_key:
+        log.warning(
+            "observability.user_hash_key is not set: using a random key for this process, so user_hash "
+            "values in logs change on restart and differ between pods"
+        )
+    # Logging goes first (outermost) so it also records calls the rate limiter rejects.
+    mcp.add_middleware(ToolCallLogMiddleware(settings.observability, metrics, user_hash_key))
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node, portals, apps, water):

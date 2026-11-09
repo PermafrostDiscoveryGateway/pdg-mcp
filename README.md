@@ -84,6 +84,57 @@ ADC does not rate-limit on its side, so this server limits itself. There are two
 `get_server_config` reports the active limits to agents. Limits are kept in memory per process, so with several
 replicas the effective limits are multiplied by the replica count.
 
+### Usage logging
+
+Every tool call writes one JSON line to stderr (logger `arcticdata_mcp.toolcalls`), for log shippers such as
+Loki. Set `[observability] log_format = "text"` for a readable form during development.
+
+```json
+{"ts": "2026-11-06T20:54:28.500+00:00", "level": "INFO", "logger": "arcticdata_mcp.toolcalls", "event": "tool_call",
+ "tool": "count_datasets", "status": "ok", "duration_ms": 312, "user_hash": "9f2c0a4be1d37a55",
+ "adc_call_count": 1, "adc_retries": 0, "adc_calls": [{"endpoint": "query", "method": "GET", "status": 200, "ms": 298}]}
+```
+
+- `status` is `ok`, `error` (the tool raised a `ToolError`), `rate_limited`, `upstream_busy` (no ADC slot within
+  `queue_timeout`), `cancelled` or `exception`. Failures add `error_type`.
+- `user_hash` is a keyed HMAC-SHA256 of the Keycloak `sub`, truncated to 16 hex characters. Set
+  `observability.user_hash_key` to a secret that is the same on every pod. Without it the server uses a random key
+  per process and logs a warning at startup, so hashes change on restart and differ between pods. Changing the
+  key makes new hashes unlinkable to old ones. Calls without auth
+  log `anonymous`.
+- `adc_calls` lists each request made to ADC (`endpoint`, `method`, `status`, `ms`, and `retried` or `error` when
+  they apply), capped at 25. `endpoint` is the first path segment (`query`, `object`, `meta`, ...), never the URL.
+- Tool arguments and error messages are **not** logged, because they can contain users' query text. The `httpx`
+  loggers are held at WARNING for the same reason (they log request URLs), and the raw Keycloak `sub` is never
+  logged. See "Usage data and privacy" in `docs/admin-guide.md` for the full policy and open questions.
+
+### Metrics
+
+With the http transport the server also serves Prometheus metrics at `http://<metrics_host>:<metrics_port>/metrics`
+(default `127.0.0.1:9100`). This is a **separate listener**: the MCP port has no `/metrics` route, so exposing the
+MCP port through a Service or Ingress does not expose the metrics. Set `observability.metrics_enabled = false` to
+turn it off. stdio never opens a port.
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `pdg_mcp_tool_calls_total` | `tool`, `status` | Tool calls by outcome (`ok`, `error`, `rate_limited`, `upstream_busy`, `invalid_arguments`, `not_found`, `cancelled`, `exception`) |
+| `pdg_mcp_tool_call_duration_seconds` | `tool` | Tool call latency histogram |
+| `pdg_mcp_rate_limit_rejections_total` | | Calls rejected by the per-user rate limit |
+| `pdg_mcp_adc_requests_total` | `endpoint`, `method`, `status` | Requests to ADC, one per attempt; `status` is the HTTP code or `error` |
+| `pdg_mcp_adc_retries_total` | `endpoint` | Requests that were retried |
+| `pdg_mcp_adc_request_duration_seconds` | `endpoint` | ADC response time per attempt |
+| `pdg_mcp_adc_queue_wait_seconds` | | Time spent waiting for a free ADC slot |
+| `pdg_mcp_adc_queue_timeouts_total` | | Requests that gave up waiting for a slot |
+| `pdg_mcp_adc_requests_in_flight`, `pdg_mcp_adc_requests_waiting` | | Requests holding / waiting for an ADC slot |
+| `pdg_mcp_process_*` | | Process memory, CPU and open files (Linux) |
+
+ADC failures are `pdg_mcp_adc_requests_total{status=~"4..|5.."}`. Labels never carry user IDs, PIDs or query text,
+and an unknown tool name is counted as `tool="unknown"`. Counters are kept in memory per pod and reset on restart,
+so use `rate()` / `increase()` in queries and scrape every pod.
+
+A Grafana 12 dashboard is in `dashboards/pdg-mcp.json`, and `scripts/usage_report.py` prints the same numbers for
+any period (table, CSV or JSON). See "Dashboard and reports" in `docs/admin-guide.md`.
+
 ### How downloads reach the agent
 
 `download_file` returns files up to `max_inline_bytes` **inline** as an MCP embedded resource: text for

@@ -3,6 +3,8 @@
 Large EML documents are mostly repeated structure: a package of daily files often carries the same attribute
 list once per file. Entities whose attribute lists are identical (ignoring XML ids) share one ``schema_id``,
 so each schema is described once. Values are copied from the document as-is; nothing is summarized.
+Free-text sections (abstract, methods, ...) are flattened to plain text with headings and lists kept;
+structured elements inside them (protocols, citations, data sources, ...) are copied whole next to the text.
 """
 
 from __future__ import annotations
@@ -10,18 +12,28 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import textwrap
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import defusedxml.ElementTree as ET
 from fastmcp.exceptions import ToolError
 
 ENTITY_TYPES = ("dataTable", "spatialRaster", "spatialVector", "storedProcedure", "view", "otherEntity")
+# section name -> element below <dataset>
+FREE_TEXT_SECTIONS = {
+    "abstract": "abstract",
+    "methods": "methods",
+    "purpose": "purpose",
+    "intellectual_rights": "intellectualRights",
+    "additional_info": "additionalInfo",
+}
 SECTIONS = (
     "outline",
-    "methods",
+    *FREE_TEXT_SECTIONS,
     "coverage",
     "people",
     "project",
@@ -49,6 +61,50 @@ EXAMPLE_ENTITIES = 3
 PREVIEW_ATTRIBUTES = 12
 MAX_RAW_DATES = 10
 ISO_DATE = re.compile(r"^\d{4}(-\d{2}(-\d{2}([T ]\d{2}(:\d{2}(:\d{2}(\.\d+)?)?)?(Z|[+-]\d{2}:?\d{2})?)?)?)?$")
+# Block-level EML TextType / methods elements that start a new paragraph.
+_BLOCK = {
+    "para",
+    "section",
+    "listitem",
+    "description",
+    "methodStep",
+    "sampling",
+    "qualityControl",
+    "studyExtent",
+    "samplingDescription",
+}
+# Prose (EML TextType) elements. An element whose children are all prose is rendered as text.
+_PROSE = {
+    "para",
+    "section",
+    "itemizedlist",
+    "orderedlist",
+    "listitem",
+    "markdown",
+    "literalLayout",
+    "emphasis",
+    "subscript",
+    "superscript",
+    "ulink",
+    "citetitle",
+    "value",
+}
+# Whitespace inside these is meaningful, so only the indentation common to every line is removed.
+_VERBATIM = {"markdown", "literalLayout"}
+# Structured elements that can sit inside free text. They are copied whole and returned next to the text,
+# with a placeholder such as "[protocol 1]" where they appeared. Without child elements they are plain text.
+STRUCTURED = {
+    "protocol": "protocols",
+    "software": "software",
+    "instrumentation": "instrumentation",
+    "citation": "citations",
+    "dataSource": "data_sources",
+    "coverage": "sampling_coverage",
+    "spatialSamplingUnits": "spatial_sampling_units",
+}
+_STEP_TITLES = {"sampling": "Sampling", "qualityControl": "Quality control"}
+# Marks verbatim text so _clean leaves it alone.
+_V_START, _V_END = "\x02", "\x03"
 
 
 def _local(tag: Any) -> str:
@@ -68,6 +124,160 @@ def _text(el: Any, path: str) -> str | None:
 
 def _texts(el: Any, path: str) -> list[str]:
     return [t for t in (_plain(x) for x in el.findall(path)) if t]
+
+
+def _verbatim(el: Any) -> str:
+    """Text of a markdown / literalLayout element without blank edge lines or the indentation common to every line."""
+    lines = "".join(el.itertext()).expandtabs().split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return textwrap.dedent("\n".join(line.rstrip() for line in lines))
+
+
+def _mixed(el: Any) -> bool:
+    """True if text is interleaved with child elements, so a dict copy would lose the order."""
+    return len(el) > 0 and (bool((el.text or "").strip()) or any((c.tail or "").strip() for c in el))
+
+
+def _clean(text: str) -> str:
+    out = []
+    for i, seg in enumerate(re.split(f"{_V_START}(.*?){_V_END}", text, flags=re.S)):
+        if i % 2:
+            out.append(seg)
+            continue
+        seg = re.sub(r"[ \t\r\f\v]+", " ", seg)
+        seg = re.sub(r" *\n *", "\n", seg)
+        seg = re.sub(r"(\[citation \d+\]) +(?=[.,;:)])", r"\1", seg)
+        out.append(re.sub(r"\n{3,}", "\n\n", seg))
+    return "".join(out).strip()
+
+
+class _FreeTextBuilder:
+    """Walks prose into text and copies structured elements whole, leaving a placeholder in the text."""
+
+    def __init__(self, doc: EMLDocument) -> None:
+        self.doc = doc
+        self.counts: dict[str, int] = {}
+        self.elements: dict[str, list[dict[str, Any]]] = {}
+        self.anchors: dict[int, str] = {}  # id(item) -> the placeholder that places it in the section text
+        self.owner: str | None = None  # placeholder of the top-level copy being built, if any
+        self.seen: frozenset[int] = frozenset()  # elements being copied, to stop <references> cycles
+
+    def text(self, el: Any) -> str:
+        parts: list[str] = []
+        self.walk(el, parts)
+        return _clean("".join(parts))
+
+    def walk(self, el: Any, parts: list[str], depth: int = 0, marker: str = "- ") -> None:
+        name = _local(el.tag)
+        if name in STRUCTURED and len(el):
+            ref = self.extract(el)
+            parts.append(f" {ref} " if name == "citation" else f"\n\n{ref}\n\n")
+            return
+        if name in _VERBATIM:
+            parts.append(f"\n\n{_V_START}{_verbatim(el)}{_V_END}\n\n")
+            return
+        if name == "ulink":
+            label, url = _plain(el), el.get("url")
+            parts.append(f"[{label}]({url})" if label and url and label != url else (url or label or ""))
+            return
+        if name in _STEP_TITLES:
+            parts.append(f"\n\n# {_STEP_TITLES[name]}\n")
+        if name == "title":
+            parts.append(f"\n\n{'#' * max(1, min(depth, 4))} {_plain(el) or ''}\n")
+            return
+        if name == "listitem":
+            parts.append(f"\n\n{marker}")
+        elif (name in _BLOCK or name in STRUCTURED.keys() - {"citation"}) and not re.search(
+            r"\n(-|\d+\.)$", "".join(parts[-3:]).rstrip(" \t\n")
+        ):
+            # A paragraph directly inside a list item stays on the bullet's line.
+            parts.append("\n\n")
+        if el.text:
+            parts.append(el.text)
+        n = 0
+        for i, child in enumerate(el):
+            kind = _local(child.tag)
+            if kind == "value" and ((el.text or "").strip() or i):
+                parts.append(" / ")  # the same text in another language
+            if kind == "listitem":
+                n += 1
+                self.walk(child, parts, depth, f"{n}. " if name == "orderedlist" else "- ")
+            else:
+                self.walk(child, parts, depth + (1 if name == "section" else 0))
+            if child.tail:
+                parts.append(child.tail)
+
+    def extract(self, el: Any) -> str:
+        name = _local(el.tag)
+        self.counts[name] = self.counts.get(name, 0) + 1
+        ref = f"{name} {self.counts[name]}"
+        outer, self.owner = self.owner, self.owner or ref
+        try:
+            copy = self.tree(el)
+        finally:
+            self.owner = outer
+        item = {"ref": ref, **(copy if isinstance(copy, dict) else {"text": copy})}
+        self.elements.setdefault(STRUCTURED[name], []).append(item)
+        # An element nested in another copy is placed where that copy's placeholder is.
+        self.anchors[id(item)] = f"[{outer or ref}]"
+        return f"[{ref}]"
+
+    def tree(self, el: Any) -> Any:
+        """Copy an element whole with :meth:`EMLDocument._tree`, rendering prose inside it as text."""
+        return self.doc._tree(el, self.seen, prose=self._prose)
+
+    def _prose(self, el: Any, seen: frozenset[int]) -> str:
+        # Keep the cycle guard across prose, which can hold further structured elements.
+        outer, self.seen = self.seen, seen
+        try:
+            return self.text(el)
+        finally:
+            self.seen = outer
+
+
+@dataclass
+class FreeText:
+    """A free-text section: prose as text, plus structured elements copied whole, keyed by kind."""
+
+    text: str
+    elements: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Where each element's placeholder starts in ``text``; elements without one (licenses) count as 0.
+    positions: dict[int, int] = field(default_factory=dict, repr=False)
+
+    def page(self, offset: int, max_chars: int) -> dict[str, Any]:
+        """One page of text plus the elements whose placeholders start on that page.
+
+        The copies count toward ``max_chars``: the text page ends early enough that it and the copies its
+        placeholders bring fit, so a placeholder and its copy are always on the same page. A copy too big
+        to fit on its own is still returned, at the start of its page.
+        """
+        page_text(self.text, offset, max_chars)  # rejects an offset past the end
+        anchored = [(self.positions.get(id(it), 0), _size(it)) for items in self.elements.values() for it in items]
+        end = min(len(self.text), offset + max_chars)
+
+        def on_page(pos: int) -> bool:  # the last page also takes copies anchored at the very end
+            return offset <= pos and (pos < end or end == len(self.text))
+
+        while True:
+            on = [(pos, size) for pos, size in anchored if on_page(pos)]
+            last = max((pos for pos, _ in on), default=offset)
+            if (end - offset) + sum(size for _, size in on) <= max_chars or last <= offset:
+                break
+            end = last  # move the last placeholder, and its copy, to the next page
+        nxt = end if end < len(self.text) else None
+        out: dict[str, Any] = {
+            "chars": len(self.text),
+            "offset": offset,
+            "next_offset": nxt,
+            "text": self.text[offset:end],
+        }
+        for key, items in self.elements.items():
+            if here := [it for it in items if on_page(self.positions.get(id(it), 0))]:
+                out[key] = here
+        return out
 
 
 def _compact(d: dict[str, Any]) -> dict[str, Any]:
@@ -240,24 +450,35 @@ class EMLDocument:
             if _local(u.tag) == "unit" and u.get("id")
         }
 
-    def _tree(self, el: Any, seen: frozenset[int] = frozenset(), skip: tuple[str, ...] = ()) -> Any:
+    def _tree(
+        self,
+        el: Any,
+        seen: frozenset[int] = frozenset(),
+        skip: tuple[str, ...] = (),
+        prose: Callable[[Any, frozenset[int]], str] | None = None,
+    ) -> Any:
         """Copy an element and everything under it, shaped like the EML.
 
         Children become keys (a list when repeated), XML attributes are kept except identity ones, and
         <references> is followed at every level. A custom unit gets its unitList definition attached.
         Direct children named in ``skip`` are left out.
+        With ``prose``, an element holding only prose (or text mixed with elements) is rendered by it instead.
         """
         el, missing = self._resolve(el)
         if id(el) in seen:
             return {"reference_cycle": el.get("id")}
         seen = seen | {id(el)}
+        if prose is not None:
+            kids = [c for c in el if _local(c.tag) and not (missing and _local(c.tag) == "references")]
+            if kids and (_mixed(el) or all(_local(c.tag) in _PROSE for c in kids)):
+                return prose(el, seen)
         node: dict[str, Any] = {_local(k): v for k, v in el.attrib.items() if _local(k) not in IDENTITY_ATTRS}
         if missing:
             node["unresolved_reference"] = missing
         for child in el:
             tag = _local(child.tag)
             if tag and tag not in skip and not (missing and tag == "references"):
-                node.setdefault(tag, []).append(self._tree(child, seen))
+                node.setdefault(tag, []).append(self._tree(child, seen, prose=prose))
         node = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in node.items()}
         text = " ".join(" ".join(p.split()) for p in (el.text, *(c.tail for c in el)) if p and p.strip())
         if _local(el.tag) == "customUnit" and text in self.custom_units:
@@ -367,13 +588,30 @@ class EMLDocument:
 
     # -- sections ---------------------------------------------------------------------------------
 
+    def free_text(self, section: str) -> FreeText | None:
+        """One free-text section, or None if the document lacks it.
+
+        Prose comes back as text. Structured elements inside it (protocols, citations, data sources, ...) are
+        copied whole into ``elements`` and marked in the text by a placeholder such as "[protocol 1]".
+        ``intellectual_rights`` also returns EML 2.2 <licensed> elements as ``licenses``.
+        """
+        found = self.dataset.findall(FREE_TEXT_SECTIONS[section])
+        licenses = self.dataset.findall("licensed") if section == "intellectual_rights" else []
+        if not found and not licenses:
+            return None
+        builder = _FreeTextBuilder(self)
+        text = "\n\n".join(t for t in (builder.text(el) for el in found) if t)
+        result = FreeText(text, builder.elements)
+        for items in builder.elements.values():
+            for item in items:
+                result.positions[id(item)] = max(0, text.find(builder.anchors[id(item)]))
+        if licenses:
+            result.elements["licenses"] = [builder.tree(el) for el in licenses]
+        return result
+
     def methods_text(self) -> str | None:
-        parts = []
-        for m in self.dataset.findall("methods"):
-            for step in m:
-                if text := _plain(step):
-                    parts.append(text)
-        return "\n\n".join(parts) or None
+        methods = self.free_text("methods")
+        return methods.text if methods and methods.text else None
 
     def coverage(self) -> dict[str, Any]:
         geo, temporal, taxa = [], [], []
@@ -508,9 +746,10 @@ class EMLDocument:
         d = self.dataset
         methods = self.methods_text()
         groups = self.entity_groups()
-        rights = d.find("intellectualRights")
-        if rights is None:
-            rights = d.find("licensed")
+        rights = _plain(d.find("intellectualRights"))
+        if rights is None and (lic := d.find("licensed")) is not None:
+            name, url = _text(lic, "licenseName"), _text(lic, "url")
+            rights = f"{name} ({url})" if name and url else name or url
         out = _compact(
             {
                 "format": "EML",
@@ -522,7 +761,7 @@ class EMLDocument:
                 "creators": [n for n in (_display_name(c) for c in d.findall("creator")) if n],
                 "keyword_sets": [self._tree(k) for k in d.findall("keywordSet")],
                 "abstract": _text(d, "abstract"),
-                "license": _plain(rights),
+                "license": rights,
                 "distribution": [self._tree(x) for x in d.findall("distribution")],
                 "coverage": self.coverage_summary(),
                 "methods_preview": methods[:METHODS_PREVIEW_CHARS]

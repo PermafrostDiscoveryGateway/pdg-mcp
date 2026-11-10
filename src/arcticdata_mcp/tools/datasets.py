@@ -255,7 +255,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             Field(
                 ge=1000,
                 le=2_000_000,
-                description="Approximate size limit per response for raw, methods, entities, attributes and codes.",
+                description="Approximate size limit per response for raw, free-text sections, entities, attributes and codes.",
             ),
         ] = 50_000,
     ) -> dict[str, Any]:
@@ -264,11 +264,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Start with the default outline: title, creators, abstract, coverage, a methods preview, dataset annotations,
         and entity_groups, where data files with identical columns share one schema_id. Then request what you need:
         section='attributes' with schema_id (each column copied whole from the EML: definition, measurementScale with
-        units and domains, missing-value codes, annotations), 'methods', 'coverage', 'people', 'project', 'entities'
-        (every file with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses
-        are paged: call again with offset=next_offset. An attribute whose code list does not fit shows
-        codeDefinition_omitted; page all its codes with section='codes' and attribute=<name>. Raw XML is paged by
-        character, so a page is not valid XML on its own. Documents that are not EML datasets are returned as raw XML.
+        units and domains, missing-value codes, annotations), a free-text section as plain text ('abstract', 'methods',
+        'purpose', 'intellectual_rights', 'additional_info'; protocols, citations, data sources and other structured
+        parts are copied whole next to the text and marked in it as e.g. '[protocol 1]'; intellectual_rights also
+        returns EML 2.2 licenses), 'coverage', 'people', 'project', 'entities' (every file with its schema_id),
+        'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
+        offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted; page all its
+        codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not valid XML
+        on its own. Documents that are not EML datasets are returned as raw XML.
         Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
         cached = await documents.get(pid, lambda: client.get_text(client.object_url(pid)))
@@ -288,12 +291,11 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             return out
         if section == "outline":
             out.update(doc.outline())
-        elif section == "methods":
-            methods = doc.methods_text()
-            if methods is None:
-                raise ToolError(f"'{pid}' has no methods section.")
-            page, nxt = eml.page_text(methods, offset, max_chars)
-            out.update({"chars": len(methods), "offset": offset, "next_offset": nxt, "text": page})
+        elif section in eml.FREE_TEXT_SECTIONS:
+            free = doc.free_text(section)
+            if free is None:
+                raise ToolError(f"'{pid}' has no {section} section.")
+            out.update(free.page(offset, max_chars))
         elif section == "coverage":
             out.update(doc.coverage())
         elif section == "people":

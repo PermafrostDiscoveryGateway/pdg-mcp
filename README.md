@@ -148,11 +148,18 @@ EML documents can be far larger than a model's context, mostly because packages 
 per data file. `get_metadata_document(pid)` therefore returns an **outline**: title, creators, abstract, coverage, a
 methods preview, dataset annotations and `entity_groups`, where entities with identical attribute lists share one
 `schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `codes` (one attribute's code
-list), `methods`, `coverage`, `people`, `project`, `entities`, `annotations`, or `raw` for the XML. Attributes, entities
-(all but their attribute list), people and projects are copied whole, shaped like the EML. Long responses are paged
-with `offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents (for example ISO 19115) come
-back as paged raw XML. Recent documents are cached (`metadata.cache_max_chars`) and parsed off the event loop.
+list), `coverage`, `people`, `project`, `entities`, `annotations`, a free-text section, or `raw` for the XML. Attributes,
+entities (all but their attribute list), people and projects are copied whole, shaped like the EML. Long responses are
+paged with `offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents (for example ISO 19115)
+come back as paged raw XML. Recent documents are cached (`metadata.cache_max_chars`) and parsed off the event loop.
 `get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
+
+Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text
+with headings, numbered and bulleted lists, links and `markdown` / `literalLayout` spacing kept, for example
+`get_metadata_document(pid, section="methods")`. Structured elements inside them (protocols, software,
+instrumentation, citations, data sources, sampling coverage) are copied whole next to the text, under `protocols`,
+`citations`, `data_sources` and so on, and marked in the text by a placeholder such as `[protocol 1]`.
+`intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
 `download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,

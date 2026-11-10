@@ -5,6 +5,9 @@ import httpx
 import pytest
 from fastmcp.exceptions import ToolError
 
+from fastmcp import Client
+
+from arcticdata_mcp.server import create_server
 from arcticdata_mcp.waterdata import JsonWaterData
 from conftest import MN
 
@@ -22,8 +25,8 @@ def solr_json(docs, num=None, **extra):
 
 async def test_lists_all_tools(client):
     names = {t.name for t in await client.list_tools()}
-    assert len(names) == 50
-    assert {"search_datasets", "download_file", "list_dataset_files", "get_facet_counts"} <= names
+    assert len(names) == 54
+    assert {"search_datasets", "download_file", "list_dataset_files", "get_facet_counts", "search_portals"} <= names
 
 
 async def test_search_by_keyword_builds_query(client, mock_api):
@@ -216,3 +219,108 @@ async def test_water_views_are_mcp_apps(client, uri):
     assert res.mime_type == "text/html;profile=mcp-app"
     [content] = await client.read_resource(uri)
     assert "ext-apps" in content.text and "ontoolresult" in content.text
+
+
+PORTALS = [
+    {"id": "urn:uuid:p1", "seriesId": "urn:uuid:s1", "label": "PerCS-Net", "title": "Permafrost Coastal Systems Network",
+     "abstract": "Coastal permafrost.", "collectionQuery": 'readPermission:"CN=percs-net"', "logo": "urn:uuid:logo"},
+    {"id": "urn:uuid:p2", "seriesId": "urn:uuid:s2", "label": "broken", "title": "Broken Portal",
+     "collectionQuery": 'title:"*&quot;oops'},
+    {"id": "urn:uuid:p3", "seriesId": "urn:uuid:s3", "label": "TestPortal", "title": "Robyn's Test Portal",
+     "collectionQuery": "isPartOf:x"},
+]
+PORTAL_XML = """<?xml version="1.0"?>
+<por:portal xmlns:por="https://purl.dataone.org/portals-1.1.0">
+  <label>PerCS-Net</label><name>Permafrost Coastal Systems Network</name><description>Coastal permafrost.</description>
+  <definition><filter><field>readPermission</field><value>CN=percs-net</value></filter></definition>
+  <logo><identifier>urn:uuid:logo</identifier></logo>
+  <section><label>About</label><title>About us</title><content><markdown><![CDATA[# About
+
+Long text here.]]></markdown></content></section>
+  <section><label>Map</label><option><optionName>sectionType</optionName><optionValue>visualization</optionValue></option></section>
+  <associatedParty><individualName><givenName>Ben</givenName><surName>Jones</surName></individualName><organizationName>UAF</organizationName></associatedParty>
+  <award><title>PerCS</title><awardNumber>123</awardNumber><funderName>NSF</funderName></award>
+</por:portal>"""
+
+
+@pytest.fixture
+def portal_api(mock_api):
+    """Mock Solr: portal list, batched facet counts (the 'broken' query errors), and dataset searches."""
+    counts = {'readPermission:"CN=percs-net"': 23, "isPartOf:x": 0}
+
+    def solr(request):
+        params = request.url.params
+        facets = params.get_list("facet.query")
+        if facets:
+            if any("&quot;" in f for f in facets):
+                return httpx.Response(500, text='<error name="ServiceFailure"><description>SyntaxError</description></error>')
+            single = 'id:"doi:1"' in params["q"]
+            out = {}
+            for f in facets:
+                key, q = f[len("{!key="):].split("}", 1)
+                n = counts[q[1:-1]]
+                out[key] = min(n, 1) if single else n
+            return httpx.Response(200, json={**solr_json([], num=0), "facet_counts": {"facet_queries": out}})
+        if params["q"].startswith("formatId:("):
+            return httpx.Response(200, json=solr_json([dict(p) for p in PORTALS]))
+        if "title:" in params["q"] and "collectionQuery:" in params["q"]:
+            return httpx.Response(200, json=solr_json([{"id": "urn:uuid:p1"}]))
+        if params["q"].startswith('id:"doi:1"'):
+            return httpx.Response(200, json=solr_json([{"id": "doi:1", "title": "T"}]))
+        return httpx.Response(200, json=solr_json([{"id": "doi:1", "title": "T"}], num=23))
+
+    route = mock_api.get(f"{MN}/query/solr/").mock(side_effect=solr)
+    mock_api.get(f"{MN}/object/urn%3Auuid%3Ap1").mock(return_value=httpx.Response(200, text=PORTAL_XML))
+    return route
+
+
+async def test_search_portals_lists_counts_and_flags_broken(settings, portal_api):
+    settings.portals.exclude_labels = ["testportal"]
+    async with Client(create_server(settings, require_auth=False)) as c:
+        r = (await c.call_tool("search_portals", {})).structured_content
+        assert r["numFound"] == 2
+        by_label = {p["label"]: p for p in r["portals"]}
+        assert by_label["PerCS-Net"]["dataset_count"] == 23
+        assert by_label["PerCS-Net"]["portal_url"] == "https://arcticdata.io/catalog/portals/PerCS-Net"
+        assert by_label["broken"]["dataset_count"] is None
+        calls = portal_api.call_count
+        await c.call_tool("search_portals", {"sort": "datasets"})
+        assert portal_api.call_count == calls  # served from cache
+
+
+async def test_search_portals_query_uses_website_fields(client, portal_api):
+    r = (await client.call_tool("search_portals", {"query": "coastal permafrost"})).structured_content
+    assert [p["label"] for p in r["portals"]] == ["PerCS-Net"]
+    q = portal_api.calls.last.request.url.params["q"]
+    assert 'abstract:"coastal"' in q and 'awardNumber:"permafrost"' in q and " AND " in q
+
+
+async def test_get_portal_parses_xml(client, portal_api):
+    r = (await client.call_tool("get_portal", {"portal": "percs-net", "max_section_chars": 8})).structured_content
+    assert r["logo_url"] == f"{MN}/object/urn%3Auuid%3Alogo"
+    assert r["collection_query"] == 'readPermission:"CN=percs-net"'
+    assert r["definition"] == [{"type": "filter", "fields": ["readPermission"], "values": ["CN=percs-net"]}]
+    about, viz = r["sections"]
+    assert about["markdown"] == "# About\n…" and about["markdown_chars"] > 8
+    assert viz == {"label": "Map", "type": "visualization"}
+    assert r["people"] == [{"name": "Ben Jones", "organization": "UAF"}]
+    assert r["awards"] == [{"title": "PerCS", "awardNumber": "123", "funderName": "NSF"}]
+
+
+async def test_search_portal_datasets_applies_collection_query(client, portal_api):
+    r = await client.call_tool("search_portal_datasets", {"portal": "urn:uuid:s1", "text": "erosion", "start_date": "2018"})
+    params = portal_api.calls.last.request.url.params
+    assert 'readPermission:"CN=percs-net"' in params.get_list("fq")
+    assert "erosion" in params["q"] and "endDate:[2018-01-01T00:00:00Z TO *]" in params["q"]
+    sc = r.structured_content
+    assert sc["portal"]["label"] == "PerCS-Net" and sc["numFound"] == 23
+    with pytest.raises(ToolError, match="all four"):
+        await client.call_tool("search_portal_datasets", {"portal": "PerCS-Net", "north": 70})
+    with pytest.raises(ToolError, match="search_portals"):
+        await client.call_tool("search_portal_datasets", {"portal": "nope"})
+
+
+async def test_find_portals_for_dataset(client, portal_api):
+    r = (await client.call_tool("find_portals_for_dataset", {"pid": "doi:1"})).structured_content
+    assert [p["label"] for p in r["portals"]] == ["PerCS-Net"]
+    assert r["unchecked_portals"] == ["broken"]

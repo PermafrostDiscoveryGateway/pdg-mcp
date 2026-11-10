@@ -1,5 +1,5 @@
 # Mechanical reformat with ruff format. GitHub's blame view honours this file; locally run:
 #   git config blame.ignoreRevsFile .git-blame-ignore-revs
-# The hash must be a commit on main: merge the pull request with a merge commit or a rebase. If it is squashed,
-# replace the hash below with the squash commit's.
+# The hash must be a commit on main: merge this pull request with "Create a merge commit". Squash and rebase merges
+# both rewrite hashes; if either is used, replace the hash below with the resulting commit on main.
 a67c6aa4b3b6326286578b00327cff26614ef3f2

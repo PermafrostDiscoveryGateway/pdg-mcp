@@ -9,6 +9,9 @@ env:
   GHCR_IMAGE: ghcr.io/permafrostdiscoverygateway/pdg-mcp
 jobs:
   # Lint, tests and chart checks (ci.yml). The image is only built and pushed if they pass.
+  # This is the only place ci.yml runs on PRs/pushes: don't add `paths:` filters to this workflow's triggers or
+  # disable it, or CI stops running. The required status checks are "ci / test", "ci / lint" and "ci / chart";
+  # renaming this job changes those names and breaks branch protection.
   ci:
     uses: ./.github/workflows/ci.yml
     permissions:

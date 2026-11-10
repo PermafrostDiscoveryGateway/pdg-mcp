@@ -50,6 +50,14 @@
       "</body></html>";
   }
 
+  // The dashboard's figures use scattergl; at ~50 points per trace SVG is just as fast and
+  // does not use up the browser's limited pool of WebGL contexts (~16 shared across all chat
+  // views), so older charts don't go blank in long chats. The saved HTML keeps the original figure.
+  const svg = (fig) => ({
+    ...fig,
+    data: fig.data.map((t) => (t.type === "scattergl" ? { ...t, type: "scatter" } : t)),
+  });
+
   function addSaveButton(container, fig, lakeId, prefix) {
     if (!app.getHostCapabilities()?.downloadFile) return;
     const btn = document.createElement("button");
@@ -72,7 +80,8 @@
       ? `Break ${b.date_break.slice(0, 7)} · water area before ${fmt(b.pre_break_median)} ha, after ${fmt(b.post_break_median)} ha`
       : "No drainage break detected";
 
-    Plotly.newPlot("dw", d.dw.figure.data, d.dw.figure.layout, { responsive: true, displaylogo: false });
+    const dwFig = svg(d.dw.figure);
+    Plotly.newPlot("dw", dwFig.data, dwFig.layout, { responsive: true, displaylogo: false });
     addSaveButton($("dw-actions"), d.dw.figure, d.lake_id, "");
     const explain = document.createElement("button");
     explain.textContent = "Ask Claude to explain this series";
@@ -86,7 +95,8 @@
 
     if (d.jrc?.figure) {
       $("jrc-section").hidden = false;
-      Plotly.newPlot("jrc", d.jrc.figure.data, d.jrc.figure.layout, { responsive: true, displaylogo: false });
+      const jrcFig = svg(d.jrc.figure);
+      Plotly.newPlot("jrc", jrcFig.data, jrcFig.layout, { responsive: true, displaylogo: false });
       addSaveButton($("jrc-actions"), d.jrc.figure, d.lake_id, "jrc");
     } else {
       $("jrc-missing").hidden = false;

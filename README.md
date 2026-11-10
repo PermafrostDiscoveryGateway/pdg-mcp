@@ -69,6 +69,8 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `portals.portal_url` | `https://arcticdata.io/catalog/portals` | Base of portal web pages (`<portal_url>/<label>`) |
 | `portals.cache_ttl` | `3600` | Seconds to cache the portal list and dataset counts (0 = no cache) |
 | `portals.exclude_labels` | empty | Portal labels to hide, such as test or spam portals |
+| `metadata.cache_max_chars` | `20000000` | Total characters of metadata documents cached for paging (a parsed document uses about 5-6x its size in memory; 0 = no cache) |
+| `metadata.cache_ttl` | `600` | Seconds to keep a cached metadata document |
 
 ### Rate limiting
 
@@ -145,10 +147,11 @@ total). The portal list and counts are cached for `portals.cache_ttl`. A count o
 EML documents can be far larger than a model's context, mostly because packages repeat the same attribute list once
 per data file. `get_metadata_document(pid)` therefore returns an **outline**: title, creators, abstract, coverage, a
 methods preview, dataset annotations and `entity_groups`, where entities with identical attribute lists share one
-`schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `coverage`, `people`, `project`,
-`entities`, `annotations`, a free-text section, or `raw` for the XML. Long responses are paged with
-`offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents
-(for example ISO 19115) come back as paged raw XML.
+`schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `codes` (one attribute's code
+list), `coverage`, `people`, `project`, `entities`, `annotations`, a free-text section, or `raw` for the XML. Attributes,
+entities (all but their attribute list), people and projects are copied whole, shaped like the EML. Long responses are
+paged with `offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents (for example ISO 19115)
+come back as paged raw XML. Recent documents are cached (`metadata.cache_max_chars`) and parsed off the event loop.
 `get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
 
 Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text

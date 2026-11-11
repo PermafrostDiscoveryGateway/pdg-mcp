@@ -244,3 +244,7 @@ kubectl create secret docker-registry ncsa-hub -n pdg-mcp --dry-run=client -o ya
 ```
 
 Commit the sealed file to software-dev's `kubernetes/` folder (never the plain Secret).
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

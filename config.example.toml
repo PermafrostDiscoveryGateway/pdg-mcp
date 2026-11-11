@@ -67,3 +67,10 @@ exclude_labels = []
 cache_max_chars = 20000000
 # Seconds to keep a cached document.
 cache_ttl = 600.0
+
+[tools]
+# Hide tools with any of these tags to keep the tool list (sent to the model every turn) short.
+# "low_level" = node diagnostics and object plumbing: ping, get_node_info, list_query_engines, list_views,
+# list_object_formats, get_object_format, describe_object, get_checksum, list_objects, is_authorized.
+# Set to [] to expose every tool.
+exclude_tags = ["low_level"]

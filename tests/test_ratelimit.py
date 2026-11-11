@@ -46,10 +46,10 @@ async def test_per_user_limit_rejects_after_burst(settings, mock_api):
     settings.ratelimit.per_user_burst = 2
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
         with pytest.raises(ToolError, match="Rate limit exceeded"):
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
         # Listing tools is not a tool call and is not limited.
         assert await c.list_tools()
 
@@ -60,7 +60,7 @@ async def test_per_user_limit_disabled(settings, mock_api):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
         for _ in range(5):
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
 
 
 async def test_retries_on_503_then_succeeds(fast_retries, mock_api):
@@ -68,7 +68,7 @@ async def test_retries_on_503_then_succeeds(fast_retries, mock_api):
         side_effect=[httpx.Response(503), httpx.Response(429), httpx.Response(200, json=SOLR_OK)]
     )
     async with Client(create_server(fast_retries, require_auth=False)) as c:
-        r = await c.call_tool("count_datasets", {"text": "x"})
+        r = await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     assert route.call_count == 3
     assert r.structured_content is not None
 
@@ -78,7 +78,7 @@ async def test_gives_up_after_max_retries(fast_retries, mock_api):
     route = mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(503))
     async with Client(create_server(fast_retries, require_auth=False)) as c:
         with pytest.raises(ToolError, match="503"):
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     assert route.call_count == 3
 
 

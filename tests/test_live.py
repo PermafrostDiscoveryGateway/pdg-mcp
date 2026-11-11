@@ -16,12 +16,12 @@ async def live():
         yield c
 
 
-async def test_ping(live):
-    assert (await live.call_tool("ping", {})).structured_content["up"]
+async def test_get_server_config(live):
+    assert (await live.call_tool("get_server_config", {})).structured_content
 
 
 async def test_search_list_download(live):
-    r = await live.call_tool("search_by_keyword", {"keyword": "permafrost", "rows": 1})
+    r = await live.call_tool("search_datasets", {"keyword": "permafrost", "rows": 1})
     assert r.structured_content["numFound"] > 0
     files = (await live.call_tool("list_dataset_files", {"pid": DOI, "rows": 2})).structured_content
     assert files["numFound"] > 0

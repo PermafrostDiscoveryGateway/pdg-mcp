@@ -142,7 +142,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """
         return downloads.url_result(await downloads.object_info(client, pid), settings, "URL requested")
 
-    @mcp.tool(annotations=READ_ONLY, tags={"files"})
+    @mcp.tool(annotations=READ_ONLY, tags={"files", "low_level"})
     async def describe_object(pid: Pid) -> dict[str, Any]:
         """Lightweight existence/size/format/checksum check via MNRead describe (HEAD /object/{pid})."""
         resp = await client.head(client.object_url(pid))
@@ -170,7 +170,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         sm = await client.get_xml(client.mn(f"meta/{quote_pid(pid)}"))
         return sm if raw else _simplify_sysmeta(sm)
 
-    @mcp.tool(annotations=READ_ONLY, tags={"files"})
+    @mcp.tool(annotations=READ_ONLY, tags={"files", "low_level"})
     async def get_checksum(
         pid: Pid,
         algorithm: Annotated[Literal["MD5", "SHA-1", "SHA-256"], Field(description="Checksum algorithm.")] = "SHA-256",
@@ -181,7 +181,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         cs = await client.get_xml(client.mn(f"checksum/{quote_pid(pid)}"), params={"checksumAlgorithm": algorithm})
         return {"pid": pid, "algorithm": cs.get("@algorithm", algorithm), "checksum": cs.get("#text")}
 
-    @mcp.tool(annotations=READ_ONLY, tags={"files", "listing"})
+    @mcp.tool(annotations=READ_ONLY, tags={"files", "listing", "low_level"})
     async def list_objects(
         from_date: DateStr = None,
         to_date: DateStr = None,
@@ -218,7 +218,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             })
         return {"total": int(ol.get("@total", 0)), "start": int(ol.get("@start", 0)), "count": len(items), "objects": items}
 
-    @mcp.tool(annotations=READ_ONLY, tags={"files", "auth"})
+    @mcp.tool(annotations=READ_ONLY, tags={"files", "auth", "low_level"})
     async def is_authorized(
         pid: Pid,
         action: Annotated[Literal["read", "write", "changePermission"], Field(description="Permission to check.")] = "read",

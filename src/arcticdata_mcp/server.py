@@ -19,8 +19,9 @@ INSTRUCTIONS = """\
 Search and download public data from the NSF Arctic Data Center (arcticdata.io), a DataONE member node.
 
 Typical workflow:
-1. Discover datasets with search_datasets or a specific search_by_* tool (keyword, bounding box, temporal
-   coverage, author, funding award, measured variable, taxon, ...). get_facet_counts reveals valid values.
+1. Discover datasets with search_datasets, combining any of its filters (text, keyword, author, bounding box,
+   collection period, funding award, measured variable, taxon, ...). get_facet_counts reveals valid values;
+   search_data_files finds individual files; find_dataset_by_identifier resolves a DOI or file PID.
 2. Inspect a dataset with get_dataset_details, get_metadata_document (EML) or get_dataset_citation.
 3. List its files with list_dataset_files, peek with preview_file, then fetch with download_file.
    Large files return a direct URL instead of inline bytes (see get_server_config).
@@ -61,4 +62,6 @@ def create_server(
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node, portals, apps, water):
         module.register(mcp, ctx)
+    if settings.tools.exclude_tags:
+        mcp.disable(tags=set(settings.tools.exclude_tags), components={"tool"})
     return mcp

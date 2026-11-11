@@ -1,10 +1,7 @@
 name: live
-# Runs the tests marked `live`, which call the real arcticdata.io API. Kept off pull requests so we don't add load to ADC.
-# Scheduled workflows only run from the default branch, use UTC, and are disabled by GitHub after 60 days without
-# repository activity (re-enable from the Actions tab).
+# Runs the tests marked `live`, which call the real arcticdata.io API. Manual only (Actions tab > live > Run workflow),
+# so we don't add load to ADC.
 on:
-  schedule:
-    - cron: "17 14 * * 1" # Mondays 14:17 UTC; off the hour to avoid scheduling delays
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,30 +18,3 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run pytest -m live
-  # Separate job so the issues:write token is never present while dependency code runs. Opens one issue per outage,
-  # comments on it while it keeps failing, and closes it when the live tests pass again.
-  report:
-    needs: live
-    if: always() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          RESULT: ${{ needs.live.result }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-            --search '"Live ADC check failed" in:title' --json number --jq '.[].number')
-          if [ "$RESULT" = "failure" ]; then
-            if [ -z "$open" ]; then
-              gh issue create --repo "$GITHUB_REPOSITORY" \
-                --title "Live ADC check failed ($(date -u +%F))" \
-                --body "Scheduled live tests failed: $RUN_URL"
-            else
-              for n in $open; do gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body "Still failing: $RUN_URL"; done
-            fi
-          elif [ "$RESULT" = "success" ]; then
-            for n in $open; do gh issue close "$n" --repo "$GITHUB_REPOSITORY" --comment "Live tests pass again: $RUN_URL"; done
-          fi

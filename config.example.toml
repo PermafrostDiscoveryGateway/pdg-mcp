@@ -49,7 +49,8 @@ retry_max_delay = 30.0
 
 [water]
 # Lake data for the water-timeseries MCP Apps PoC (show_lakes, get_lake_timeseries): a directory with
-# lakes.geojson and timeseries.json written by scripts/export_water_fixtures.py. Empty = bundled fixtures.
+# timeseries.json and either lakes.parquet (scripts/build_water_store.py, queried with DuckDB, for large layers)
+# or lakes.geojson (scripts/export_water_fixtures.py, held in memory). Empty = bundled fixtures.
 data_dir = ""
 
 [portals]

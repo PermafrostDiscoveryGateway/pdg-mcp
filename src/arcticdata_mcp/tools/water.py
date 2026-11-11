@@ -1,17 +1,15 @@
 """Water-timeseries MCP Apps proof of concept: the "Lost Lakes" drainage map and lake time series.
 
-Serves a small slice of water-timeseries-v2 data that scripts/export_water_fixtures.py precomputes with the
-water_timeseries library (masking, breaks and the dashboard's Plotly figures). Both tools render an
-interactive view in clients that support MCP Apps; others get the JSON result.
+Serves water-timeseries-v2 lakes from a DuckDB-queried GeoParquet store (scripts/build_water_store.py) or the
+small bundled fixture, plus per-lake time series that scripts/export_water_fixtures.py precomputes with the
+water_timeseries library (masking and breaks). Both tools render an interactive view in clients that support
+MCP Apps (the time series view draws the dashboard's charts from the data); others get the JSON result.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from functools import cached_property
-from importlib.resources import files
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -23,6 +21,7 @@ from pydantic import Field
 
 from arcticdata_mcp.tools.apps import LAKE_MAP_URI, LAKE_TIMESERIES_URI
 from arcticdata_mcp.tools.common import ToolContext
+from arcticdata_mcp.waterdata import MAX_POINTS, MAX_POLYGONS, LakeResult, open_water_data
 
 # Local data only, so unlike the ADC tools these are not open-world.
 LOCAL_READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False, idempotent_hint=True)
@@ -33,49 +32,6 @@ LakeId = Annotated[
     str,
     Field(pattern=r"^[0-9a-z]{12}$", description="Lake id (12-character geohash, the id_geohash field), e.g. 'b7uefy0bvcrc'."),
 ]
-
-
-def _bounds(coords: Any) -> tuple[float, float, float, float]:
-    """(west, south, east, north) of a nested GeoJSON coordinate array."""
-    xs: list[float] = []
-    ys: list[float] = []
-
-    def walk(c: Any) -> None:
-        if isinstance(c[0], (int, float)):
-            xs.append(c[0])
-            ys.append(c[1])
-        else:
-            for part in c:
-                walk(part)
-
-    walk(coords)
-    return min(xs), min(ys), max(xs), max(ys)
-
-
-class WaterData:
-    """Lazily loaded lakes.geojson + timeseries.json."""
-
-    def __init__(self, data_dir: str) -> None:
-        self._dir = Path(data_dir).expanduser() if data_dir else None
-
-    def _read(self, name: str) -> Any:
-        if self._dir is not None:
-            return json.loads((self._dir / name).read_text(encoding="utf-8"))
-        return json.loads((files("arcticdata_mcp") / "data" / "water" / name).read_text(encoding="utf-8"))
-
-    @cached_property
-    def lakes(self) -> list[dict[str, Any]]:
-        features = self._read("lakes.geojson")["features"]
-        for f in features:
-            f["bbox"] = list(_bounds(f["geometry"]["coordinates"]))
-        return features
-
-    @cached_property
-    def timeseries(self) -> dict[str, Any]:
-        return self._read("timeseries.json")
-
-    def lake(self, lake_id: str) -> dict[str, Any] | None:
-        return next((f for f in self.lakes if f["properties"]["id_geohash"] == lake_id), None)
 
 
 def _summary(dates: list[str], water: list[float | None]) -> dict[str, Any]:
@@ -93,12 +49,29 @@ def _summary(dates: list[str], water: list[float | None]) -> dict[str, Any]:
     }
 
 
+def _map_view(r: LakeResult) -> dict[str, Any]:
+    """What the map view draws: capped GeoJSON plus the counts and a note when lakes were left out."""
+    note = None
+    if len(r.features) < r.num_found:
+        cap = MAX_POLYGONS if r.geometry == "polygon" else MAX_POINTS
+        note = f"Map shows the top {cap} of {r.num_found} lakes"
+        note += "; zoom in to see more." if r.geometry == "point" else "; zoom in or filter to see others."
+    return {
+        "numFound": r.num_found,
+        "drained": r.drained,
+        "shown": len(r.features),
+        "geometry": r.geometry,
+        "map_note": note,
+        "geojson": {"type": "FeatureCollection", "features": r.features},
+    }
+
+
 def _text(payload: dict[str, Any]) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(payload))]
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
-    data = WaterData(ctx.settings.water.data_dir)
+    data = open_water_data(ctx.settings.water.data_dir)
 
     @mcp.tool(annotations=LOCAL_READ_ONLY, tags={"water", "spatial"}, app=AppConfig(resource_uri=LAKE_MAP_URI))
     def show_lakes(
@@ -112,15 +85,18 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         only_with_timeseries: Annotated[
             bool, Field(description="Only return lakes that have a water-area time series (get_lake_timeseries).")
         ] = False,
-        limit: Annotated[int, Field(ge=1, le=500, description="Maximum number of lakes to return.")] = 200,
+        limit: Annotated[int, Field(ge=1, le=500, description="Lakes listed in the result (page size).")] = 50,
+        offset: Annotated[int, Field(ge=0, description="Lakes to skip, for paging through the list.")] = 0,
     ) -> ToolResult:
         """Show Arctic lakes on the "Lost Lakes" drainage map (the water-timeseries dashboard's Historical view).
 
         Drained lakes are colored by the year of their drainage break and carry the break date, the median
         water area before and after the break and the change of water area. Every lake also has its area in
         2000 and 2020 and the net change (Area_start_ha, Area_end_ha, NetChange_ha, NetChange_perc). Omit the
-        bounding box to get every lake. This proof of concept holds a small sample of lakes on the Seward
-        Peninsula, Alaska (about 66.3-66.8 N, 164.3-160.8 W); lakes with has_timeseries=true can be passed to
+        bounding box to get every lake (west > east gives a box across the 180th meridian). Lakes are ranked drained-first (largest water change first), then
+        stable lakes by size. The result lists `limit` lakes from `offset` and the total counts; the map shows
+        the top lakes of the same ranking, as dots when the box is wide and as polygons when it is zoomed in,
+        so give a bounding box to see more of a dense area. Lakes with has_timeseries=true can be passed to
         get_lake_timeseries.
         """
         box = (west, south, east, north)
@@ -129,42 +105,60 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if north is not None and south is not None and south > north:
             raise ToolError("south must be <= north.")
 
-        matches = []
-        for f in data.lakes:
-            props = f["properties"]
-            if only_with_timeseries and not props["has_timeseries"]:
-                continue
-            if only_drained and "date_break" not in props:
-                continue
-            if north is not None:
-                w, s, e, n = f["bbox"]
-                if e < west or w > east or n < south or s > north:  # type: ignore[operator]
-                    continue
-            matches.append(f)
-
-        shown = matches[:limit]
-        lakes = [f["properties"] for f in shown]
-        summary = {
-            "numFound": len(matches),
-            "returned": len(shown),
-            "drained": sum(1 for p in lakes if "date_break" in p),
-            "lakes": lakes,
+        r = data.search(
+            bbox=None if west is None else box,  # type: ignore[arg-type]
+            only_drained=only_drained,
+            only_with_timeseries=only_with_timeseries,
+            limit=limit,
+            offset=offset,
+        )
+        summary: dict[str, Any] = {
+            "numFound": r.num_found,
+            "drained": r.drained,
+            "returned": len(r.page),
+            "offset": offset,
+            "lakes": r.page,
         }
-        structured = {
-            **summary,
-            "geojson": {
-                "type": "FeatureCollection",
-                "features": [{k: f[k] for k in ("type", "properties", "geometry")} for f in shown],
-            },
-        }
-        # The model gets the lake attributes; the polygons are only for the map view.
+        if offset + len(r.page) < r.num_found:
+            summary["next_offset"] = offset + len(r.page)
+        structured = {**summary, **_map_view(r)}
+        # The model gets the lake attributes; the geometry is only for the map view.
         return ToolResult(content=_text(summary), structured_content=structured)
+
+    @mcp.tool(
+        annotations=LOCAL_READ_ONLY, tags={"water", "spatial"}, app=AppConfig(visibility=["app"])
+    )
+    def lakes_in_view(
+        north: Annotated[float, Field(ge=-90, le=90, description="Top of the map view (WGS84).")],
+        south: Annotated[float, Field(ge=-90, le=90, description="Bottom of the map view (WGS84).")],
+        east: Annotated[float, Field(ge=-180, le=180, description="Right edge of the map view (WGS84).")],
+        west: Annotated[
+            float,
+            Field(ge=-180, le=180, description="Left edge of the map view (WGS84); west > east crosses 180 degrees."),
+        ],
+        zoom: Annotated[int, Field(ge=0, le=22, description="The map's zoom level; picks dots or polygons.")],
+        only_drained: bool = False,
+        only_with_timeseries: bool = False,
+    ) -> ToolResult:
+        """The lake map's pan/zoom reload: lakes in the current view, for the map only (hidden from the model)."""
+        if south > north:
+            raise ToolError("south must be <= north.")
+        r = data.search(
+            bbox=(west, south, east, north),
+            only_drained=only_drained,
+            only_with_timeseries=only_with_timeseries,
+            limit=0,
+            offset=0,
+            zoom=zoom,
+        )
+        view = _map_view(r)
+        return ToolResult(content=_text({k: view[k] for k in ("numFound", "drained", "shown")}), structured_content=view)
 
     @mcp.tool(
         annotations=LOCAL_READ_ONLY, tags={"water", "temporal"}, app=AppConfig(resource_uri=LAKE_TIMESERIES_URI)
     )
     def get_lake_timeseries(lake_id: LakeId) -> ToolResult:
-        """Water-area time series of one lake, shown as the water-timeseries dashboard's interactive charts.
+        """Water-area time series of one lake, drawn as the water-timeseries dashboard's interactive charts.
 
         Dynamic World (monthly, June-September): water, vegetation (flooded vegetation + grass + shrub/scrub
         + trees), bare and snow/ice area in ha, with invalid months (no-data or snow) already masked out.
@@ -176,22 +170,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if entry is None:
             available = ", ".join(sorted(data.timeseries["lakes"]))
             raise ToolError(f"No time series for lake {lake_id!r}. Lakes with data: {available}.")
-        lake = data.lake(lake_id)
         dw = entry["dw"]
-        summary: dict[str, Any] = {
+        result: dict[str, Any] = {
             "lake_id": lake_id,
             "name": entry["name"],
-            "lake": lake["properties"] if lake else None,
+            "lake": data.lake(lake_id),
             "break": entry["break"],
             "summary": _summary(dw["data"]["dates"], dw["data"]["water"]),
-            "dw": {k: v for k, v in dw.items() if k != "figure"},
+            "dw": dw,
         }
         if "jrc" in entry:
-            summary["jrc"] = {k: v for k, v in entry["jrc"].items() if k != "figure"}
-        structured = {
-            **summary,
-            "dw": dw,
-            **({"jrc": entry["jrc"]} if "jrc" in entry else {}),
-        }
-        # The model gets the data; the Plotly figures are only for the chart view.
-        return ToolResult(content=_text(summary), structured_content=structured)
+            result["jrc"] = entry["jrc"]
+        # The chart view draws the figures from this same data, so model and view get one result.
+        return ToolResult(content=_text(result), structured_content=result)

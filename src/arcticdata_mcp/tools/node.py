@@ -26,7 +26,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     client = ctx.client
     settings = ctx.settings
 
-    @mcp.tool(annotations=READ_ONLY, tags={"node"})
+    @mcp.tool(annotations=READ_ONLY, tags={"node", "low_level"})
     async def get_node_info() -> dict[str, Any]:
         """Describe the Arctic Data Center member node (GET /node): identifier, description, supported
         DataONE services/versions, sync schedule, and software version.
@@ -48,25 +48,25 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "contactSubject": n.get("contactSubject"),
         }
 
-    @mcp.tool(annotations=READ_ONLY, tags={"node"})
+    @mcp.tool(annotations=READ_ONLY, tags={"node", "low_level"})
     async def ping() -> dict[str, Any]:
         """Check that the Arctic Data Center API is up (GET /monitor/ping)."""
         resp = await client.request("GET", client.mn("monitor/ping"), raise_errors=False)
         return {"up": resp.status_code == 200, "status_code": resp.status_code, "date": resp.headers.get("date")}
 
-    @mcp.tool(annotations=READ_ONLY, tags={"node"})
+    @mcp.tool(annotations=READ_ONLY, tags={"node", "low_level"})
     async def list_query_engines() -> dict[str, Any]:
         """List the query engines the node supports (GET /query). The Arctic Data Center uses 'solr'."""
         q = await client.get_xml(client.mn("query"))
         return {"query_engines": as_list(q.get("queryEngine"))}
 
-    @mcp.tool(annotations=READ_ONLY, tags={"node"})
+    @mcp.tool(annotations=READ_ONLY, tags={"node", "low_level"})
     async def list_views() -> dict[str, Any]:
         """List metadata rendering views the node supports (GET /views), usable with get_metadata_html."""
         v = await client.get_xml(client.mn("views"))
         return {"views": as_list(v.get("option")), "description": v.get("@description")}
 
-    @mcp.tool(annotations=READ_ONLY, tags={"reference"})
+    @mcp.tool(annotations=READ_ONLY, tags={"reference", "low_level"})
     async def list_object_formats(
         format_type: Annotated[
             Literal["any", "DATA", "METADATA", "RESOURCE"],
@@ -75,7 +75,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         contains: Annotated[str | None, Field(description="Case-insensitive filter on format ID, name, media type or extension.")] = None,
     ) -> dict[str, Any]:
         """List DataONE object format IDs (from the DataONE Coordinating Node GET /formats), e.g. to pick
-        a formatId for search_by_format or search_data_files.
+        a formatId for search_data_files.
         """
         fl = await client.get_xml(client.cn("formats"))
         formats = [_format(f) for f in as_list(fl.get("objectFormat"))]
@@ -86,7 +86,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             formats = [f for f in formats if any(c in str(v).lower() for v in f.values() if v)]
         return {"count": len(formats), "formats": formats}
 
-    @mcp.tool(annotations=READ_ONLY, tags={"reference"})
+    @mcp.tool(annotations=READ_ONLY, tags={"reference", "low_level"})
     async def get_object_format(
         format_id: Annotated[str, Field(description="DataONE format ID, e.g. 'text/csv' or 'https://eml.ecoinformatics.org/eml-2.2.0'.")],
     ) -> dict[str, Any]:

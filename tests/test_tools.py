@@ -23,15 +23,27 @@ def solr_json(docs, num=None, **extra):
 
 async def test_lists_all_tools(client):
     names = {t.name for t in await client.list_tools()}
-    assert len(names) == 53
+    assert len(names) == 26
     assert {"search_datasets", "download_file", "list_dataset_files", "get_facet_counts", "search_portals"} <= names
+    assert not names & {"ping", "list_objects", "get_checksum"}
+
+
+async def test_low_level_tools_hidden_unless_enabled(settings, mock_api):
+    async with Client(create_server(settings, require_auth=False)) as c:
+        with pytest.raises(ToolError):
+            await c.call_tool("ping", {})
+    settings.tools.exclude_tags = []
+    async with Client(create_server(settings, require_auth=False)) as c:
+        names = {t.name for t in await c.list_tools()}
+    assert len(names) == 36
+    assert {"ping", "list_objects", "get_checksum"} <= names
 
 
 async def test_search_by_keyword_builds_query(client, mock_api):
     route = mock_api.get(f"{MN}/query/solr/").mock(
         return_value=httpx.Response(200, json=solr_json([{"id": "doi:1", "title": "T", "origin": ["A"]}], num=5))
     )
-    r = await client.call_tool("search_by_keyword", {"keyword": "permafrost", "rows": 1})
+    r = await client.call_tool("search_datasets", {"keyword": "permafrost", "rows": 1})
     params = route.calls.last.request.url.params
     assert 'keywordsText:"permafrost"' in params["q"]
     assert "formatType:METADATA" in params.get_list("fq")
@@ -40,6 +52,28 @@ async def test_search_by_keyword_builds_query(client, mock_api):
     res = r.structured_content["results"][0]
     assert res["authors"] == ["A"]
     assert res["landing_url"].endswith("doi%3A1")
+
+
+async def test_search_datasets_combines_filters(client, mock_api):
+    route = mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=solr_json([], num=3)))
+    r = await client.call_tool("search_datasets", {
+        "query": "thaw", "author": "Schuur", "license": "Zero", "north": 71.5, "south": 68, "east": -141,
+        "west": -166, "start_date": "2010", "uploaded_from": "NOW-30DAYS", "rows": 0,
+    })
+    q = route.calls.last.request.url.params["q"]
+    assert q.startswith("(thaw) AND ")
+    assert 'authorLastName:"Schuur"' in q
+    assert "licenseName:*Zero*" in q
+    assert "southBoundCoord:[* TO 71.5]" in q
+    assert "endDate:[2010-01-01T00:00:00Z TO *]" in q
+    assert "dateUploaded:[NOW-30DAYS TO *]" in q
+    assert route.calls.last.request.url.params["rows"] == "0"
+    assert r.structured_content["numFound"] == 3
+
+
+async def test_search_datasets_needs_full_bbox(client):
+    with pytest.raises(ToolError, match="all four"):
+        await client.call_tool("search_datasets", {"north": 70})
 
 
 async def test_facet_counts(client, mock_api):
@@ -125,9 +159,9 @@ async def test_citation(client, mock_api):
     assert r.structured_content["citation"] == "A B, C D, and E F. 2020. Snow. Arctic Data Center. doi:10.18739/X."
 
 
-async def test_bounding_box_search_links_map_app(client):
+async def test_dataset_search_links_map_app(client):
     tools = {t.name: t for t in await client.list_tools()}
-    uri = tools["search_by_bounding_box"].meta["ui"]["resourceUri"]
+    uri = tools["search_datasets"].meta["ui"]["resourceUri"]
     assert uri == "ui://arcticdata/search-map.html"
     [res] = [r for r in await client.list_resources() if str(r.uri) == uri]
     assert res.mime_type == "text/html;profile=mcp-app"

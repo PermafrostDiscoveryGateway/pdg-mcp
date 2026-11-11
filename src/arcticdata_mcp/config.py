@@ -83,6 +83,13 @@ class MetadataSettings:
 
 
 @dataclass
+class ToolSettings:
+    # Tools carrying any of these tags are not listed or callable. "low_level" covers DataONE node diagnostics
+    # and object plumbing (ping, get_node_info, list_objects, get_checksum, ...); set [] to expose everything.
+    exclude_tags: list[str] = field(default_factory=lambda: ["low_level"])
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
@@ -92,6 +99,7 @@ class Settings:
     water: WaterSettings = field(default_factory=WaterSettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
     metadata: MetadataSettings = field(default_factory=MetadataSettings)
+    tools: ToolSettings = field(default_factory=ToolSettings)
 
 
 def _coerce(value: str, target: type) -> Any:

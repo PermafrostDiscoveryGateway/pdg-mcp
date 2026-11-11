@@ -93,35 +93,22 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (53)
+## Tools (26 by default, 36 with `tools.exclude_tags = []`)
+
+Every tool's schema is sent to the model on each turn, so the surface is kept small: one `search_datasets` with
+combinable filters instead of a tool per field, and low-level DataONE tools (tagged `low_level`) hidden unless
+`tools.exclude_tags` is changed.
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
 |------|---------|
-| `search_datasets` | Free-text search over all metadata |
-| `search_by_title` | Title phrase or wildcard |
-| `search_by_author` | Creator, last name, or investigator |
-| `search_by_keyword` | Author keywords, GCMD keywords, topics |
-| `search_by_bounding_box` | Spatial overlap or containment |
-| `search_by_temporal_coverage` | Data collection period overlaps a range |
-| `search_by_publication_date` | Uploaded, published, or modified in a range |
-| `search_by_funding` | Award number, funder, or award title |
-| `search_by_project` | Project name |
-| `search_by_measured_variable` | Attribute name, label, description, or unit |
-| `search_by_taxon` | Scientific name or taxonomic rank |
-| `search_by_semantic_annotation` | Ontology concept URI (for example ECSO) |
-| `search_by_location_name` | Place keyword or site name |
-| `search_by_organization` | Contact or related organization |
-| `search_by_license` | Indexed license name |
-| `search_by_rights_holder` | Owner or submitter ORCID |
-| `search_by_provenance` | PROV relations to a PID |
+| `search_datasets` | Datasets by any mix of free text, title, author, keyword, place, organization, project, funding, measured variable, taxon, semantic annotation, license, owner ORCID, bounding box (map view), collection period and upload date. `rows=0` counts only |
 | `search_data_files` | Data files by name, format, size, or parent dataset |
-| `search_by_format` | Any object by formatId |
+| `search_by_provenance` | PROV relations to a PID |
 | `find_dataset_by_identifier` | Resolve a DOI, PID, series ID, or file PID to its dataset |
-| `count_datasets` | Number of matches only |
 | `get_facet_counts` | Top values and counts of any field |
 | `list_search_fields` | All index fields and their types |
-| `advanced_solr_query` | Raw q/fq/fl/sort/facets |
+| `advanced_solr_query` | Raw q/fq/fl/sort/facets, for single-field matches such as `gcmdKeyword` or `genus` |
 
 ### Project portals
 Portals are curated project collections on arcticdata.io (for example
@@ -162,12 +149,12 @@ instrumentation, citations, data sources, sampling coverage) are copied whole ne
 `intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
-`download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
-`get_checksum`, `list_objects`, `is_authorized`.
+`download_file`, `preview_file`, `get_download_url`, `get_system_metadata`. Hidden by default (`low_level`):
+`describe_object` (HEAD), `get_checksum`, `list_objects`, `is_authorized`.
 
 ### Node and reference
-`get_node_info`, `ping`, `list_query_engines`, `list_views`, `list_object_formats` and `get_object_format`
-(from the DataONE CN), `get_server_config`.
+`get_server_config`. Hidden by default (`low_level`): `get_node_info`, `ping`, `list_query_engines`, `list_views`,
+`list_object_formats` and `get_object_format` (from the DataONE CN).
 
 ### Water timeseries (MCP Apps PoC)
 `show_lakes` (lake map) and `get_lake_timeseries` (water-area chart) serve a small sample of

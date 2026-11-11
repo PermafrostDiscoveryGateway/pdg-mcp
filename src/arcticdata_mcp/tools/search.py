@@ -39,340 +39,90 @@ PROV_FIELDS = {
 }
 
 
+# Solr fields each search_datasets filter matches (a value matching any one of them counts).
+FIELD_FILTERS = {
+    "title": ["title"],
+    "author": ["originText", "author", "authorLastName", "investigatorText"],
+    "keyword": ["keywordsText", "gcmdKeyword", "topicText"],
+    "place": ["placeKey", "siteText", "namedLocation"],
+    "organization": ["contactOrganizationText", "relatedOrganizations"],
+    "project": ["projectText", "project"],
+    "funding": ["awardNumber", "fundingText", "funderName", "awardTitle"],
+    "variable": ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"],
+    "taxon": ["scientificName", "kingdom", "phylum", "class", "order", "family", "genus", "species"],
+    "concept_uri": ["sem_annotation"],
+    "owner": ["rightsHolder", "submitter"],
+}
+
+
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     client = ctx.client
 
     async def run(q: str | list[str], **kw: Any) -> dict[str, Any]:
         return await solr.search(client, q, **kw)
 
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
+    @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial", "temporal"}, app=AppConfig(resource_uri=SEARCH_MAP_URI))
     async def search_datasets(
-        query: Annotated[str, Field(description="Free-text query, e.g. 'permafrost thaw methane'. Solr syntax (AND/OR/quotes) is allowed.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Full-text search across dataset metadata (title, abstract, keywords, people, places, etc.).
-
-        Best starting point for discovering Arctic Data Center datasets.
-        Example: search_datasets(query="sea ice thickness Beaufort")
-        """
-        return await run(query, rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_title(
-        title: Annotated[str, Field(description="Title phrase, or wildcard pattern such as '*snow depth*'.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets whose title contains a phrase (or matches a wildcard pattern).
-
-        Example: search_by_title(title="ice wedge")
-        """
-        return await run(f"title:{solr.term(title)}", rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_author(
-        name: Annotated[str, Field(description="Creator/author name, e.g. 'Schuur' or 'Edward Schuur'. Wildcards allowed.")],
-        role: Annotated[
-            Literal["any", "creator", "last_name", "investigator"],
-            Field(description="'creator' = dataset origin/authors, 'last_name' = author surname only, 'investigator' = PI/associated party."),
-        ] = "any",
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets by author, creator, or investigator name.
-
-        Example: search_by_author(name="Romanovsky", role="last_name")
-        """
-        fields = {
-            "any": ["originText", "author", "authorLastName", "investigatorText"],
-            "creator": ["originText", "author"],
-            "last_name": ["authorLastName", "authorSurName"],
-            "investigator": ["investigatorText"],
-        }[role]
-        return await run(solr.any_field(fields, name), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_keyword(
-        keyword: Annotated[str, Field(description="Keyword, e.g. 'permafrost', 'EARTH SCIENCE > CRYOSPHERE'.")],
-        vocabulary: Annotated[
-            Literal["any", "author_keywords", "gcmd", "topic"],
-            Field(description="Restrict to author-supplied keywords, GCMD science keywords, or topic categories."),
-        ] = "any",
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets tagged with a keyword (author keywords, GCMD keywords, or topic).
-
-        Tip: use get_facet_counts(field="keywords") to discover popular keywords.
-        Example: search_by_keyword(keyword="active layer")
-        """
-        fields = {
-            "any": ["keywordsText", "gcmdKeyword", "topicText"],
-            "author_keywords": ["keywordsText"],
-            "gcmd": ["gcmdKeyword"],
-            "topic": ["topicText"],
-        }[vocabulary]
-        return await run(solr.any_field(fields, keyword), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"}, app=AppConfig(resource_uri=SEARCH_MAP_URI))
-    async def search_by_bounding_box(
-        north: Lat,
-        south: Lat,
-        east: Lon,
-        west: Lon,
-        mode: Annotated[
+        query: Annotated[str | None, Field(description="Free text over all metadata, e.g. 'permafrost thaw methane'. Solr syntax (AND/OR/quotes) is allowed.")] = None,
+        title: Annotated[str | None, Field(description="Title phrase or wildcard pattern, e.g. '*snow depth*'.")] = None,
+        author: Annotated[str | None, Field(description="Creator, author surname or investigator, e.g. 'Romanovsky'.")] = None,
+        keyword: Annotated[str | None, Field(description="Author, GCMD or topic keyword, e.g. 'active layer'.")] = None,
+        place: Annotated[str | None, Field(description="Named place or site, e.g. 'Toolik Lake'.")] = None,
+        organization: Annotated[str | None, Field(description="Contact or related organization.")] = None,
+        project: Annotated[str | None, Field(description="Research project, e.g. 'Arctic Observing Network'.")] = None,
+        funding: Annotated[str | None, Field(description="Award number (e.g. '1503559'), funder name or award title.")] = None,
+        variable: Annotated[str | None, Field(description="Measured variable (data-table attribute) name, label, description or unit, e.g. 'soil temperature'.")] = None,
+        taxon: Annotated[str | None, Field(description="Scientific name or taxon at any rank, e.g. 'Rangifer tarandus'.")] = None,
+        concept_uri: Annotated[str | None, Field(description="Semantic annotation concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001197'.")] = None,
+        license: Annotated[str | None, Field(description="License name fragment (case-sensitive), e.g. 'Creative Commons Zero'.")] = None,
+        owner: Annotated[str | None, Field(description="Rights holder or submitter ORCID, e.g. 'http://orcid.org/0000-0003-1846-5140'.")] = None,
+        north: Lat | None = None,
+        south: Lat | None = None,
+        east: Lon | None = None,
+        west: Lon | None = None,
+        spatial_mode: Annotated[
             Literal["intersects", "within"],
-            Field(description="'intersects' = dataset extent overlaps the box; 'within' = dataset extent lies fully inside it."),
+            Field(description="Bounding box test: footprint overlaps the box, or lies fully inside it."),
         ] = "intersects",
-        text: Annotated[str | None, Field(description="Optional free-text filter to combine with the spatial filter.")] = None,
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets whose geographic coverage overlaps (or lies within) a lat/lon bounding box.
-
-        Coordinates in decimal degrees (WGS84). Boxes crossing the antimeridian are not supported;
-        split them into two queries.
-        Example (North Slope of Alaska): search_by_bounding_box(north=71.5, south=68, east=-141, west=-166)
-        """
-        q = [solr.bbox_clause(north, south, east, west, mode)]
-        if text:
-            q.append(text)
-        return await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "temporal"})
-    async def search_by_temporal_coverage(
         start_date: DateStr = None,
         end_date: DateStr = None,
-        text: Annotated[str | None, Field(description="Optional free-text filter.")] = None,
+        uploaded_from: DateStr = None,
+        uploaded_to: DateStr = None,
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "relevance",
         latest_only: LatestOnly = True,
     ) -> dict[str, Any]:
-        """Find datasets whose data collection period overlaps a date range (beginDate/endDate).
+        """Search Arctic Data Center datasets. Every filter is optional and filters combine with AND;
+        with none, all datasets are listed. Text filters accept wildcards ('*', '?').
 
-        Leave start_date or end_date empty for an open-ended range.
-        Example: search_by_temporal_coverage(start_date="2007", end_date="2009", text="caribou")
+        start_date/end_date match the data collection period (overlap); uploaded_from/uploaded_to match the
+        upload date ('NOW-30DAYS' with sort='newest' shows what's new). The bounding box needs all of
+        north/south/east/west in WGS84 degrees and cannot cross the antimeridian. rows=0 returns only numFound.
+        get_facet_counts shows valid filter values; advanced_solr_query targets a single Solr field.
+        Example: search_datasets(keyword="permafrost", author="Schuur", start_date="2010")
         """
-        if not start_date and not end_date:
-            raise ToolError("Provide at least one of start_date or end_date")
-        q = [
-            f"beginDate:[* TO {solr.solr_date(end_date, end_of_period=True)}]",
-            f"endDate:[{solr.solr_date(start_date)} TO *]",
-        ]
-        if text:
-            q.append(text)
+        q: list[str] = []
+        if query:
+            q.append(query)
+        given = {"title": title, "author": author, "keyword": keyword, "place": place, "organization": organization,
+                 "project": project, "funding": funding, "variable": variable, "taxon": taxon,
+                 "concept_uri": concept_uri, "owner": owner}
+        q += [solr.any_field(FIELD_FILTERS[k], v) for k, v in given.items() if v]
+        if license:
+            value = license if ("*" in license or "?" in license) else f"*{license}*"
+            q.append(solr.any_field(["licenseName", "licenseUrl"], value))
+        box = (north, south, east, west)
+        if any(v is not None for v in box):
+            if any(v is None for v in box):
+                raise ToolError("Give all four of north, south, east and west, or none of them.")
+            q.append(solr.bbox_clause(north, south, east, west, spatial_mode))  # type: ignore[arg-type]
+        if start_date or end_date:
+            q.append(f"beginDate:[* TO {solr.solr_date(end_date, end_of_period=True)}]")
+            q.append(f"endDate:[{solr.solr_date(start_date)} TO *]")
+        if uploaded_from or uploaded_to:
+            q.append(solr.date_range("dateUploaded", uploaded_from, uploaded_to))
         return await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "temporal"})
-    async def search_by_publication_date(
-        start_date: DateStr = None,
-        end_date: DateStr = None,
-        date_field: Annotated[
-            Literal["datePublished", "dateUploaded", "dateModified"],
-            Field(description="Which date to filter on."),
-        ] = "dateUploaded",
-        text: Annotated[str | None, Field(description="Optional free-text filter.")] = None,
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "newest",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets published/uploaded/modified within a date range. Useful for "what's new".
-
-        Example: search_by_publication_date(start_date="NOW-30DAYS")
-        """
-        q = [solr.date_range(date_field, start_date, end_date)]
-        if text:
-            q.append(text)
-        return await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_funding(
-        award: Annotated[str, Field(description="Award number (e.g. '1503559'), funder name (e.g. 'National Science Foundation') or award title text.")],
-        field: Annotated[
-            Literal["any", "award_number", "funder_name", "award_title"],
-            Field(description="Which funding field to search."),
-        ] = "any",
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets produced under a funding award (e.g. an NSF Arctic award number) or funder.
-
-        Example: search_by_funding(award="1503559", field="award_number")
-        """
-        fields = {
-            "any": ["awardNumber", "fundingText", "funderName", "awardTitle"],
-            "award_number": ["awardNumber", "fundingText"],
-            "funder_name": ["funderName"],
-            "award_title": ["awardTitle"],
-        }[field]
-        return await run(solr.any_field(fields, award), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_project(
-        project: Annotated[str, Field(description="Project name, e.g. 'Arctic Observing Network' or 'NGEE Arctic'. Wildcards allowed.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets that belong to a named research project.
-
-        Tip: get_facet_counts(field="project") lists project names.
-        Example: search_by_project(project="Arctic Observing Network")
-        """
-        return await run(solr.any_field(["projectText", "project"], project), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_measured_variable(
-        variable: Annotated[str, Field(description="Variable/attribute name, label, description or unit, e.g. 'soil temperature', 'celsius', 'CH4'.")],
-        field: Annotated[
-            Literal["any", "name", "label", "description", "unit"],
-            Field(description="Which attribute field to match."),
-        ] = "any",
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets containing a measured variable (EML data-table attribute) by name, label, description or unit.
-
-        Example: search_by_measured_variable(variable="snow water equivalent")
-        """
-        fields = {
-            "any": ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"],
-            "name": ["attributeName"],
-            "label": ["attributeLabel"],
-            "description": ["attributeDescription"],
-            "unit": ["attributeUnit"],
-        }[field]
-        return await run(solr.any_field(fields, variable), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_taxon(
-        taxon: Annotated[str, Field(description="Scientific name or taxon, e.g. 'Rangifer tarandus', 'Salix', 'Mammalia'.")],
-        rank: Annotated[
-            Literal["any", "scientificName", "kingdom", "phylum", "class", "order", "family", "genus", "species"],
-            Field(description="Taxonomic rank to match."),
-        ] = "any",
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets with taxonomic coverage of an organism or taxon.
-
-        Example: search_by_taxon(taxon="Ursus maritimus")
-        """
-        fields = (
-            ["scientificName", "kingdom", "phylum", "class", "order", "family", "genus", "species"]
-            if rank == "any"
-            else [rank]
-        )
-        return await run(solr.any_field(fields, taxon), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "semantic"})
-    async def search_by_semantic_annotation(
-        concept_uri: Annotated[str, Field(description="Ontology concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001197' (ECSO), or a wildcard.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets semantically annotated with an ontology concept (e.g. ECSO measurement types).
-
-        Tip: get_facet_counts(field="sem_annotation") lists concept URIs in use.
-        """
-        return await run(f"sem_annotation:{solr.term(concept_uri)}", rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"})
-    async def search_by_location_name(
-        place: Annotated[str, Field(description="Place name, e.g. 'Toolik', 'Svalbard', 'Utqiagvik', 'Greenland'.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets by named geographic place/site in their metadata (place keywords, site, geographic description).
-
-        Example: search_by_location_name(place="Toolik Lake")
-        """
-        return await run(solr.any_field(["placeKey", "siteText", "namedLocation"], place), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_organization(
-        organization: Annotated[str, Field(description="Organization name, e.g. 'University of Alaska Fairbanks'.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets by contact or related organization.
-
-        Example: search_by_organization(organization="University of Alaska Fairbanks")
-        """
-        return await run(solr.any_field(["contactOrganizationText", "relatedOrganizations"], organization), rows=rows, start=start, sort=sort, latest_only=latest_only)
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_license(
-        license: Annotated[str, Field(description="License name fragment (case-sensitive), e.g. 'Creative Commons Zero', 'Attribution', or an exact name from get_facet_counts(field='licenseName').")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "relevance",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find datasets whose indexed license name matches a value.
-
-        Note: only a subset of records carry an indexed license; run
-        get_facet_counts(field="licenseName") to see which license names exist.
-        Example: search_by_license(license="Creative Commons Zero")
-        """
-        value = license if ("*" in license or "?" in license) else f"*{license}*"
-        return await run(
-            f"licenseName:{solr.term(value)} OR licenseUrl:{solr.term(value)}",
-            rows=rows, start=start, sort=sort, latest_only=latest_only,
-        )
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def search_by_rights_holder(
-        subject: Annotated[str, Field(description="DataONE subject, usually an ORCID URL, e.g. 'http://orcid.org/0000-0002-1825-0097'.")],
-        role: Annotated[
-            Literal["rights_holder", "submitter", "either"],
-            Field(description="Match the object's owner (rightsHolder), its submitter, or either."),
-        ] = "either",
-        format_type: Annotated[
-            Literal["METADATA", "DATA", "RESOURCE", "any"],
-            Field(description="Kind of object to return."),
-        ] = "METADATA",
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "newest",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Find objects owned or submitted by a DataONE subject (ORCID).
-
-        Example: search_by_rights_holder(subject="http://orcid.org/0000-0003-1846-5140")
-        """
-        fields = {"rights_holder": ["rightsHolder"], "submitter": ["submitter"], "either": ["rightsHolder", "submitter"]}[role]
-        return await run(
-            solr.any_field(fields, subject),
-            rows=rows, start=start, sort=sort, latest_only=latest_only,
-            format_type=None if format_type == "any" else format_type,
-        )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "provenance"})
     async def search_by_provenance(
@@ -423,24 +173,6 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             raise ToolError("Provide at least one filter")
         return await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only, format_type="DATA")
 
-    @mcp.tool(annotations=READ_ONLY, tags={"search", "files"})
-    async def search_by_format(
-        format_id: Annotated[str, Field(description="DataONE format ID, e.g. 'text/csv', 'netCDF-4', 'https://eml.ecoinformatics.org/eml-2.2.0'.")],
-        rows: Rows = 10,
-        start: Start = 0,
-        sort: Sort = "newest",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """List objects of any type (data, metadata, resource maps) with a given DataONE format ID.
-
-        Tip: list_object_formats() shows valid format IDs; get_facet_counts(field="formatId") shows which are used.
-        """
-        return await run(
-            f"formatId:{solr.phrase(format_id)}", rows=rows, start=start, sort=sort,
-            latest_only=latest_only, format_type=None,
-            fl=[*solr.DATA_FIELDS, "title"],
-        )
-
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def find_dataset_by_identifier(
         identifier: Annotated[str, Field(description="A DOI ('doi:10.18739/A2...' or 'https://doi.org/10.18739/...'), PID, series ID, or a data file PID.")],
@@ -459,35 +191,6 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             f"id:{p} OR seriesId:{p} OR identifier:{p} OR documents:{p}",
             rows=20, latest_only=False,
         )
-
-    @mcp.tool(annotations=READ_ONLY, tags={"search"})
-    async def count_datasets(
-        text: Annotated[str | None, Field(description="Optional free-text query.")] = None,
-        keyword: Annotated[str | None, Field(description="Optional keyword filter.")] = None,
-        author: Annotated[str | None, Field(description="Optional author filter.")] = None,
-        start_date: DateStr = None,
-        end_date: DateStr = None,
-        format_type: Annotated[
-            Literal["METADATA", "DATA", "RESOURCE", "any"],
-            Field(description="METADATA = datasets, DATA = data files, RESOURCE = packages."),
-        ] = "METADATA",
-        latest_only: LatestOnly = True,
-    ) -> dict[str, Any]:
-        """Count matching objects without returning them (temporal filter uses data coverage dates).
-
-        Example: count_datasets(keyword="permafrost", start_date="2015")
-        """
-        q: list[str] = []
-        if text:
-            q.append(text)
-        if keyword:
-            q.append(solr.any_field(["keywordsText", "gcmdKeyword"], keyword))
-        if author:
-            q.append(solr.any_field(["originText", "author"], author))
-        if start_date or end_date:
-            q.append(f"beginDate:[* TO {solr.solr_date(end_date, True)}] AND endDate:[{solr.solr_date(start_date)} TO *]")
-        res = await run(q, rows=0, latest_only=latest_only, format_type=None if format_type == "any" else format_type)
-        return {"count": res["numFound"], "query": res["query"]}
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "facets"})
     async def get_facet_counts(

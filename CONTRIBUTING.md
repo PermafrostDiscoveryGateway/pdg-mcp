@@ -22,5 +22,3 @@ To run these automatically before each commit, install the optional hook:
 ```bash
 uvx pre-commit install
 ```
-
-`git blame` can skip the one-off reformat commit: `git config blame.ignoreRevsFile .git-blame-ignore-revs`.

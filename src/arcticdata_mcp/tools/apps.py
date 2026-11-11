@@ -33,7 +33,7 @@ def _page(name: str) -> str:
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.resource(SEARCH_MAP_URI, name="search_map", app=AppConfig(csp=SEARCH_MAP_CSP))
     def search_map() -> str:
-        """Leaflet map that draws the dataset footprints returned by search_by_bounding_box."""
+        """Leaflet map that draws the dataset footprints returned by search_datasets and search_portal_datasets."""
         return _page("search_map.html")
 
     @mcp.resource(LAKE_MAP_URI, name="lake_map", app=AppConfig(csp=LAKE_MAP_CSP))

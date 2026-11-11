@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> None:
     port = args.port or settings.server.port
 
     if transport == "stdio":
-        create_server(settings, require_auth=False).run(transport="stdio")
+        create_server(settings, require_auth=False, check_index_fields=True).run(transport="stdio")
         return
 
     if not settings.auth.realm_url and not args.insecure:
@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> None:
             "Refusing to start: no Keycloak realm configured. Set [auth] realm_url in config.toml "
             "or ARCTICDATA_MCP_AUTH_REALM_URL (or pass --insecure for local testing)."
         )
-    server = create_server(settings, require_auth=bool(settings.auth.realm_url))
+    server = create_server(settings, require_auth=bool(settings.auth.realm_url), check_index_fields=True)
     server.run(transport="http", host=host, port=port, path=settings.server.path)
 
 

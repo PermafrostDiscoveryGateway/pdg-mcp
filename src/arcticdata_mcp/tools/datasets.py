@@ -17,7 +17,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from arcticdata_mcp import downloads, eml, solr
-from arcticdata_mcp.client import as_list, quote_pid
+from arcticdata_mcp.client import quote_pid
 from arcticdata_mcp.tools.common import READ_ONLY, Pid, Rows, Start, ToolContext
 
 NS = {
@@ -43,6 +43,15 @@ DETAIL_EXCLUDED = {
 }
 FIELD_LIST_TTL = 3600.0
 
+# Index fields named in this module, compared with the index by solr.check_fields (see tools.fields_in_use).
+PACKAGE_LOOKUP_FIELDS = ["id", "formatType", "resourceMap"]
+CITATION_FIELDS = ["id", "seriesId", "title", "origin", "pubDate", "datePublished", "dateUploaded"]
+VERSION_FIELDS = ["id", "seriesId", "obsoletes", "obsoletedBy", "dateUploaded", "title", "formatType"]
+# Fields written directly into query strings (size is also the stats field for package totals).
+QUERY_FIELDS = ["id", "seriesId", "resourceMap", "isDocumentedBy", "fileName", "size"]
+VERSION_SORT = "dateUploaded asc"
+SORTS = [VERSION_SORT]
+
 
 def is_detail_field(name: str) -> bool:
     return name not in DETAIL_EXCLUDED and not name.startswith(DETAIL_EXCLUDED_PREFIXES)
@@ -63,7 +72,7 @@ class IndexFields:
             if self._names is None or time.monotonic() - self._fetched >= self.ttl:
                 try:
                     desc = await self.client.get_xml(self.client.mn("query/solr"))
-                    names = [f["name"] for f in as_list(desc.get("queryField")) if f.get("returnable") == "true" and f.get("name")]
+                    names = [name for name, f in solr.index_fields(desc).items() if f["returnable"]]
                 except Exception as exc:  # noqa: BLE001 - fall back to fl=* rather than fail the tool
                     log.warning("Could not read the Solr field list: %s", exc)
                     return None
@@ -157,7 +166,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         return docs[0]
 
     async def resource_map_pid(pid: str) -> str:
-        doc = await solr_doc(pid, "id,formatType,resourceMap")
+        doc = await solr_doc(pid, ",".join(PACKAGE_LOOKUP_FIELDS))
         if doc.get("formatType") == "RESOURCE":
             return doc["id"]
         maps = doc.get("resourceMap") or []
@@ -200,7 +209,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Use download_file / preview_file with a returned id to retrieve content.
         Example: list_dataset_files(pid="doi:10.18739/A29K4B", file_name="*.csv")
         """
-        doc = await solr_doc(pid, "id,formatType,resourceMap")
+        doc = await solr_doc(pid, ",".join(PACKAGE_LOOKUP_FIELDS))
         if doc.get("formatType") == "RESOURCE":
             clause = f"resourceMap:{solr.phrase(pid)}"
         else:
@@ -367,7 +376,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         style: Annotated[Literal["text", "bibtex"], Field(description="Citation format.")] = "text",
     ) -> dict[str, Any]:
         """Build a citation for a dataset from its indexed metadata (authors, year, title, repository, DOI)."""
-        doc = await solr_doc(pid, "id,seriesId,title,origin,pubDate,datePublished,dateUploaded")
+        doc = await solr_doc(pid, ",".join(CITATION_FIELDS))
         authors: list[str] = doc.get("origin") or []
         date = doc.get("datePublished") or doc.get("pubDate") or doc.get("dateUploaded") or ""
         year = date[:4] or "n.d."
@@ -402,10 +411,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Return the full version chain of an object (following obsoletes/obsoletedBy), oldest first,
         and identify the latest version.
         """
-        fl = "id,seriesId,obsoletes,obsoletedBy,dateUploaded,title,formatType"
+        fl = ",".join(VERSION_FIELDS)
         data = await client.solr([
             ("q", f"id:{solr.phrase(pid)} OR seriesId:{solr.phrase(pid)}"),
-            ("fl", fl), ("rows", 100), ("sort", "dateUploaded asc"),
+            ("fl", fl), ("rows", 100), ("sort", VERSION_SORT),
         ])
         docs = {d["id"]: d for d in data.get("response", {}).get("docs", [])}
         if not docs:

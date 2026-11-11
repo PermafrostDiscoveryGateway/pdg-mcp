@@ -3,6 +3,8 @@ name = "arcticdata-mcp"
 version = "0.1.0"
 description = "FastMCP server exposing the Arctic Data Center (DataONE) search and download API"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Luigi Marini", email = "lmarini@illinois.edu" }
 ]

@@ -23,7 +23,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Pull requests only build. Pushes go to NCSA Harbor (needs HUB_USERNAME/HUB_PASSWORD secrets, e.g. a
       # Harbor robot account with push access to the pdg project) and to ghcr.io.
       - id: push

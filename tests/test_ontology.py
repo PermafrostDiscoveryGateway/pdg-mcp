@@ -1,11 +1,15 @@
 import httpx
 import pytest
-
-from arcticdata_mcp import ontology
 from conftest import MN
 
+from arcticdata_mcp import ontology
+
 SOIL_DEPTH = "http://purl.dataone.org/odo/ECSO_00001207"
-SOIL_DEPTH_FORMS = [SOIL_DEPTH, "https://purl.dataone.org/odo/ECSO_00001207", "http://www.purl.dataone.org/odo/ECSO_00001207"]
+SOIL_DEPTH_FORMS = [
+    SOIL_DEPTH,
+    "https://purl.dataone.org/odo/ECSO_00001207",
+    "http://www.purl.dataone.org/odo/ECSO_00001207",
+]
 WATER_CONTENT = "http://purl.dataone.org/odo/ECSO_00010077"  # minted as http://www.purl..., 96 current datasets
 
 
@@ -29,7 +33,14 @@ def test_www_purl_concepts_are_bundled(value):
     assert "http://www.purl.dataone.org/odo/ECSO_00010077" in ontology.purl_variants(value)
 
 
-@pytest.mark.parametrize(("term", "label"), [("water content", "Water Content"), ("depth of thaw", "Depth of Thaw"), ("NDVI", "Normalized Difference Vegetation Index")])
+@pytest.mark.parametrize(
+    ("term", "label"),
+    [
+        ("water content", "Water Content"),
+        ("depth of thaw", "Depth of Thaw"),
+        ("NDVI", "Normalized Difference Vegetation Index"),
+    ],
+)
 def test_www_purl_concepts_resolve(term, label):
     assert [m.concept.label for m in ontology.top_matches(term, ontology.match_local(term, 50))] == [label]
 
@@ -44,7 +55,9 @@ def test_bundled_table_records_its_ecso_version():
 
 
 def test_other_uris_pass_through():
-    assert ontology.purl_variants("http://purl.obolibrary.org/obo/ENVO_00002003") == ["http://purl.obolibrary.org/obo/ENVO_00002003"]
+    assert ontology.purl_variants("http://purl.obolibrary.org/obo/ENVO_00002003") == [
+        "http://purl.obolibrary.org/obo/ENVO_00002003"
+    ]
     assert ontology.annotation_clause(["*ECSO_00001207"]) == "sem_annotation:(*ECSO_00001207)"
 
 
@@ -55,7 +68,12 @@ def test_annotation_clause_ors_variants():
 
 @pytest.mark.parametrize(
     ("term", "label"),
-    [("soil depth", "Soil Depth"), ("Soil depths", "Soil Depth"), ("active layer thickness", "Soil Active Layer Depth"), ("methane flux", "Methane Flux")],
+    [
+        ("soil depth", "Soil Depth"),
+        ("Soil depths", "Soil Depth"),
+        ("active layer thickness", "Soil Active Layer Depth"),
+        ("methane flux", "Methane Flux"),
+    ],
 )
 def test_match_local_ranks_exact_label_or_synonym_first(term, label):
     best = ontology.match_local(term)[0]
@@ -80,7 +98,9 @@ def test_top_matches_prefers_concepts_whose_own_label_matches(term, labels):
     assert [m.concept.label for m in ontology.top_matches(term, ontology.match_local(term, 10))] == labels
 
 
-@pytest.mark.parametrize(("term", "label"), [("moisture", "Volumetric Water Content Method"), ("animal", "Multi-Celled Organism")])
+@pytest.mark.parametrize(
+    ("term", "label"), [("moisture", "Volumetric Water Content Method"), ("animal", "Multi-Celled Organism")]
+)
 def test_related_synonym_is_a_candidate_but_never_used_automatically(term, label):
     matches = ontology.match_local(term, 30)
     m = next(m for m in matches if m.concept.label == label)
@@ -169,10 +189,12 @@ async def test_search_by_variable_labels_match_type(client, mock_api):
         {"id": "doi:b", "title": "B", "sem_annotation": ["https://purl.dataone.org/odo/ECSO_00001207"]},
         {"id": "doi:c", "title": "C"},
     ]
-    route = mock_api.get(f"{MN}/query/solr/").mock(side_effect=[
-        httpx.Response(200, json=solr_json(docs, num=139, facet_queries={"annotation": 122, "free_text": 25})),
-        httpx.Response(200, json=solr_json([{"id": "doi:a"}, {"id": "doi:c"}])),
-    ])
+    route = mock_api.get(f"{MN}/query/solr/").mock(
+        side_effect=[
+            httpx.Response(200, json=solr_json(docs, num=139, facet_queries={"annotation": 122, "free_text": 25})),
+            httpx.Response(200, json=solr_json([{"id": "doi:a"}, {"id": "doi:c"}])),
+        ]
+    )
     r = await client.call_tool("search_by_variable", {"variable": "soil depth", "rows": 3})
     sc = r.structured_content
     assert sc["resolution"] == "concept"
@@ -186,7 +208,9 @@ async def test_search_by_variable_labels_match_type(client, mock_api):
 
 async def test_search_by_variable_falls_back_to_free_text(client, mock_api):
     route = mock_api.get(f"{MN}/query/solr/").mock(
-        return_value=httpx.Response(200, json=solr_json([{"id": "doi:x", "title": "X"}], facet_queries={"free_text": 1}))
+        return_value=httpx.Response(
+            200, json=solr_json([{"id": "doi:x", "title": "X"}], facet_queries={"free_text": 1})
+        )
     )
     r = await client.call_tool("search_by_variable", {"variable": "permafrost temperature"})
     sc = r.structured_content
@@ -202,7 +226,8 @@ async def test_search_by_variable_explicit_concepts(client, mock_api):
         return_value=httpx.Response(200, json=solr_json([], facet_queries={"annotation": 0}))
     )
     r = await client.call_tool(
-        "search_by_variable", {"variable": "depth", "concept_uris": ["ECSO_00001207"], "include_free_text": False},
+        "search_by_variable",
+        {"variable": "depth", "concept_uris": ["ECSO_00001207"], "include_free_text": False},
     )
     assert r.structured_content["resolution"] == "explicit"
     assert route.calls.last.request.url.params["q"] == "(" + ontology.annotation_clause([SOIL_DEPTH]) + ")"
@@ -214,9 +239,16 @@ async def test_bioportal_used_when_configured(settings, mock_api):
     from arcticdata_mcp.server import create_server
 
     settings.ontology.bioportal_api_key = "k"
-    bp = mock_api.get("https://data.bioontology.org/search").mock(return_value=httpx.Response(200, json={"collection": [
-        {"@id": "http://purl.dataone.org/odo/ECSO_00001697", "prefLabel": "permafrost depth"},
-    ]}))
+    bp = mock_api.get("https://data.bioontology.org/search").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "collection": [
+                    {"@id": "http://purl.dataone.org/odo/ECSO_00001697", "prefLabel": "permafrost depth"},
+                ]
+            },
+        )
+    )
     async with Client(create_server(settings, require_auth=False)) as c:
         r = await c.call_tool("find_variable_concepts", {"term": "permafrost", "with_counts": False})
     assert bp.calls.last.request.headers["Authorization"] == "apikey token=k"

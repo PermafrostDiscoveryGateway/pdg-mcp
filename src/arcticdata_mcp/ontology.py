@@ -59,7 +59,12 @@ class Match:
 
     def to_dict(self) -> dict[str, Any]:
         c = self.concept
-        out: dict[str, Any] = {"uri": c.uri, "label": c.label, "score": round(self.score, 3), "matched_on": self.matched_on}
+        out: dict[str, Any] = {
+            "uri": c.uri,
+            "label": c.label,
+            "score": round(self.score, 3),
+            "matched_on": self.matched_on,
+        }
         if self.matched_on == c.label:
             out["matched_as"] = "label"
         elif self.matched_on in c.synonyms:
@@ -89,7 +94,7 @@ def purl_variants(uri: str) -> list[str]:
     """All forms of a concept URI found in the index (http://, https:// and http://www. for DataONE PURLs)."""
     uri = normalize_concept_id(uri)
     if uri.startswith(ODO_HTTP):
-        return [form + uri[len(ODO_HTTP):] for form in ODO_FORMS]
+        return [form + uri[len(ODO_HTTP) :] for form in ODO_FORMS]
     return [uri]
 
 
@@ -145,7 +150,11 @@ def load_concepts() -> tuple[Concept, ...]:
     raw = json.loads(files("arcticdata_mcp").joinpath("data/ecso/concepts.json").read_text())
     return tuple(
         Concept(
-            c["uri"], c["label"], c.get("synonyms", []), c.get("definition"), c.get("parents", []),
+            c["uri"],
+            c["label"],
+            c.get("synonyms", []),
+            c.get("definition"),
+            c.get("parents", []),
             related_synonyms=c.get("related_synonyms", []),
         )
         for c in raw["concepts"]
@@ -202,8 +211,14 @@ def match_local(query: str, limit: int = 10) -> list[Match]:
 async def match_bioportal(client: DataONEClient, query: str, api_key: str, url: str, limit: int = 10) -> list[Match]:
     """Search ECSO on BioPortal, which also matches definitions and related terms."""
     resp = await client.request(
-        "GET", f"{url.rstrip('/')}/search",
-        params={"q": query, "ontologies": BIOPORTAL_ONTOLOGY, "pagesize": limit, "include": "prefLabel,synonym,definition"},
+        "GET",
+        f"{url.rstrip('/')}/search",
+        params={
+            "q": query,
+            "ontologies": BIOPORTAL_ONTOLOGY,
+            "pagesize": limit,
+            "include": "prefLabel,synonym,definition",
+        },
         headers={"Authorization": f"apikey token={api_key}"},
     )
     out = []
@@ -211,7 +226,9 @@ async def match_bioportal(client: DataONEClient, query: str, api_key: str, url: 
         uri = normalize_concept_id(item.get("@id", ""))
         local = concept_by_uri(uri)
         concept = local or Concept(
-            uri, item.get("prefLabel") or uri, item.get("synonym") or [],
+            uri,
+            item.get("prefLabel") or uri,
+            item.get("synonym") or [],
             " ".join(item.get("definition") or []) or None,
         )
         s, name = best_name(query, concept)

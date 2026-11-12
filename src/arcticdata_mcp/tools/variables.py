@@ -16,7 +16,9 @@ from pydantic import Field
 from arcticdata_mcp import ontology, solr
 from arcticdata_mcp.tools.common import READ_ONLY, LatestOnly, Rows, Sort, Start, ToolContext
 
-Term = Annotated[str, Field(description="Variable in plain language, e.g. 'soil depth', 'active layer thickness', 'methane flux'.")]
+Term = Annotated[
+    str, Field(description="Variable in plain language, e.g. 'soil depth', 'active layer thickness', 'methane flux'.")
+]
 MAX_AUTO_CONCEPTS = 5
 CANDIDATE_POOL = 50
 
@@ -76,11 +78,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         variable: Term,
         concept_uris: Annotated[
             list[str] | None,
-            Field(description="Concept PURLs or ECSO ids to search instead of resolving `variable` automatically (e.g. picked from find_variable_concepts)."),
+            Field(
+                description="Concept PURLs or ECSO ids to search instead of resolving `variable` automatically (e.g. picked from find_variable_concepts)."
+            ),
         ] = None,
         include_free_text: Annotated[
             bool,
-            Field(description="Also include datasets whose attribute names/descriptions mention the variable but are not annotated."),
+            Field(
+                description="Also include datasets whose attribute names/descriptions mention the variable but are not annotated."
+            ),
         ] = True,
         rows: Rows = 10,
         start: Start = 0,
@@ -129,8 +135,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if free_text:
             facets.append(("facet.query", f"{{!key=free_text}}{free_text}"))
         res = await solr.search(
-            client, q, rows=rows, start=start, sort=sort, latest_only=latest_only,
-            fl=[*solr.METADATA_FIELDS, "sem_annotation"], extra_params=facets, raw=True,
+            client,
+            q,
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
+            fl=[*solr.METADATA_FIELDS, "sem_annotation"],
+            extra_params=facets,
+            raw=True,
         )
 
         docs = res.pop("results")
@@ -138,7 +151,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         free_ids: set[str] = set()
         if annotation and free_text and docs:
             ids = " OR ".join(solr.phrase(d["id"]) for d in docs)
-            check = await solr.search(client, [f"id:({ids})", free_text], rows=len(docs), latest_only=False, fl=["id"], raw=True)
+            check = await solr.search(
+                client, [f"id:({ids})", free_text], rows=len(docs), latest_only=False, fl=["id"], raw=True
+            )
             free_ids = {d["id"] for d in check["results"]}
         results = []
         for d in docs:
@@ -174,8 +189,11 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             )
         # Concepts under one that was searched are already covered (the index expands annotations to ancestors).
         others = [
-            m for m in candidates
-            if m.concept.uri not in uris and not ontology.ancestors(m.concept.uri) & set(uris) and m.concept.uri not in {d.concept.uri for d in dropped}
+            m
+            for m in candidates
+            if m.concept.uri not in uris
+            and not ontology.ancestors(m.concept.uri) & set(uris)
+            and m.concept.uri not in {d.concept.uri for d in dropped}
         ]
         others = dropped + others[: max(0, 5 - len(dropped))]
         if others:

@@ -45,7 +45,9 @@ async def run() -> int:
             failures += not ok
             purl = combined["counts"]["annotation"] if used else 0
             label = ", ".join(u["label"] or u["uri"] for u in combined["concepts_used"]) or "(free-text fallback)"
-            print(f"{term:<24} {label[:34]:<34} {'yes' if ok else 'NO':<3} {free['numFound']:>9} {purl:>6} {combined['numFound']:>8}")
+            print(
+                f"{term:<24} {label[:34]:<34} {'yes' if ok else 'NO':<3} {free['numFound']:>9} {purl:>6} {combined['numFound']:>8}"
+            )
     return failures
 
 

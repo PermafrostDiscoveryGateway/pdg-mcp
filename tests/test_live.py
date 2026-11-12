@@ -68,11 +68,19 @@ async def test_bundled_ecso_table_covers_indexed_annotations():
 
     client = DataONEClient(Settings())
     try:
-        data = await client.solr([
-            ("q", "sem_annotation:*ECSO_*"), ("fq", "-obsoletedBy:*"), ("fq", "formatType:METADATA"), ("rows", 0),
-            ("facet", "true"), ("facet.field", "sem_annotation"), ("facet.limit", -1), ("facet.mincount", 1),
-            ("json.nl", "map"),
-        ])
+        data = await client.solr(
+            [
+                ("q", "sem_annotation:*ECSO_*"),
+                ("fq", "-obsoletedBy:*"),
+                ("fq", "formatType:METADATA"),
+                ("rows", 0),
+                ("facet", "true"),
+                ("facet.field", "sem_annotation"),
+                ("facet.limit", -1),
+                ("facet.mincount", 1),
+                ("json.nl", "map"),
+            ]
+        )
     finally:
         await client.aclose()
     uncovered: dict[str, int] = {}

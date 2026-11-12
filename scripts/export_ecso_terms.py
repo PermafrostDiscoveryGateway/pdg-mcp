@@ -82,17 +82,19 @@ def export(owl_path: Path) -> list[dict]:
         if not labels:
             continue
         label = labels[0]
-        exact = list(dict.fromkeys(
-            s for s in _texts(cls, EXACT_SYNONYM_TAGS) + labels[1:] if s.lower() != label.lower()
-        ))
+        exact = list(
+            dict.fromkeys(s for s in _texts(cls, EXACT_SYNONYM_TAGS) + labels[1:] if s.lower() != label.lower())
+        )
         seen = {label.lower(), *(s.lower() for s in exact)}
         related = [s for s in _texts(cls, RELATED_SYNONYM_TAGS) if s.lower() not in seen]
         definition = " ".join((cls.findtext(DEFINITION_TAG, "", NS) or "").split())
         if len(definition) > DEFINITION_CHARS:
             definition = definition[:DEFINITION_CHARS].rsplit(" ", 1)[0] + "…"
-        parents = list(dict.fromkeys(
-            parent for p in cls.findall("rdfs:subClassOf", NS) if (parent := canonical_ecso(p.get(RDF_RESOURCE)))
-        ))
+        parents = list(
+            dict.fromkeys(
+                parent for p in cls.findall("rdfs:subClassOf", NS) if (parent := canonical_ecso(p.get(RDF_RESOURCE)))
+            )
+        )
         concept = {"uri": uri, "label": label}
         if exact:
             concept["synonyms"] = exact
@@ -123,7 +125,9 @@ def main() -> None:
         "exported": datetime.now(UTC).date().isoformat(),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"source": source, "concepts": concepts}, ensure_ascii=False, separators=(",", ":")) + "\n")
+    args.out.write_text(
+        json.dumps({"source": source, "concepts": concepts}, ensure_ascii=False, separators=(",", ":")) + "\n"
+    )
     print(f"Wrote {len(concepts)} concepts to {args.out}")
 
 

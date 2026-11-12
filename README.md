@@ -66,6 +66,7 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `ratelimit.per_user_burst` | `20` | Back-to-back calls allowed before the per-user rate applies |
 | `ratelimit.max_retries` | `3` | Retries on 429/502/503/504 from ADC |
 | `ratelimit.retry_backoff` / `retry_max_delay` | `1.0` / `30` | Exponential backoff base and cap, in seconds |
+| `ontology.bioportal_api_key` | empty | Optional BioPortal key; adds BioPortal ECSO search to variable lookups |
 | `portals.portal_url` | `https://arcticdata.io/catalog/portals` | Base of portal web pages (`<portal_url>/<label>`) |
 | `portals.cache_ttl` | `3600` | Seconds to cache the portal list and dataset counts (0 = no cache) |
 | `portals.exclude_labels` | empty | Portal labels to hide, such as test or spam portals |
@@ -93,7 +94,7 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (53)
+## Tools (55)
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
@@ -107,9 +108,11 @@ the first bytes or lines of any file, however large.
 | `search_by_publication_date` | Uploaded, published, or modified in a range |
 | `search_by_funding` | Award number, funder, or award title |
 | `search_by_project` | Project name |
-| `search_by_measured_variable` | Attribute name, label, description, or unit |
+| `search_by_variable` | Datasets measuring a variable: ECSO concept annotations plus free text, each result labelled by match type |
+| `find_variable_concepts` | Map a term like "soil depth" to ECSO concept PURLs, with dataset counts |
+| `search_by_measured_variable` | Free text in attribute name, label, description, or unit |
 | `search_by_taxon` | Scientific name or taxonomic rank |
-| `search_by_semantic_annotation` | Ontology concept URI (for example ECSO) |
+| `search_by_semantic_annotation` | Ontology concept URI or bare ECSO id (http and https PURLs) |
 | `search_by_location_name` | Place keyword or site name |
 | `search_by_organization` | Contact or related organization |
 | `search_by_license` | Indexed license name |
@@ -123,6 +126,17 @@ the first bytes or lines of any file, however large.
 | `list_search_fields` | All index fields and their types |
 | `advanced_solr_query` | Raw q/fq/fl/sort/facets |
 
+Search results include `latest_only`: when true (the default), `numFound` counts only the current version of
+each dataset, so it is lower than a raw Solr count that includes obsoleted versions.
+
+#### Variable search and ECSO concepts
+Variable names in metadata vary, so `search_by_variable` first maps the term to
+[ECSO](https://bioportal.bioontology.org/ontologies/ECSO) measurement concepts and searches the `sem_annotation`
+index field. For "soil depth" that finds 123 annotated datasets where a free-text attribute search finds 25. The
+term-to-concept table is bundled in `src/arcticdata_mcp/data/ecso/concepts.json`; regenerate it from a new
+ECSO release with `scripts/export_ecso_terms.py`. Set `ontology.bioportal_api_key` to also search ECSO on
+BioPortal. `scripts/benchmark_variable_search.py` compares free-text and concept search for a set of terms
+against the live index.
 ### Project portals
 Portals are curated project collections on arcticdata.io (for example
 [PerCS-Net](https://arcticdata.io/catalog/portals/PerCS-Net)). The indexer turns each portal's dataset rules into a

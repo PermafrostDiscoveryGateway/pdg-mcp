@@ -47,6 +47,9 @@ DATA_FIELDS = [
     "obsoletedBy",
 ]
 
+# EML data-table attribute fields, for free-text variable searches.
+ATTRIBUTE_FIELDS = ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"]
+
 SORT_OPTIONS = {
     "relevance": "score desc",
     "newest": "dateUploaded desc",
@@ -176,9 +179,14 @@ async def search(
     latest_only: bool = True,
     fl: list[str] | None = None,
     extra_fq: list[str] | None = None,
+    extra_params: list[tuple[str, Any]] | None = None,
     raw: bool = False,
 ) -> dict[str, Any]:
-    """Run a search and return ``{numFound, start, rows, query, results}``."""
+    """Run a search and return ``{numFound, latest_only, start, rows, query, results}``.
+
+    ``latest_only`` is echoed so callers can tell whether ``numFound`` counts only current versions.
+    Facet query counts from ``extra_params`` are returned under ``facet_queries``.
+    """
     clauses = [q] if isinstance(q, str) else [c for c in q if c]
     query = " AND ".join(f"({c})" for c in clauses) if clauses else "*:*"
     fq = list(extra_fq or [])
@@ -197,13 +205,18 @@ async def search(
         ("sort", SORT_OPTIONS.get(sort, sort)),
     ]
     params += [("fq", f) for f in fq]
+    params += extra_params or []
     data = await client.solr(params)
     resp = data.get("response", {})
     docs = resp.get("docs", [])
-    return {
+    out = {
         "numFound": resp.get("numFound", 0),
+        "latest_only": latest_only,
         "start": resp.get("start", 0),
         "rows": len(docs),
         "query": {"q": query, "fq": fq},
         "results": docs if raw else [summarize(d, client) for d in docs],
     }
+    if "facet_queries" in data.get("facet_counts", {}):
+        out["facet_queries"] = data["facet_counts"]["facet_queries"]
+    return out

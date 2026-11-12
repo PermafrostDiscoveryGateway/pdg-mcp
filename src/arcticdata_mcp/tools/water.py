@@ -31,7 +31,10 @@ OptLat = Annotated[float | None, Field(ge=-90, le=90, description="Latitude in d
 OptLon = Annotated[float | None, Field(ge=-180, le=180, description="Longitude in decimal degrees (WGS84).")]
 LakeId = Annotated[
     str,
-    Field(pattern=r"^[0-9a-z]{12}$", description="Lake id (12-character geohash, the id_geohash field), e.g. 'b7uefy0bvcrc'."),
+    Field(
+        pattern=r"^[0-9a-z]{12}$",
+        description="Lake id (12-character geohash, the id_geohash field), e.g. 'b7uefy0bvcrc'.",
+    ),
 ]
 
 
@@ -160,9 +163,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         # The model gets the lake attributes; the polygons are only for the map view.
         return ToolResult(content=_text(summary), structured_content=structured)
 
-    @mcp.tool(
-        annotations=LOCAL_READ_ONLY, tags={"water", "temporal"}, app=AppConfig(resource_uri=LAKE_TIMESERIES_URI)
-    )
+    @mcp.tool(annotations=LOCAL_READ_ONLY, tags={"water", "temporal"}, app=AppConfig(resource_uri=LAKE_TIMESERIES_URI))
     def get_lake_timeseries(lake_id: LakeId) -> ToolResult:
         """Water-area time series of one lake, shown as the water-timeseries dashboard's interactive charts.
 

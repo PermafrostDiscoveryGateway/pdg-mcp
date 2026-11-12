@@ -3,10 +3,10 @@ import json
 
 import httpx
 import pytest
+from conftest import MN
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp import eml
-from conftest import MN
 
 PID = "doi:10.18739/TEST"
 OBJECT = f"{MN}/object/doi%3A10.18739%2FTEST"
@@ -91,17 +91,28 @@ def test_identical_schemas_are_deduplicated(doc):
     assert daily["attribute_names"] == ["time", "reflectivity"]
     assert daily["example_entities"] == ["radar.20220101.nc", "radar.20220102.nc", "radar.20220103.nc"]
     [other] = [g for g in groups if "schema_id" not in g]
-    assert other == {"entity_types": {"otherEntity": 1}, "n_entities": 1, "n_attributes": 0, "example_entities": ["report.pdf"]}
+    assert other == {
+        "entity_types": {"otherEntity": 1},
+        "n_entities": 1,
+        "n_attributes": 0,
+        "example_entities": ["report.pdf"],
+    }
 
 
 def test_attributes_are_copied_whole(doc):
     time, refl = doc.schemas["S1"]
     assert time["attributeName"] == "time" and "id" not in time
-    assert time["measurementScale"] == {"ratio": {"unit": {"standardUnit": "second"}, "numericDomain": {"numberType": "real"}}}
+    assert time["measurementScale"] == {
+        "ratio": {"unit": {"standardUnit": "second"}, "numericDomain": {"numberType": "real"}}
+    }
     assert time["missingValueCode"] == {"code": "-999", "codeExplanation": "No data"}
-    assert time["annotation"]["valueURI"] == {"label": "time of measurement", "#text": "http://purl.dataone.org/odo/ECSO_00002040"}
+    assert time["annotation"]["valueURI"] == {
+        "label": "time of measurement",
+        "#text": "http://purl.dataone.org/odo/ECSO_00002040",
+    }
     assert refl["measurementScale"]["ratio"]["unit"]["customUnit"] == {
-        "#text": "dBZ", "unit_definition": {"name": "dBZ", "unitType": "dimensionless", "description": "Decibels relative to Z"},
+        "#text": "dBZ",
+        "unit_definition": {"name": "dBZ", "unitType": "dimensionless", "description": "Decibels relative to Z"},
     }
     [site] = doc.schemas["S2"]
     assert eml.attribute_codes(site) == [{"code": "SUM", "definition": "Summit"}]
@@ -112,29 +123,38 @@ def column(scale):
 
 
 def one_table(*attrs, extra=""):
-    tables = "".join(f'<dataTable id="t{i}"><entityName>t{i}</entityName><attributeList>{a}</attributeList></dataTable>' for i, a in enumerate(attrs))
+    tables = "".join(
+        f'<dataTable id="t{i}"><entityName>t{i}</entityName><attributeList>{a}</attributeList></dataTable>'
+        for i, a in enumerate(attrs)
+    )
     return f'<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title>{tables}{extra}</dataset></eml:eml>'
 
 
 def test_tree_keeps_what_fixed_paths_dropped():
-    d = load(one_table(
-        column("""<dateTime><formatString>YYYY</formatString><dateTimeDomain>
+    d = load(
+        one_table(
+            column("""<dateTime><formatString>YYYY</formatString><dateTimeDomain>
           <bounds><minimum exclusive="false">1990</minimum></bounds><bounds><maximum exclusive="true">2030</maximum></bounds>
           </dateTimeDomain></dateTime>"""),
-        column('<nominal><nonNumericDomain><references>codes</references></nonNumericDomain></nominal>'),
-        column("""<nominal><nonNumericDomain><enumeratedDomain><entityCodeList><entityReference>t0</entityReference>
+            column("<nominal><nonNumericDomain><references>codes</references></nonNumericDomain></nominal>"),
+            column("""<nominal><nonNumericDomain><enumeratedDomain><entityCodeList><entityReference>t0</entityReference>
           <valueAttributeReference>a</valueAttributeReference><definitionAttributeReference>b</definitionAttributeReference>
           </entityCodeList></enumeratedDomain></nonNumericDomain></nominal>"""),
-        extra="""<additionalMetadata><nonNumericDomain id="codes"><enumeratedDomain>
+            extra="""<additionalMetadata><nonNumericDomain id="codes"><enumeratedDomain>
           <codeDefinition><code>A</code><definition>Alpha</definition></codeDefinition>
           <codeDefinition><code>B</code><definition>Beta</definition></codeDefinition></enumeratedDomain></nonNumericDomain></additionalMetadata>""",
-    ))
+        )
+    )
     [date], [ref], [ecl] = d.schemas.values()
     assert date["measurementScale"]["dateTime"]["dateTimeDomain"]["bounds"] == [
-        {"minimum": {"exclusive": "false", "#text": "1990"}}, {"maximum": {"exclusive": "true", "#text": "2030"}},
+        {"minimum": {"exclusive": "false", "#text": "1990"}},
+        {"maximum": {"exclusive": "true", "#text": "2030"}},
     ]
     assert [c["code"] for c in eml.attribute_codes(ref)] == ["A", "B"]
-    assert ecl["measurementScale"]["nominal"]["nonNumericDomain"]["enumeratedDomain"]["entityCodeList"]["entityReference"] == "t0"
+    assert (
+        ecl["measurementScale"]["nominal"]["nonNumericDomain"]["enumeratedDomain"]["entityCodeList"]["entityReference"]
+        == "t0"
+    )
 
 
 def test_columns_differing_only_in_a_flag_get_different_schemas():
@@ -157,18 +177,30 @@ def test_temporal_coverage_ignores_empty_and_non_iso_dates():
       <temporalCoverage><singleDateTime><alternativeTimeScale><timeScaleName>Ma</timeScaleName><timeScaleAgeEstimate>66</timeScaleAgeEstimate>
         </alternativeTimeScale></singleDateTime></temporalCoverage></coverage>"""
     d = load(one_table(extra=cov))
-    assert d.outline()["coverage"]["temporal"] == {"begin": "2009-06-01T12:00:00", "end": "2011-01-01", "other_values": ["Ma 66"]}
+    assert d.outline()["coverage"]["temporal"] == {
+        "begin": "2009-06-01T12:00:00",
+        "end": "2011-01-01",
+        "other_values": ["Ma 66"],
+    }
     empty = load(one_table(extra="<coverage><temporalCoverage><singleDateTime/></temporalCoverage></coverage>"))
     assert "temporal" not in empty.outline().get("coverage", {})
 
 
 def test_fit_codes_cuts_an_oversized_code_list():
-    codes = "".join(f"<codeDefinition><code>C{i}</code><definition>Station {i}</definition></codeDefinition>" for i in range(2000))
-    [[attr]] = load(one_table(column(f"<nominal><nonNumericDomain><enumeratedDomain>{codes}</enumeratedDomain></nonNumericDomain></nominal>"))).schemas.values()
+    codes = "".join(
+        f"<codeDefinition><code>C{i}</code><definition>Station {i}</definition></codeDefinition>" for i in range(2000)
+    )
+    [[attr]] = load(
+        one_table(
+            column(
+                f"<nominal><nonNumericDomain><enumeratedDomain>{codes}</enumeratedDomain></nonNumericDomain></nominal>"
+            )
+        )
+    ).schemas.values()
     fitted = eml.fit_codes(attr, 1000)
     assert len(json.dumps(fitted)) <= 1000
     kept = eml.attribute_codes(fitted)
-    assert kept and kept == eml.attribute_codes(attr)[:len(kept)]
+    assert kept and kept == eml.attribute_codes(attr)[: len(kept)]
     assert fitted["codeDefinition_omitted"] == 2000 - len(kept)
     assert eml.fit_codes(attr, 10**7) is attr
 
@@ -198,10 +230,17 @@ def test_find_schema(doc):
 
 def test_sections(doc):
     people = doc.people()
-    assert people["creators"][0]["userId"] == {"directory": "https://orcid.org", "#text": "https://orcid.org/0000-0000-0000-0001"}
+    assert people["creators"][0]["userId"] == {
+        "directory": "https://orcid.org",
+        "#text": "https://orcid.org/0000-0000-0000-0001",
+    }
     assert people["contacts"] == [{"organizationName": "NOAA", "electronicMailAddress": "x@noaa.gov"}]
     [project] = doc.project()
-    assert project["award"] == {"funderName": "National Science Foundation", "awardNumber": "1303879", "title": "ICECAPS award"}
+    assert project["award"] == {
+        "funderName": "National Science Foundation",
+        "awardNumber": "1303879",
+        "title": "ICECAPS award",
+    }
     assert project["personnel"] == {"individualName": {"surName": "Neely"}, "role": "coPrincipalInvestigator"}
     anns = doc.annotations()
     assert [a["attribute"] for a in anns["attributes"]["S1"]] == ["time", "reflectivity"]
@@ -209,17 +248,28 @@ def test_sections(doc):
 
 
 def test_antimeridian_boxes_are_not_merged():
-    two = EML.replace("</coverage>", """<geographicCoverage><geographicDescription>Chukchi</geographicDescription>
+    two = EML.replace(
+        "</coverage>",
+        """<geographicCoverage><geographicDescription>Chukchi</geographicDescription>
       <boundingCoordinates><westBoundingCoordinate>170</westBoundingCoordinate><eastBoundingCoordinate>-170</eastBoundingCoordinate>
       <northBoundingCoordinate>75</northBoundingCoordinate><southBoundingCoordinate>70</southBoundingCoordinate></boundingCoordinates>
-      </geographicCoverage></coverage>""")
+      </geographicCoverage></coverage>""",
+    )
     cov = load(two).coverage_summary()
     assert cov["n_geographic"] == 2 and "bounding_box" not in cov
 
 
 def test_missing_sections():
-    bare = load('<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title></dataset></eml:eml>')
-    assert bare.outline() == {"format": "EML", "eml_namespace": "https://eml.ecoinformatics.org/eml-2.2.0", "title": "T", "n_entities": 0, "n_schemas": 0}
+    bare = load(
+        '<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title></dataset></eml:eml>'
+    )
+    assert bare.outline() == {
+        "format": "EML",
+        "eml_namespace": "https://eml.ecoinformatics.org/eml-2.2.0",
+        "title": "T",
+        "n_entities": 0,
+        "n_schemas": 0,
+    }
     assert bare.methods_text() is None and bare.coverage() == {} and bare.project() == []
 
 
@@ -264,20 +314,34 @@ async def test_tool_entities_and_methods(client, mock_api):
     ents = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "entities"})).structured_content
     assert ents["n_entities"] == 6 and ents["next_offset"] is None
     assert ents["entities"][0] == {
-        "index": 0, "type": "dataTable", "id": "t1", "schema_id": "S1", "n_attributes": 2,
-        "entityName": "radar.20220101.nc", "entityDescription": "Day 1",
-        "physical": {"objectName": "radar.20220101.nc", "size": "100",
-                     "dataFormat": {"externallyDefinedFormat": {"formatName": "netCDF-4"}}},
+        "index": 0,
+        "type": "dataTable",
+        "id": "t1",
+        "schema_id": "S1",
+        "n_attributes": 2,
+        "entityName": "radar.20220101.nc",
+        "entityDescription": "Day 1",
+        "physical": {
+            "objectName": "radar.20220101.nc",
+            "size": "100",
+            "dataFormat": {"externallyDefinedFormat": {"formatName": "netCDF-4"}},
+        },
     }
-    first = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "max_chars": 1000})).structured_content
-    rest = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "offset": 1000})).structured_content
+    first = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "max_chars": 1000})
+    ).structured_content
+    rest = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "offset": 1000})
+    ).structured_content
     assert first["next_offset"] == 1000 and rest["next_offset"] is None
     assert first["text"] + rest["text"] == METHODS.strip()
 
 
 async def test_tool_raw_paging(client, mock_api):
     mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=EML))
-    r = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "raw", "offset": 10, "max_chars": 1000})).structured_content
+    r = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "raw", "offset": 10, "max_chars": 1000})
+    ).structured_content
     assert r["document"] == EML[10:1010] and r["next_offset"] == 1010
 
 
@@ -299,14 +363,25 @@ async def test_tool_eml_without_dataset_falls_back_to_raw(client, mock_api):
 
 
 async def test_tool_pages_oversized_codes(client, mock_api):
-    codes = "".join(f"<codeDefinition><code>C{i}</code><definition>Station {i}</definition></codeDefinition>" for i in range(500))
-    xml = one_table(column(f"<nominal><nonNumericDomain><enumeratedDomain>{codes}</enumeratedDomain></nonNumericDomain></nominal>"))
+    codes = "".join(
+        f"<codeDefinition><code>C{i}</code><definition>Station {i}</definition></codeDefinition>" for i in range(500)
+    )
+    xml = one_table(
+        column(f"<nominal><nonNumericDomain><enumeratedDomain>{codes}</enumeratedDomain></nonNumericDomain></nominal>")
+    )
     mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=xml))
-    r = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "attributes", "max_chars": 2000})).structured_content
+    r = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "attributes", "max_chars": 2000})
+    ).structured_content
     assert len(json.dumps(r["attributes"])) <= 2000 and r["attributes"][0]["codeDefinition_omitted"] > 0 and "note" in r
     seen, offset = [], 0
     while offset is not None:
-        page = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "codes", "attribute": "x", "offset": offset, "max_chars": 2000})).structured_content
+        page = (
+            await client.call_tool(
+                "get_metadata_document",
+                {"pid": PID, "section": "codes", "attribute": "x", "offset": offset, "max_chars": 2000},
+            )
+        ).structured_content
         assert len(json.dumps(page["codes"])) <= 2000
         seen += page["codes"]
         offset = page["next_offset"]
@@ -316,7 +391,9 @@ async def test_tool_pages_oversized_codes(client, mock_api):
 async def test_tool_fetches_each_document_once_while_paging(client, mock_api):
     route = mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=EML))
     for offset in (0, 1000):
-        await client.call_tool("get_metadata_document", {"pid": PID, "section": "raw", "offset": offset, "max_chars": 1000})
+        await client.call_tool(
+            "get_metadata_document", {"pid": PID, "section": "raw", "offset": offset, "max_chars": 1000}
+        )
     await client.call_tool("get_metadata_document", {"pid": PID, "section": "entities"})
     assert route.call_count == 1
 
@@ -326,6 +403,7 @@ def fetcher(log, text):
         log.append(text)
         await asyncio.sleep(0)
         return text
+
     return fetch
 
 
@@ -354,6 +432,7 @@ async def test_document_cache_shares_one_download_and_one_parse():
     def counting_parse(text):
         calls.append(1)
         return real_parse(text)
+
     eml.parse = counting_parse
     try:
         results = await asyncio.gather(*(docs[0].parsed() for _ in range(3)))
@@ -368,6 +447,7 @@ async def test_document_cache_failed_fetch_is_not_cached():
     async def failing():
         attempts.append(1)
         raise ToolError("down")
+
     for _ in range(2):
         with pytest.raises(ToolError, match="down"):
             await cache.get(PID, failing)
@@ -396,8 +476,12 @@ def test_values_beyond_attributes_are_copied_whole():
     assert people["userId"] == {"directory": "https://orcid.org", "#text": "0000-0001"}
     assert d.project()[0]["personnel"]["phone"] == "555-0101"
     o = d.outline()
-    assert o["keyword_sets"] == [{"keyword": {"keywordType": "place", "#text": "Utqiagvik"}, "keywordThesaurus": "GCMD"}]
-    assert o["distribution"] == [{"online": {"url": {"function": "information", "#text": "https://example.org/project"}}}]
+    assert o["keyword_sets"] == [
+        {"keyword": {"keywordType": "place", "#text": "Utqiagvik"}, "keywordThesaurus": "GCMD"}
+    ]
+    assert o["distribution"] == [
+        {"online": {"url": {"function": "information", "#text": "https://example.org/project"}}}
+    ]
     ent = d.entities[0]
     assert ent["entityType"] == "application/zip" and ent["id"] == "e1"
     assert ent["physical"]["size"] == {"unit": "bytes", "#text": "42"}
@@ -419,12 +503,22 @@ FIELD_LIST = """<queryEngineDescription><name>solr</name>
   <queryField><name>_version_</name><returnable>true</returnable></queryField>
   <queryField><name>hidden</name><returnable>false</returnable></queryField>
 </queryEngineDescription>"""
-FULL_DOC = {"id": PID, "title": "T", "attribute": ["a"], "attributeName": ["a"], "text": "t", "documents": ["d"], "_version_": 1}
+FULL_DOC = {
+    "id": PID,
+    "title": "T",
+    "attribute": ["a"],
+    "attributeName": ["a"],
+    "text": "t",
+    "documents": ["d"],
+    "_version_": 1,
+}
 
 
 async def test_dataset_details_uses_index_field_list(client, mock_api):
     fields = mock_api.get(f"{MN}/query/solr").mock(return_value=httpx.Response(200, text=FIELD_LIST))
-    route = mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [{"id": PID}]}}))
+    route = mock_api.get(f"{MN}/query/solr/").mock(
+        return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [{"id": PID}]}})
+    )
     await client.call_tool("get_dataset_details", {"pid": PID})
     await client.call_tool("get_dataset_details", {"pid": PID})
     assert route.calls.last.request.url.params["fl"] == "id,title,licenseName"
@@ -435,7 +529,9 @@ async def test_dataset_details_uses_index_field_list(client, mock_api):
 
 async def test_dataset_details_falls_back_when_field_list_fails(client, mock_api):
     mock_api.get(f"{MN}/query/solr").mock(return_value=httpx.Response(500, text="boom"))
-    route = mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [FULL_DOC]}}))
+    route = mock_api.get(f"{MN}/query/solr/").mock(
+        return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [FULL_DOC]}})
+    )
     r = (await client.call_tool("get_dataset_details", {"pid": PID})).structured_content
     assert route.calls.last.request.url.params["fl"] == "*"
     assert {k for k in r if k != "landing_url"} == {"id", "title"}

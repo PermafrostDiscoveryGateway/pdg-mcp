@@ -60,7 +60,7 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `downloads.max_inline_bytes` | 10 MiB | Largest file returned inline to the agent |
 | `downloads.allow_server_save` | `false` | Allow `delivery="server"` to write files on the server host |
 | `downloads.download_dir` | `./downloads` | Where server-side saves go |
-| `profile.sample_bytes` | 5 MiB | Bytes `profile_file` reads in `scan="sample"` mode |
+| `profile.sample_bytes` | 5 MiB | Bytes `profile_file` reads in `scan="sample"` mode (for Parquet: column data read, on top of the footer) |
 | `profile.max_full_bytes` | 100 MiB | Most bytes `profile_file` reads in `scan="full"` mode; bigger files are profiled up to this |
 | `profile.max_columns` | `500` | Columns profiled per file (the rest are listed by name) |
 | `profile.chunk_rows` | `100000` | Rows pandas parses at a time |
@@ -70,7 +70,7 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `profile.max_full_pixels` | `25000000` | Raster pixels (times bands) read in `scan="full"` mode; bigger rasters are sampled |
 | `profile.sample_values` | `20000` | Values read per NetCDF variable in `scan="sample"` mode, half from its start and half from its end |
 | `profile.max_full_values` | `50000000` | NetCDF values read in total in `scan="full"` mode; the rest are sampled |
-| `profile.timeout` | `120` | Seconds a raster or NetCDF profile may take |
+| `profile.timeout` | `120` | Seconds a raster, NetCDF or Parquet profile may take |
 | `ratelimit.max_concurrent` | `6` | Global cap on in-flight requests to ADC (0 = unlimited) |
 | `ratelimit.queue_timeout` | `30` | Seconds to wait for a free slot before failing |
 | `ratelimit.per_user_rate` | `2.0` | Sustained tool calls per second per user (0 = unlimited) |
@@ -106,7 +106,7 @@ the first bytes or lines of any file, however large.
 
 `profile_file` summarizes a data file for metadata enrichment, so an agent can compare what a file contains with
 what its EML says. `scan="sample"` (default) reads part of the file and `scan="full"` reads up to the configured
-limits; the result says whether it was `complete`. It supports three kinds of file; other formats (Parquet, Excel,
+limits; the result says whether it was `complete`. It supports four kinds of file; other formats (Excel,
 archives) return `supported: false` for now.
 
 - **Delimited text (CSV, TSV)** is streamed to a temporary file and parsed in chunks, so memory stays bounded. Per
@@ -130,8 +130,16 @@ archives) return `supported: false` for now.
   applying scaling). Spatial and temporal extents come from the latitude, longitude and time variables, found by CF
   attributes or name, with CF time units decoded. Large variables are read from their start and their end in sample
   mode, so their statistics are estimates.
+- **Parquet and GeoParquet** are read over HTTP range requests with `pyarrow`, so file size does not matter. The
+  footer alone gives the schema, the exact row count and, for most columns, the null count and min/max of every row
+  group, so those are exact for the whole file (`range_from: "footer"`). Column data are then read for what the footer
+  lacks (mean, distinct values, examples, sentinel counts): up to `sample_bytes` of column chunks from a few row
+  groups in sample mode, and up to `max_full_bytes` in full mode. When a column is read in full its range comes from
+  the rows instead, with sentinels excluded. Dates stored as text are recognized. For GeoParquet the geometry columns
+  are listed with their geometry types and CRS, and the bounding box in the file's metadata gives the spatial extent
+  (reprojected to latitude/longitude if needed); the geometries themselves, usually most of the file, are not read.
 
-Raster and NetCDF profiles hold one upstream slot while they run and give up after `profile.timeout` seconds.
+Raster, NetCDF and Parquet profiles hold one upstream slot while they run and give up after `profile.timeout` seconds.
 
 ## Tools (54)
 
@@ -231,7 +239,7 @@ CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.
 pre-commit hook.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
-errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py`, `profiling_raster.py` and `profiling_netcdf.py` (the `profile_file` profilers), `ratelimit.py` (per-user and upstream limits), and `tools/`
+errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py`, `profiling_raster.py`, `profiling_netcdf.py` and `profiling_parquet.py` (the `profile_file` profilers), `ratelimit.py` (per-user and upstream limits), and `tools/`
 (`search`, `datasets`, `objects`, `node`, `portals`).
 
 ## Deployment (software-dev)

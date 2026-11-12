@@ -66,7 +66,7 @@ class ProfileSettings:
     max_netcdf_download: int = (
         64 * 1024 * 1024
     )  # NetCDF files up to this size are downloaded and read locally; bigger ones use range requests
-    timeout: float = 120.0  # seconds a raster or NetCDF profile may take
+    timeout: float = 120.0  # seconds a raster, NetCDF or Parquet profile may take
 
 
 @dataclass

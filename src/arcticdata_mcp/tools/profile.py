@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import tempfile
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -11,7 +12,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from arcticdata_mcp import downloads, profiling, profiling_netcdf, profiling_raster
+from arcticdata_mcp import downloads, profiling, profiling_netcdf, profiling_parquet, profiling_raster
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import ProfileSettings
 from arcticdata_mcp.tools.common import READ_ONLY, ToolContext
@@ -57,6 +58,9 @@ async def profile_object(
     report = None
     if profiling_raster.is_raster(fmt, name):
         report = await run_remote(client, limits, profiling_raster.profile_raster, url, scan)
+    elif profiling_parquet.is_parquet(fmt, name):
+        func = functools.partial(profiling_parquet.profile_parquet, size=info["size"])
+        report = await run_remote(client, limits, func, url, scan)
     elif profiling_netcdf.is_netcdf(fmt, name):
         if info["size"] and info["size"] <= limits.max_netcdf_download:
             # HDF5 reads in many small pieces, so over HTTP each one costs a round trip; one download is far faster.
@@ -77,8 +81,13 @@ async def profile_object(
         return {
             **base,
             "supported": False,
-            "reason": f"Cannot profile format {fmt!r} yet (archives such as zip and gzip included).",
-            "supported_formats": [profiling.SUPPORTED, profiling_raster.SUPPORTED, profiling_netcdf.SUPPORTED],
+            "reason": f"Cannot profile format {fmt!r} yet (Excel and archives such as zip and gzip included).",
+            "supported_formats": [
+                profiling.SUPPORTED,
+                profiling_raster.SUPPORTED,
+                profiling_netcdf.SUPPORTED,
+                profiling_parquet.SUPPORTED,
+            ],
             "download_url": url,
         }
     limit = limits.sample_bytes if scan == "sample" else limits.max_full_bytes
@@ -113,7 +122,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             Field(
                 description=(
                     "'sample' reads only part of the file (fast): the start of a CSV, a few blocks of a raster, the start "
-                    "and end of each large NetCDF variable. 'full' reads everything up to the server's limits (see "
+                    "and end of each large NetCDF variable, a few column chunks of a Parquet file. 'full' reads everything up to the server's limits (see "
                     "get_server_config)."
                 )
             ),
@@ -132,7 +141,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ] = "auto",
     ) -> dict[str, Any]:
         """Summarize the contents of a data file so it can be compared with its EML. Supports delimited text
-        (CSV, TSV), GeoTIFF rasters and NetCDF; other formats return supported=false.
+        (CSV, TSV), GeoTIFF rasters, NetCDF and Parquet/GeoParquet; other formats return supported=false.
 
         Delimited text: per-column type, missing values, ranges, example values, guessed units, and the extent
         inferred from latitude, longitude and date columns. Types, units and extents are guesses from the data and
@@ -142,7 +151,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         file's own georeferencing; statistics come from sampled blocks unless `complete`.
         NetCDF: dimensions, global attributes, and per variable the dtype, units, long name, fill value and
         statistics, plus spatial and temporal extents from the coordinate variables (CF time units are decoded).
-        GeoTIFF is read over HTTP range requests; NetCDF is downloaded when it is not huge, otherwise range-read.
+        Parquet: per-column type, null count, range, mean, distinct values and examples. The row count, null
+        counts and each min/max marked range_from="footer" come from the file's footer and are exact for the whole
+        file at any size; the rest come from the rows read. GeoParquet adds the geometry columns, their CRS and a
+        lat/lon bounding box from the file's metadata (geometries themselves are not read).
+        GeoTIFF and Parquet are read over HTTP range requests, so multi-GB files are fine; NetCDF is downloaded
+        when it is not huge, otherwise range-read.
         Check `complete` before trusting row counts, statistics and extents.
         Example: profile_file(pid="urn:uuid:...", scan="full")
         """

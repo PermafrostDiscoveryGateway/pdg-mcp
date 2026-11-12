@@ -34,6 +34,7 @@ download_dir = "./downloads"
 
 [profile]
 # profile_file: bytes read in scan="sample" mode, and the most bytes read in scan="full" mode.
+# For Parquet these cap the column data read; the footer is always read and covers every row.
 sample_bytes = 5242880
 max_full_bytes = 104857600
 # Columns profiled per file, rows parsed per chunk, distinct text values tracked per column, top values reported.
@@ -53,7 +54,7 @@ sample_values = 20000
 max_full_values = 50000000
 # NetCDF files up to this many bytes are downloaded and read locally; bigger ones are read over HTTP range requests.
 max_netcdf_download = 67108864
-# Seconds a raster or NetCDF profile may take before it is abandoned.
+# Seconds a raster, NetCDF or Parquet profile may take before it is abandoned.
 timeout = 120.0
 
 [ratelimit]

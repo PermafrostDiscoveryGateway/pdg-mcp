@@ -337,7 +337,7 @@ async def test_profile_file_full_scan_is_capped_by_the_server_limit(client, mock
 async def test_profile_file_reports_unsupported_formats_without_downloading(client, mock_api):
     obj = mock_file(mock_api, "urn:uuid:zip", "application/zip", "a.zip", b"PK")
     sc = (await client.call_tool("profile_file", {"pid": "urn:uuid:zip"})).structured_content
-    assert sc["supported"] is False and "application/zip" in sc["reason"] and len(sc["supported_formats"]) == 3
+    assert sc["supported"] is False and "application/zip" in sc["reason"] and len(sc["supported_formats"]) == 4
     assert not obj.called
 
 

@@ -24,7 +24,7 @@ Typical workflow:
 2. Inspect a dataset with get_dataset_details, get_metadata_document (EML) or get_dataset_citation.
 3. List its files with list_dataset_files, peek with preview_file, then fetch with download_file.
    Large files return a direct URL instead of inline bytes (see get_server_config). profile_file summarizes a
-   data file (CSV/TSV columns, GeoTIFF bands, NetCDF variables): types, missing values, ranges, units and
+   data file (CSV/TSV or Parquet columns, GeoTIFF bands, NetCDF variables): types, missing values, ranges, units and
    inferred spatial/temporal extent, to compare against the dataset's metadata.
 Project portals (curated collections such as PerCS-Net or the Permafrost Discovery Gateway) add a project
 layer: search_portals finds them, get_portal describes one, search_portal_datasets searches exactly the

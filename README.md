@@ -70,6 +70,8 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `portals.portal_url` | `https://arcticdata.io/catalog/portals` | Base of portal web pages (`<portal_url>/<label>`) |
 | `portals.cache_ttl` | `3600` | Seconds to cache the portal list and dataset counts (0 = no cache) |
 | `portals.exclude_labels` | empty | Portal labels to hide, such as test or spam portals |
+| `metadata.cache_max_chars` | `20000000` | Total characters of metadata documents cached for paging (a parsed document uses about 5-6x its size in memory; 0 = no cache) |
+| `metadata.cache_ttl` | `600` | Seconds to keep a cached metadata document |
 
 ### Rate limiting
 
@@ -152,9 +154,26 @@ total). The portal list and counts are cached for `portals.cache_ttl`. A count o
 `null` count (or an entry in `unchecked_portals`) means Solr rejected that portal's query.
 
 ### Datasets and packages
-`get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML XML), `get_metadata_html`
-(MNView), `get_resource_map` (OAI-ORE), `get_package_download_info` (BagIt zip), `get_dataset_citation`,
-`get_version_history`.
+`get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML outline and sections; see below),
+`get_metadata_html` (MNView), `get_resource_map` (OAI-ORE), `get_package_download_info` (BagIt zip),
+`get_dataset_citation`, `get_version_history`.
+
+EML documents can be far larger than a model's context, mostly because packages repeat the same attribute list once
+per data file. `get_metadata_document(pid)` therefore returns an **outline**: title, creators, abstract, coverage, a
+methods preview, dataset annotations and `entity_groups`, where entities with identical attribute lists share one
+`schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `codes` (one attribute's code
+list), `coverage`, `people`, `project`, `entities`, `annotations`, a free-text section, or `raw` for the XML. Attributes,
+entities (all but their attribute list), people and projects are copied whole, shaped like the EML. Long responses are
+paged with `offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents (for example ISO 19115)
+come back as paged raw XML. Recent documents are cached (`metadata.cache_max_chars`) and parsed off the event loop.
+`get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
+
+Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text
+with headings, numbered and bulleted lists, links and `markdown` / `literalLayout` spacing kept, for example
+`get_metadata_document(pid, section="methods")`. Structured elements inside them (protocols, software,
+instrumentation, citations, data sources, sampling coverage) are copied whole next to the text, under `protocols`,
+`citations`, `data_sources` and so on, and marked in the text by a placeholder such as `[protocol 1]`.
+`intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
 `download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
@@ -178,7 +197,12 @@ They modify the repository or need a DataONE admin token.
 ```bash
 uv run pytest            # unit and mocked tests
 uv run pytest -m live    # smoke tests against arcticdata.io
+uv run ruff check .      # lint
+uv run ruff format .     # format
 ```
+
+CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the optional
+pre-commit hook.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`
@@ -239,3 +263,7 @@ kubectl create secret docker-registry ncsa-hub -n pdg-mcp --dry-run=client -o ya
 ```
 
 Commit the sealed file to software-dev's `kubernetes/` folder (never the plain Secret).
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

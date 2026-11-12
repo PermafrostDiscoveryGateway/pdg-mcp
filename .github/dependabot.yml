@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  # Patch updates of the base image only. Moving off Python 3.12 is a manual change: the Dockerfile, .python-version
+  # and the workflows' python-version have to move together.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # Updates uv.lock (and the pyproject.toml constraints). Grouped and capped so the first run doesn't open a pile of
+  # PRs; expect uv.lock conflicts with open PRs, which `uv lock` resolves. Live tests don't run on these PRs, so check
+  # that fastmcp bumps still work.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      # Separate group: a ruff bump can change formatting, so it needs `uv run ruff format .` and a matching `rev`
+      # bump in .pre-commit-config.yaml in the same PR, and shouldn't block the other updates.
+      ruff:
+        patterns: ["ruff"]
+      python-dependencies:
+        patterns: ["*"]
+        exclude-patterns: ["ruff"]

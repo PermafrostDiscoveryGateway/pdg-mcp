@@ -49,3 +49,30 @@ def test_bbox_intersects_and_within():
 def test_bbox_validates():
     with pytest.raises(ToolError):
         solr.bbox_clause(60, 70, 0, 0)
+
+
+def test_missing_clause_negates_the_present_clause():
+    assert solr.missing_clause("keywords") == "-keywords:*"
+    assert solr.missing_clause("funding") == "-(awardNumber:* OR funderName:* OR fundingText:*)"
+    assert solr.missing_clause("license") == "-licenseName:*"
+
+
+def test_missing_clause_rejects_unknown_field():
+    with pytest.raises(ToolError, match="Unknown metadata field 'place_names'"):
+        solr.missing_clause("place_names")
+
+
+def test_missing_filters_all_is_one_filter_per_field():
+    assert solr.missing_filters(["keywords", "spatial_coverage"], "all") == ["-keywords:*", "-northBoundCoord:*"]
+
+
+def test_missing_filters_any_anchors_each_negative_clause_on_match_all():
+    # A bare "-a OR -b" matches nothing useful in Solr (88 records instead of 605 on the live index).
+    assert solr.missing_filters(["keywords", "spatial_coverage"], "any") == [
+        "(*:* AND -keywords:*) OR (*:* AND -northBoundCoord:*)"
+    ]
+    assert solr.missing_filters(["keywords"], "any") == ["-keywords:*"]
+
+
+def test_eml_format_filter_covers_both_eml_namespaces():
+    assert solr.EML_FORMAT_FQ == r"formatId:(eml\:\/\/* OR https\:\/\/eml.ecoinformatics.org\/*)"

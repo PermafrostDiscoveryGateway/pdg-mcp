@@ -40,11 +40,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ] = "all",
         query: Annotated[
             str | None,
-            Field(description="Optional free-text query to scope the search, e.g. 'permafrost'. Solr syntax is allowed."),
+            Field(
+                description="Optional free-text query to scope the search, e.g. 'permafrost'. Solr syntax is allowed."
+            ),
         ] = None,
         eml_only: Annotated[
             bool,
-            Field(description="Only EML records. Portals and ISO, Dublin Core and FGDC records have no EML fields and would all show as missing."),
+            Field(
+                description="Only EML records. Portals and ISO, Dublin Core and FGDC records have no EML fields and would all show as missing."
+            ),
         ] = True,
         rows: Rows = 10,
         start: Start = 0,

@@ -2,11 +2,11 @@ from typing import get_args
 
 import httpx
 import pytest
+from conftest import MN
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp import solr
 from arcticdata_mcp.tools.metadata_gaps import MissingField
-from conftest import MN
 
 DOC = {"id": "doi:1", "title": "T", "origin": ["A"], "dateUploaded": "2025-01-01T00:00:00Z"}
 
@@ -41,7 +41,12 @@ async def test_missing_all_builds_one_filter_per_field(client, route):
     assert {solr.EML_FORMAT_FQ, "formatType:METADATA", "-obsoletedBy:*", "-keywords:*", "-northBoundCoord:*"} <= set(fq)
     assert params["q"] == "*:*" and params["sort"] == "dateUploaded desc" and params["rows"] == "1"
     sc = r.structured_content
-    assert (sc["missing"], sc["match"], sc["eml_only"], sc["numFound"]) == (["keywords", "spatial_coverage"], "all", True, 3)
+    assert (sc["missing"], sc["match"], sc["eml_only"], sc["numFound"]) == (
+        ["keywords", "spatial_coverage"],
+        "all",
+        True,
+        3,
+    )
     assert sc["results"][0]["id"] == "doi:1"
 
 
@@ -67,7 +72,14 @@ async def test_missing_any_is_a_single_or_filter(client, route):
 async def test_options_scope_the_query(client, route):
     await client.call_tool(
         "search_missing_metadata",
-        {"missing": ["abstract"], "query": "permafrost", "eml_only": False, "latest_only": False, "sort": "oldest", "start": 20},
+        {
+            "missing": ["abstract"],
+            "query": "permafrost",
+            "eml_only": False,
+            "latest_only": False,
+            "sort": "oldest",
+            "start": 20,
+        },
     )
     params = route.calls.last.request.url.params
     fq = params.get_list("fq")
@@ -75,7 +87,9 @@ async def test_options_scope_the_query(client, route):
     assert solr.EML_FORMAT_FQ not in fq and "-obsoletedBy:*" not in fq and "-abstract:*" in fq
 
 
-@pytest.mark.parametrize("args", [{"missing": []}, {"missing": ["place_names"]}, {"missing": ["keywords"], "match": "some"}])
+@pytest.mark.parametrize(
+    "args", [{"missing": []}, {"missing": ["place_names"]}, {"missing": ["keywords"], "match": "some"}]
+)
 async def test_rejects_bad_arguments(client, route, args):
     with pytest.raises(ToolError):
         await client.call_tool("search_missing_metadata", args)

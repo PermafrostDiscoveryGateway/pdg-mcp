@@ -48,6 +48,36 @@ class DownloadSettings:
 
 
 @dataclass
+class ProfileSettings:
+    sample_bytes: int = 5 * 1024 * 1024  # bytes read in scan="sample" mode
+    max_full_bytes: int = 100 * 1024 * 1024  # most bytes read in scan="full" mode; bigger files are sampled up to this
+    max_columns: int = 500  # columns profiled per file (the rest are listed by name only)
+    chunk_rows: int = 100_000  # rows pandas parses at a time
+    max_distinct: int = 1000  # distinct values tracked per text column; above this the count is a lower bound
+    top_values: int = 5  # most common values reported for low-cardinality text columns
+    sentinels: list[str] = field(default_factory=lambda: ["-9999", "-99999"])  # numeric codes counted as missing
+    sample_blocks: int = 16  # raster blocks read in scan="sample" mode, spread evenly over the image
+    sample_block_pixels: int = 65536  # a sampled window is grown to about this many pixels (strips are one row high)
+    max_full_pixels: int = (
+        25_000_000  # raster pixels (times bands) read in scan="full" mode; bigger rasters are sampled
+    )
+    sample_values: int = 20_000  # values read per NetCDF variable in scan="sample" mode, from its start and its end
+    max_full_values: int = 50_000_000  # NetCDF values read in total in scan="full" mode; the rest are sampled
+    max_netcdf_download: int = (
+        64 * 1024 * 1024
+    )  # NetCDF files up to this size are downloaded and read locally; bigger ones use range requests
+    timeout: float = 120.0  # seconds a raster or NetCDF profile may take
+
+
+@dataclass
+class CompareSettings:
+    files_per_schema: int = 3  # data files profiled per group of entities that share a column list
+    max_files: int = 24  # most files profiled in one comparison, however many groups there are
+    budget: float = 300.0  # seconds after which no further files are started
+    bbox_tolerance: float = 0.05  # degrees by which data may stray outside the EML bounding box before it is flagged
+
+
+@dataclass
 class RateLimitSettings:
     max_concurrent: int = 6  # global cap on in-flight requests to ADC/DataONE; 0 = unlimited
     queue_timeout: float = 30.0  # seconds a request waits for a free slot before failing
@@ -89,6 +119,8 @@ class Settings:
     arcticdata: ArcticDataSettings = field(default_factory=ArcticDataSettings)
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
+    profile: ProfileSettings = field(default_factory=ProfileSettings)
+    compare: CompareSettings = field(default_factory=CompareSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
     metadata: MetadataSettings = field(default_factory=MetadataSettings)

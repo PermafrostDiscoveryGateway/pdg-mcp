@@ -109,6 +109,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "max_inline_bytes": settings.downloads.max_inline_bytes,
             "allow_server_save": settings.downloads.allow_server_save,
             "download_dir": settings.downloads.download_dir if settings.downloads.allow_server_save else None,
+            "profile_sample_bytes": settings.profile.sample_bytes,
+            "profile_max_full_bytes": settings.profile.max_full_bytes,
+            "compare_files_per_schema": settings.compare.files_per_schema,
+            "compare_max_files": settings.compare.max_files,
             "access": "public, read-only content only",
             "rate_limits": {
                 "per_user_calls_per_second": settings.ratelimit.per_user_rate or None,

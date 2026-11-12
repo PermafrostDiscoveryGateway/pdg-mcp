@@ -60,6 +60,21 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `downloads.max_inline_bytes` | 10 MiB | Largest file returned inline to the agent |
 | `downloads.allow_server_save` | `false` | Allow `delivery="server"` to write files on the server host |
 | `downloads.download_dir` | `./downloads` | Where server-side saves go |
+| `profile.sample_bytes` | 5 MiB | Bytes `profile_file` reads in `scan="sample"` mode |
+| `profile.max_full_bytes` | 100 MiB | Most bytes `profile_file` reads in `scan="full"` mode; bigger files are profiled up to this |
+| `profile.max_columns` | `500` | Columns profiled per file (the rest are listed by name) |
+| `profile.chunk_rows` | `100000` | Rows pandas parses at a time |
+| `profile.max_distinct` / `top_values` | `1000` / `5` | Distinct values tracked per text column, and most common values reported |
+| `profile.sentinels` | `-9999`, `-99999` | Numeric codes counted as missing, comma-separated in env vars |
+| `profile.sample_blocks` / `sample_block_pixels` | `16` / `65536` | Rasters in `scan="sample"` mode: blocks read, spread over the image, and the pixels each window is grown to |
+| `profile.max_full_pixels` | `25000000` | Raster pixels (times bands) read in `scan="full"` mode; bigger rasters are sampled |
+| `profile.sample_values` | `20000` | Values read per NetCDF variable in `scan="sample"` mode, half from its start and half from its end |
+| `profile.max_full_values` | `50000000` | NetCDF values read in total in `scan="full"` mode; the rest are sampled |
+| `profile.timeout` | `120` | Seconds a raster or NetCDF profile may take |
+| `compare.files_per_schema` | `3` | Data files `compare_eml_vs_data` profiles per group of entities that share an attribute list |
+| `compare.max_files` | `24` | Most files profiled in one comparison |
+| `compare.budget` | `300` | Seconds after which `compare_eml_vs_data` starts no further files |
+| `compare.bbox_tolerance` | `0.05` | Degrees data may stray outside the EML bounding box before it is flagged |
 | `ratelimit.max_concurrent` | `6` | Global cap on in-flight requests to ADC (0 = unlimited) |
 | `ratelimit.queue_timeout` | `30` | Seconds to wait for a free slot before failing |
 | `ratelimit.per_user_rate` | `2.0` | Sustained tool calls per second per user (0 = unlimited) |
@@ -93,7 +108,56 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (53)
+`profile_file` summarizes a data file for metadata enrichment, so an agent can compare what a file contains with
+what its EML says. `scan="sample"` (default) reads part of the file and `scan="full"` reads up to the configured
+limits; the result says whether it was `complete`. It supports three kinds of file; other formats (Parquet, Excel,
+archives) return `supported: false` for now.
+
+- **Delimited text (CSV, TSV)** is streamed to a temporary file and parsed in chunks, so memory stays bounded. Per
+  column it reports the guessed type, missing values, min/max/mean, distinct or example values and a guessed unit,
+  plus a spatial and temporal extent inferred from latitude, longitude, date and year columns (matched by name, e.g.
+  `lat`, `latitude`, `Lon`). Empty cells, `NA`/`null`/`NaN` and the sentinels `-9999` and `-99999` count as missing;
+  sentinels are excluded from statistics but reported as `sentinel_count`. If the line under the header holds units
+  (short labels above numeric columns) it is read as a units row, which replaces the name-based guess and may also
+  declare a date format; `header_rows` overrides this (1 = names only). Date columns named like `processing_time`,
+  `created` or `modified` are left out of the temporal extent and listed under `ignored_columns`. In sample mode only
+  the first `sample_bytes` are read, so row counts are estimates and ranges cover just that part.
+- **GeoTIFF and other TIFF rasters** are read over HTTP range requests, so even multi-GB files are fine. The result
+  has the size, driver, CRS (or its definition if it has no EPSG code), pixel size, a latitude/longitude bounding box,
+  tiling and overviews, tags, and per band the data type, nodata value, unit, description and scale/offset. These come
+  from the file itself, not from guesses. Band statistics (min, max, mean, standard deviation, valid fraction, and the
+  distinct values of classified rasters) come from sampled blocks spread over the image unless `complete`. A file with
+  no CRS is reported as such.
+- **NetCDF (classic and NetCDF-4)** is read with `netCDF4`. Files up to `profile.max_netcdf_download` (64 MiB) are downloaded to a temporary file first, because HDF5 reads in many small pieces and over HTTP each costs a round trip; larger files are read over HTTP range requests (usually fine, but slow for some NetCDF-4 layouts and then they may hit the timeout). The result has the dimensions,
+  selected global attributes (title, Conventions, history, declared coverage, ...) and, per variable, the dtype,
+  shape, units, long name, standard name, fill value, scaling and statistics (computed after masking fill values and
+  applying scaling). Spatial and temporal extents come from the latitude, longitude and time variables, found by CF
+  attributes or name, with CF time units decoded. Large variables are read from their start and their end in sample
+  mode, so their statistics are estimates.
+
+Raster and NetCDF profiles hold one upstream slot while they run and give up after `profile.timeout` seconds.
+
+### Comparing EML with the data
+
+`compare_eml_vs_data` checks a dataset's EML against what its data files contain. It reads the EML attribute lists,
+profiles a few files per group of entities that share one (`files_per_schema`, default 3, spread evenly over the
+group; `"all"` takes every file up to `compare.max_files`), and returns findings, most severe first. Each has a
+severity (`error`, `warning`, `info`), a confidence in the data side, the EML and data values, and a `suggested_edit`
+naming the EML element to change. Files are matched to entities by the PID in the entity's URL, then by file name.
+
+| Finding | Meaning |
+|---|---|
+| `documented_column_missing`, `undocumented_column`, `no_attribute_list`, `name_mismatch`, `inconsistent_columns` | The attribute list and the columns disagree. Names match exactly, then ignoring case and spacing, then NetCDF leaf names, then by position for tables with the same column count |
+| `type_mismatch`, `number_type_mismatch`, `outside_declared_bounds` | The declared scale, number type or bounds contradict the values |
+| `unit_mismatch`, `missing_unit`, `unit_unverified` | Units differ after normalising spellings (`celsius` = `degree_Celsius`, `metersPerSecond` = `m/s`). Units written in a NetCDF file are high confidence, a CSV units row medium, a name-derived guess low (reported as `info`) |
+| `undocumented_missing_value`, `blank_values_undocumented` | `-9999`/`-99999`, NetCDF fill values or blank cells are not listed as missing-value codes |
+| `date_format_mismatch` | The declared `formatString` has a different shape from the dates in the file; a corrected format is suggested |
+| `data_outside_spatial_coverage`, `data_outside_temporal_coverage`, `coverage_missing_spatial`, `coverage_missing_temporal` | The data fall outside the declared coverage, or the EML has none |
+
+A `scan="sample"` run reads part of each file: findings that data fall outside bounds or coverage are certain, the
+others reflect the sample. Attribute checks cover tables and NetCDF; rasters feed only the coverage check.
+
+## Tools (55)
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
@@ -162,8 +226,8 @@ instrumentation, citations, data sources, sampling coverage) are copied whole ne
 `intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
-`download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
-`get_checksum`, `list_objects`, `is_authorized`.
+`download_file`, `preview_file`, `profile_file`, `compare_eml_vs_data`, `get_download_url`, `describe_object` (HEAD),
+`get_system_metadata`, `get_checksum`, `list_objects`, `is_authorized`.
 
 ### Node and reference
 `get_node_info`, `ping`, `list_query_engines`, `list_views`, `list_object_formats` and `get_object_format`
@@ -191,7 +255,7 @@ CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.
 pre-commit hook.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
-errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`
+errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `profiling.py`, `profiling_raster.py` and `profiling_netcdf.py` (the `profile_file` profilers), `compare.py` (the `compare_eml_vs_data` checks), `ratelimit.py` (per-user and upstream limits), and `tools/`
 (`search`, `datasets`, `objects`, `node`, `portals`).
 
 ## Deployment (software-dev)

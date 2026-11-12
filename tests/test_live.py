@@ -42,3 +42,25 @@ async def test_portals(live):
     pid = data["results"][0]["id"]
     owners = (await live.call_tool("find_portals_for_dataset", {"pid": pid})).structured_content
     assert "PerCS-Net" in [p["label"] for p in owners["portals"]]
+
+
+async def test_profile_file(live):
+    small = (
+        await live.call_tool("search_data_files", {"file_name": "*.csv", "max_size": 200000, "rows": 1})
+    ).structured_content
+    pid = small["results"][0]["id"]
+    r = (await live.call_tool("profile_file", {"pid": pid, "scan": "full"})).structured_content
+    assert r["supported"] and r["complete"] and r["rows_profiled"] > 0 and r["columns"]
+    nc = (
+        await live.call_tool("search_data_files", {"format_id": "netCDF-4", "max_size": 2_000_000, "rows": 1})
+    ).structured_content
+    r = (await live.call_tool("profile_file", {"pid": nc["results"][0]["id"]})).structured_content
+    assert r["supported"] and r["kind"] == "netcdf" and r["variables"]
+
+
+async def test_compare_eml_vs_data(live):
+    r = (
+        await live.call_tool("compare_eml_vs_data", {"pid": "doi:10.18739/A2BG2HC7C", "files_per_schema": 1})
+    ).structured_content
+    assert r["summary"]["files_profiled"] > 0 and r["summary"]["entities"] > 0
+    assert all({"kind", "severity", "message"} <= f.keys() for f in r["findings"])

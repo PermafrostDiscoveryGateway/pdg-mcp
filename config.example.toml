@@ -83,3 +83,11 @@ portal_url = "https://arcticdata.io/catalog/portals"
 cache_ttl = 3600.0
 # Labels of portals to hide, e.g. test or spam portals.
 exclude_labels = []
+
+[metadata]
+# Recent metadata documents kept by get_metadata_document so paging does not refetch and reparse them.
+# Total length of the cached XML texts; a parsed EML document takes roughly 5-6x its text size in memory,
+# so keep this well under the pod's memory limit (0 = no cache). Larger documents are not cached.
+cache_max_chars = 20000000
+# Seconds to keep a cached document.
+cache_ttl = 600.0

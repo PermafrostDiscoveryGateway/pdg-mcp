@@ -27,6 +27,8 @@ auth:
 #   ARCTICDATA_MCP_RATELIMIT_MAX_CONCURRENT: "6"
 #   ARCTICDATA_MCP_RATELIMIT_PER_USER_RATE: "2"
 #   ARCTICDATA_MCP_RATELIMIT_PER_USER_BURST: "20"
+# The metadata document cache should follow resources.limits.memory (about 6 bytes per cached character once parsed):
+#   ARCTICDATA_MCP_METADATA_CACHE_MAX_CHARS: "20000000"
 extraEnv: {}
 
 service:

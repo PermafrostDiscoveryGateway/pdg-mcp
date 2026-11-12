@@ -5,3 +5,6 @@ __pycache__/
 config.toml
 downloads/
 dist/
+.idea/
+# Local sample data at the repository root only (src/arcticdata_mcp/data/ is tracked).
+/data/

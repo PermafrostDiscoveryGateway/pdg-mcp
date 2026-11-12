@@ -16,7 +16,6 @@ from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 
 from arcticdata_mcp.config import AuthSettings
 
-
 log = logging.getLogger(__name__)
 
 

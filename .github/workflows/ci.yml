@@ -1,0 +1,39 @@
+name: ci
+# Reusable workflow: called from image.yml so that the image build can `needs:` it. It has no push or pull_request
+# triggers of its own, which keeps tests from running twice on a pull request; it can also be run by hand.
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      # --locked fails if uv.lock is out of date with pyproject.toml (--frozen would silently use the stale lock).
+      - run: uv sync --locked
+      # Live tests (-m live) are deselected by pyproject.toml; run them by hand via live.yml instead.
+      - run: uv run pytest
+  # Config is in ruff.toml; the ruff version is pinned by uv.lock (and by rev in .pre-commit-config.yaml).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check --output-format=github .
+      - run: uv run ruff format --check --diff .
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: helm lint charts/pdg-mcp
+      - run: helm template charts/pdg-mcp > /dev/null

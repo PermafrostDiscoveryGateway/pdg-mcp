@@ -39,15 +39,54 @@ DATE_NAME_TOKENS = {"date", "datetime", "time", "timestamp"}
 YEAR_NAME_TOKENS = {"year", "yr", "yyyy"}
 # Columns that say when a file or record was made, not when the data were collected.
 RECORD_DATE_TOKENS = {
-    "processing", "processed", "created", "creation", "modified", "updated", "generated", "uploaded",
-    "exported", "downloaded", "retrieved", "accessed",
+    "processing",
+    "processed",
+    "created",
+    "creation",
+    "modified",
+    "updated",
+    "generated",
+    "uploaded",
+    "exported",
+    "downloaded",
+    "retrieved",
+    "accessed",
 }
 LAT_TOKENS = {"lat", "latitude"}
 LON_TOKENS = {"lon", "long", "lng", "longitude"}
 UNIT_IN_BRACKETS = re.compile(r"[(\[]([^)\]]{1,20})[)\]]\s*$")
 UNIT_SUFFIXES = {
-    "c", "degc", "k", "m", "cm", "mm", "km", "kg", "g", "mg", "ug", "l", "ml", "s", "ms", "min", "hr", "hz",
-    "pct", "percent", "ppm", "ppt", "psu", "mps", "kpa", "pa", "hpa", "mbar", "ha", "deg", "degrees",
+    "c",
+    "degc",
+    "k",
+    "m",
+    "cm",
+    "mm",
+    "km",
+    "kg",
+    "g",
+    "mg",
+    "ug",
+    "l",
+    "ml",
+    "s",
+    "ms",
+    "min",
+    "hr",
+    "hz",
+    "pct",
+    "percent",
+    "ppm",
+    "ppt",
+    "psu",
+    "mps",
+    "kpa",
+    "pa",
+    "hpa",
+    "mbar",
+    "ha",
+    "deg",
+    "degrees",
 }
 
 
@@ -253,7 +292,11 @@ class _Column:
 def _parse_dates(col: _Column, vals: pd.Series) -> pd.Series:
     """Parse with the format declared in the file when it fits (also with the other year width), else generically."""
     declared = col.dt_format
-    attempts = [declared, declared.replace("%y", "%Y") if "%y" in declared else declared.replace("%Y", "%y")] if declared else []
+    attempts = (
+        [declared, declared.replace("%y", "%Y") if "%y" in declared else declared.replace("%Y", "%y")]
+        if declared
+        else []
+    )
     for fmt in [*attempts, "mixed"]:
         parsed = pd.to_datetime(vals, errors="coerce", format=fmt, utc=True)
         if parsed.notna().mean() >= TYPE_FRACTION:
@@ -362,9 +405,12 @@ def _summary(col: _Column, limits: ProfileSettings) -> dict[str, Any]:
 def _spatial(columns: list[dict[str, Any]]) -> dict[str, Any] | None:
     def candidates(tokens: set[str], prefix: str, lo: float, hi: float) -> list[dict[str, Any]]:
         return [
-            c for c in columns
-            if c.get("type") in ("integer", "float") and _match_tokens(c["name"], tokens, (prefix,))
-            and lo <= c["min"] and c["max"] <= hi
+            c
+            for c in columns
+            if c.get("type") in ("integer", "float")
+            and _match_tokens(c["name"], tokens, (prefix,))
+            and lo <= c["min"]
+            and c["max"] <= hi
             and (not c.get("unit_guess") or c["unit_guess"].lower().startswith(("deg", "\N{DEGREE SIGN}")))
         ]
 
@@ -389,7 +435,12 @@ def _temporal(columns: list[dict[str, Any]]) -> dict[str, Any] | None:
     for c in columns:
         if c.get("type") == "datetime":
             entry = {"column": c["name"], "start": c["min"], "end": c["max"]}
-        elif c.get("type") == "integer" and _match_tokens(c["name"], YEAR_NAME_TOKENS) and 1800 <= c["min"] and c["max"] <= 2200:
+        elif (
+            c.get("type") == "integer"
+            and _match_tokens(c["name"], YEAR_NAME_TOKENS)
+            and 1800 <= c["min"]
+            and c["max"] <= 2200
+        ):
             entry = {"column": c["name"], "start": str(int(c["min"])), "end": str(int(c["max"]))}
         else:
             continue
@@ -419,8 +470,11 @@ def profile_delimited(path: Path, limits: ProfileSettings, header_rows: int | st
         head = fh.read(HEAD_BYTES)
     layout = _detect_layout(head, full_head=len(head) == HEAD_BYTES, header_rows=header_rows)
     read = {
-        "sep": layout.delimiter, "encoding": layout.encoding, "skiprows": layout.skiprows,
-        "dtype": str, "keep_default_na": False,
+        "sep": layout.delimiter,
+        "encoding": layout.encoding,
+        "skiprows": layout.skiprows,
+        "dtype": str,
+        "keep_default_na": False,
     }
     try:
         names = [str(c).strip() for c in pd.read_csv(path, nrows=0, **read).columns]
@@ -432,9 +486,7 @@ def profile_delimited(path: Path, limits: ProfileSettings, header_rows: int | st
                 col.format_hint, col.dt_format, col.dt_candidate = cell, fmt, True
                 col.time_only = "%d" not in fmt and "%m" not in fmt and "%Y" not in fmt and "%y" not in fmt
         total_rows = 0
-        reader = pd.read_csv(
-            path, usecols=usecols, chunksize=limits.chunk_rows, on_bad_lines="skip", **read
-        )
+        reader = pd.read_csv(path, usecols=usecols, chunksize=limits.chunk_rows, on_bad_lines="skip", **read)
         with reader:
             for chunk in reader:
                 total_rows += len(chunk)
@@ -454,7 +506,7 @@ def profile_delimited(path: Path, limits: ProfileSettings, header_rows: int | st
         notes.append("Several columns have no header name; the real header may be on a later row or span rows.")
     if len(names) > len(columns):
         notes.append(f"Only the first {len(columns)} of {len(names)} columns were profiled.")
-        summaries += [{"name": n, "profiled": False} for n in names[len(columns):]]
+        summaries += [{"name": n, "profiled": False} for n in names[len(columns) :]]
     return {
         "dialect": {
             "delimiter": layout.delimiter,

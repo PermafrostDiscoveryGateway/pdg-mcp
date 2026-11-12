@@ -52,9 +52,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     async def resolve(pid: str) -> tuple[str, str | None, list[str], str | None]:
         """(metadata PID, the data PID the caller asked about if it was one, the package's resource maps, and the
         PID that replaced the metadata record if it has been superseded)."""
-        data = await client.solr([
-            ("q", f"id:{solr.phrase(pid)}"), ("fl", "id,formatType,isDocumentedBy,resourceMap,obsoletedBy"), ("rows", 1),
-        ])
+        data = await client.solr(
+            [
+                ("q", f"id:{solr.phrase(pid)}"),
+                ("fl", "id,formatType,isDocumentedBy,resourceMap,obsoletedBy"),
+                ("rows", 1),
+            ]
+        )
         docs = data.get("response", {}).get("docs", [])
         if not docs:
             raise ToolError(f"No public object with id '{pid}' found in the index. Try find_dataset_by_identifier.")
@@ -67,27 +71,50 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         elif kind == "RESOURCE":
             clause = f"resourceMap:{solr.phrase(pid)}"
         else:
-            raise ToolError(f"'{pid}' is a {kind or 'unknown'} object; give a dataset (metadata) PID or a data file PID.")
+            raise ToolError(
+                f"'{pid}' is a {kind or 'unknown'} object; give a dataset (metadata) PID or a data file PID."
+            )
         if not clause:
             raise ToolError(f"'{pid}' is not documented by any metadata record.")
         metas: list[dict[str, Any]] = []
-        for current_only in (True, False):  # prefer the current record; fall back to a superseded one that was asked for
-            found = await client.solr([
-                ("q", clause), ("fq", "formatType:METADATA"), *([("fq", "-obsoletedBy:*")] if current_only else []),
-                ("fl", "id,resourceMap,obsoletedBy"), ("rows", 1),
-            ])
+        for current_only in (
+            True,
+            False,
+        ):  # prefer the current record; fall back to a superseded one that was asked for
+            found = await client.solr(
+                [
+                    ("q", clause),
+                    ("fq", "formatType:METADATA"),
+                    *([("fq", "-obsoletedBy:*")] if current_only else []),
+                    ("fl", "id,resourceMap,obsoletedBy"),
+                    ("rows", 1),
+                ]
+            )
             if metas := found.get("response", {}).get("docs", []):
                 break
         if not metas:
             raise ToolError(f"No metadata record found for '{pid}'.")
-        return metas[0]["id"], (pid if kind == "DATA" else None), metas[0].get("resourceMap") or [], metas[0].get("obsoletedBy")
+        return (
+            metas[0]["id"],
+            (pid if kind == "DATA" else None),
+            metas[0].get("resourceMap") or [],
+            metas[0].get("obsoletedBy"),
+        )
 
     async def package_files(meta_pid: str, resource_maps: list[str]) -> dict[str, list[str]]:
         """File name -> PIDs for the first page of the package's data files; used when an entity has no usable URL."""
-        clause = " OR ".join([f"isDocumentedBy:{solr.phrase(meta_pid)}"] + [f"resourceMap:{solr.phrase(r)}" for r in resource_maps])
-        data = await client.solr([
-            ("q", clause), ("fq", "formatType:DATA"), ("fq", "-obsoletedBy:*"), ("fl", "id,fileName"), ("rows", solr.MAX_ROWS),
-        ])
+        clause = " OR ".join(
+            [f"isDocumentedBy:{solr.phrase(meta_pid)}"] + [f"resourceMap:{solr.phrase(r)}" for r in resource_maps]
+        )
+        data = await client.solr(
+            [
+                ("q", clause),
+                ("fq", "formatType:DATA"),
+                ("fq", "-obsoletedBy:*"),
+                ("fl", "id,fileName"),
+                ("rows", solr.MAX_ROWS),
+            ]
+        )
         names: dict[str, list[str]] = {}
         for d in data.get("response", {}).get("docs", []):
             names.setdefault(d.get("fileName") or "", []).append(d["id"])
@@ -95,21 +122,37 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"files", "metadata-quality"})
     async def compare_eml_vs_data(
-        pid: Annotated[str, Field(description=(
-            "Dataset (metadata) PID or DOI. A data file PID is also accepted: only that file is compared, "
-            "against the current metadata record that documents it."
-        ))],
-        files_per_schema: Annotated[int | Literal["all"] | None, Field(description=(
-            "Data files to profile for each group of entities that share an attribute list, spread evenly over the "
-            "group. A number samples that many (default 3, see get_server_config); 'all' profiles every file, up to the "
-            "server's per-call file cap."
-        ))] = None,
-        scan: Annotated[Literal["sample", "full"], Field(description=(
-            "How much of each file profile_file reads: 'sample' (fast) or 'full'."
-        ))] = "sample",
-        schema_id: Annotated[str | None, Field(description=(
-            "Only compare this group of entities (a schema_id from get_metadata_document's entity_groups)."
-        ))] = None,
+        pid: Annotated[
+            str,
+            Field(
+                description=(
+                    "Dataset (metadata) PID or DOI. A data file PID is also accepted: only that file is compared, "
+                    "against the current metadata record that documents it."
+                )
+            ),
+        ],
+        files_per_schema: Annotated[
+            int | Literal["all"] | None,
+            Field(
+                description=(
+                    "Data files to profile for each group of entities that share an attribute list, spread evenly over the "
+                    "group. A number samples that many (default 3, see get_server_config); 'all' profiles every file, up to the "
+                    "server's per-call file cap."
+                )
+            ),
+        ] = None,
+        scan: Annotated[
+            Literal["sample", "full"],
+            Field(description=("How much of each file profile_file reads: 'sample' (fast) or 'full'.")),
+        ] = "sample",
+        schema_id: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Only compare this group of entities (a schema_id from get_metadata_document's entity_groups)."
+                )
+            ),
+        ] = None,
     ) -> dict[str, Any]:
         """Compare a dataset's EML with what its data files actually contain, and list the mismatches.
 
@@ -130,26 +173,42 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         started = time.monotonic()
 
         meta_pid, only_pid, resource_maps, superseded_by = await resolve(pid)
-        doc = eml.parse(await client.get_text(client.object_url(meta_pid)))
+        _, doc = eml.parse(await client.get_text(client.object_url(meta_pid)))
         if doc is None:
             raise ToolError("This metadata record is not EML (for example ISO 19115), so it cannot be compared yet.")
         notes: list[str] = []
         if superseded_by:
-            notes.append(f"This metadata record has been superseded by '{superseded_by}'; the version asked for was compared.")
+            notes.append(
+                f"This metadata record has been superseded by '{superseded_by}'; the version asked for was compared."
+            )
 
         # -- choose files ----------------------------------------------------------------------------------------
         groups: dict[str, dict[str, Any]] = {}
-        for e in doc.entities:
+        entities = [compare.eml_entity(e) for e in doc.entities]
+        schemas = {sid: [compare.eml_attribute(a) for a in attrs] for sid, attrs in doc.schemas.items()}
+        for e in entities:
             key = e.get("schema_id") or f"none:{e['type']}"
-            g = groups.setdefault(key, {"key": key, "schema_id": e.get("schema_id"), "entity_type": e["type"],
-                                        "entities": [], "n_attributes": e["n_attributes"]})
+            g = groups.setdefault(
+                key,
+                {
+                    "key": key,
+                    "schema_id": e.get("schema_id"),
+                    "entity_type": e["type"],
+                    "entities": [],
+                    "n_attributes": e["n_attributes"],
+                },
+            )
             g["entities"].append({**e, "pid": pid_from_url(e.get("url"))})
         if schema_id:
             if schema_id not in groups:
-                raise ToolError(f"Unknown schema_id '{schema_id}'. This document has: {', '.join(doc.schemas) or 'none'}.")
+                raise ToolError(
+                    f"Unknown schema_id '{schema_id}'. This document has: {', '.join(doc.schemas) or 'none'}."
+                )
             groups = {schema_id: groups[schema_id]}
         if only_pid:
-            groups = {k: {**g, "entities": [e for e in g["entities"] if e["pid"] == only_pid]} for k, g in groups.items()}
+            groups = {
+                k: {**g, "entities": [e for e in g["entities"] if e["pid"] == only_pid]} for k, g in groups.items()
+            }
             groups = {k: g for k, g in groups.items() if g["entities"]}
             if not groups:
                 raise ToolError(f"The EML of '{meta_pid}' has no entity whose URL points at '{only_pid}'.")
@@ -224,10 +283,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         # -- compare ---------------------------------------------------------------------------------------------
         findings: list[dict[str, Any]] = []
         if not doc.entities:
-            findings.append(compare.finding(
-                "no_entities", "warning", "high",
-                "The EML describes no data entities (dataTable, otherEntity, ...), so there is nothing to compare; "
-                "the package may still contain files.", edit=compare.edit("add", "dataset/dataTable or otherEntity")))
+            findings.append(
+                compare.finding(
+                    "no_entities",
+                    "warning",
+                    "high",
+                    "The EML describes no data entities (dataTable, otherEntity, ...), so there is nothing to compare; "
+                    "the package may still contain files.",
+                    edit=compare.edit("add", "dataset/dataTable or otherEntity"),
+                )
+            )
         for key, g in groups.items():
             profiles = [p for p in results[key] if p["kind"] in ("table", "netcdf")]
             if not profiles:
@@ -237,26 +302,39 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             truncated = any(p.get("columns_total", 0) > len(p.get("columns", [])) for p in profiles)
             if g["schema_id"]:
                 found = compare.compare_group(
-                    doc.schemas[g["schema_id"]], facts, kind=profiles[0]["kind"], n_files=len(profiles),
-                    schema_id=g["schema_id"], sentinels=limits.sentinels, truncated=truncated,
+                    schemas[g["schema_id"]],
+                    facts,
+                    kind=profiles[0]["kind"],
+                    n_files=len(profiles),
+                    schema_id=g["schema_id"],
+                    sentinels=limits.sentinels,
+                    truncated=truncated,
                 )
                 for f in found:
                     f["n_entities_in_schema"] = n_entities
                 findings += found
             else:
                 drafts = [compare.draft(f) for f in facts if not f.get("unprofiled")]
-                findings.append(compare.finding(
-                    "no_attribute_list", "warning", "high",
-                    f"{n_entities} {g['entity_type']} entit{'y has' if n_entities == 1 else 'ies have'} no attribute list; "
-                    f"the {len(profiles)} file(s) profiled contain {len(drafts)} column(s).",
-                    data=drafts, files=[p.get("fileName") for p in profiles][:5],
-                    edit=compare.edit("add", "attributeList/attribute", drafts)))
+                findings.append(
+                    compare.finding(
+                        "no_attribute_list",
+                        "warning",
+                        "high",
+                        f"{n_entities} {g['entity_type']} entit{'y has' if n_entities == 1 else 'ies have'} no attribute list; "
+                        f"the {len(profiles)} file(s) profiled contain {len(drafts)} column(s).",
+                        data=drafts,
+                        files=[p.get("fileName") for p in profiles][:5],
+                        edit=compare.edit("add", "attributeList/attribute", drafts),
+                    )
+                )
         for key, g in groups.items():
             if g["schema_id"] and results[key] and all(p["kind"] == "raster" for p in results[key]):
                 notes.append(f"Schema {g['schema_id']}: attribute checks are not done for raster files.")
 
         all_profiles = [p for ps in results.values() for p in ps]
-        findings += compare.compare_coverage(doc.coverage(), [compare.extent_of(p) for p in all_profiles], cfg.bbox_tolerance)
+        findings += compare.compare_coverage(
+            doc.coverage(), [compare.extent_of(p) for p in all_profiles], cfg.bbox_tolerance
+        )
         findings = compare.sort_findings(findings)
         if len(findings) > compare.MAX_FINDINGS:
             notes.append(f"Only the first {compare.MAX_FINDINGS} of {len(findings)} findings are shown.")
@@ -284,8 +362,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 "files_skipped": sum(1 for s in statuses if s.startswith("skipped")),
             },
             "groups": [
-                {"schema_id": g["schema_id"], "entity_type": g["entity_type"], "n_entities": len(g["entities"]),
-                 "n_attributes": g["n_attributes"], "files": file_rows[key]}
+                {
+                    "schema_id": g["schema_id"],
+                    "entity_type": g["entity_type"],
+                    "n_entities": len(g["entities"]),
+                    "n_attributes": g["n_attributes"],
+                    "files": file_rows[key],
+                }
                 for key, g in groups.items()
             ],
             "findings": findings,

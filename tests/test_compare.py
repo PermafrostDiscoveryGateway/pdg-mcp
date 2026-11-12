@@ -1,32 +1,35 @@
 import httpx
 import pytest
+from conftest import MN
 from fastmcp.exceptions import ToolError
+from test_profile import SYSMETA
 
 from arcticdata_mcp import compare
 from arcticdata_mcp.tools.compare import interleave, pid_from_url, spread
-from conftest import MN
-from test_profile import SYSMETA
 
 # Pure comparison logic -------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("eml_unit", "data_unit", "verdict"), [
-    ("celsius", "degree_Celsius", "same"),
-    ("celsius", "deg C", "same"),
-    ("metersPerSecond", "m/s", "same"),
-    ("meterPerSecond", "m s-1", "same"),
-    ("gramPerKilogram", "g/kg", "same"),
-    ("wattPerMeterSquared", "W/m\N{SUPERSCRIPT TWO}", "same"),
-    ("hectopascal", "mbar", "same"),
-    ("degree", "degrees_north", "same"),
-    ("meter", "cm", "different"),
-    ("millimeter", "mm/h", "different"),
-    ("furlong", "fortnight", "unknown"),
-    ("furlong", "Furlong", "same"),
-    ("partsPerMillion", "ppm", "same"),
-    ("gramsPerCubicCentimeter", "g/cm^3", "same"),
-    ("degree", "WGS84DD", "same"),
-])
+@pytest.mark.parametrize(
+    ("eml_unit", "data_unit", "verdict"),
+    [
+        ("celsius", "degree_Celsius", "same"),
+        ("celsius", "deg C", "same"),
+        ("metersPerSecond", "m/s", "same"),
+        ("meterPerSecond", "m s-1", "same"),
+        ("gramPerKilogram", "g/kg", "same"),
+        ("wattPerMeterSquared", "W/m\N{SUPERSCRIPT TWO}", "same"),
+        ("hectopascal", "mbar", "same"),
+        ("degree", "degrees_north", "same"),
+        ("meter", "cm", "different"),
+        ("millimeter", "mm/h", "different"),
+        ("furlong", "fortnight", "unknown"),
+        ("furlong", "Furlong", "same"),
+        ("partsPerMillion", "ppm", "same"),
+        ("gramsPerCubicCentimeter", "g/cm^3", "same"),
+        ("degree", "WGS84DD", "same"),
+    ],
+)
 def test_compare_units(eml_unit, data_unit, verdict):
     assert compare.compare_units(eml_unit, data_unit) == verdict
 
@@ -58,7 +61,9 @@ def kinds(findings):
 
 
 def run(a, f, kind="table", **kw):
-    return compare.compare_group(a, f, kind=kind, n_files=kw.pop("n_files", 1), schema_id="S1", sentinels=["-9999", "-99999"], **kw)
+    return compare.compare_group(
+        a, f, kind=kind, n_files=kw.pop("n_files", 1), schema_id="S1", sentinels=["-9999", "-99999"], **kw
+    )
 
 
 def test_matching_prefers_exact_then_normalised_then_position():
@@ -66,7 +71,10 @@ def test_matching_prefers_exact_then_normalised_then_position():
     f = facts({"name": "air_temp", "type": "float"}, {"name": "wind", "type": "float"}, {"name": "y1", "type": "float"})
     pairs, lone_a, lone_f = compare.match_columns(a, f, positional=True)
     assert [(p[0]["name"], p[1]["name"], p[2]) for p in pairs] == [
-        ("wind", "wind", "name"), ("Air Temp", "air_temp", "normalised name"), ("x1", "y1", "position")]
+        ("wind", "wind", "name"),
+        ("Air Temp", "air_temp", "normalised name"),
+        ("x1", "y1", "position"),
+    ]
     assert not lone_a and not lone_f
     assert compare.match_columns(a, f, positional=False)[1] == [a[2]]  # no positional fallback outside tables
 
@@ -78,14 +86,22 @@ def test_position_is_only_used_when_the_counts_agree():
 
 
 def test_netcdf_group_paths_match_on_the_leaf_name():
-    pairs, _, _ = compare.match_columns(attrs({"name": "temp"}), facts({"name": "/obs/temp", "type": "float"}), positional=False)
+    pairs, _, _ = compare.match_columns(
+        attrs({"name": "temp"}), facts({"name": "/obs/temp", "type": "float"}), positional=False
+    )
     assert pairs and pairs[0][2] == "variable name"
 
 
 def test_documented_and_undocumented_columns():
-    found = run(attrs({"name": "a"}, {"name": "ghost"}), facts({"name": "a", "type": "float"}, {"name": "extra", "type": "float", "unit": "m"}), kind="netcdf")
+    found = run(
+        attrs({"name": "a"}, {"name": "ghost"}),
+        facts({"name": "a", "type": "float"}, {"name": "extra", "type": "float", "unit": "m"}),
+        kind="netcdf",
+    )
     by = {f["kind"]: f for f in found}
-    assert by["documented_column_missing"]["severity"] == "error" and by["documented_column_missing"]["eml"] == ["ghost"]
+    assert by["documented_column_missing"]["severity"] == "error" and by["documented_column_missing"]["eml"] == [
+        "ghost"
+    ]
     assert by["undocumented_column"]["severity"] == "warning"
     assert by["undocumented_column"]["suggested_edit"]["value"] == [{"name": "extra", "type": "float", "unit": "m"}]
 
@@ -96,59 +112,124 @@ def test_a_truncated_profile_does_not_claim_columns_are_missing():
 
 
 def test_coordinate_variables_are_undocumented_but_only_info():
-    found = run(attrs({"name": "t"}), facts({"name": "t", "type": "float"}, {"name": "lat", "type": "float", "role": "latitude"}), kind="netcdf")
+    found = run(
+        attrs({"name": "t"}),
+        facts({"name": "t", "type": "float"}, {"name": "lat", "type": "float", "role": "latitude"}),
+        kind="netcdf",
+    )
     assert [(f["kind"], f["severity"]) for f in found] == [("undocumented_column", "info")]
 
 
 def test_type_mismatches():
     found = run(
-        attrs({"name": "n"}, {"name": "when", "scale": "dateTime"}, {"name": "fine"}, {"name": "year", "scale": "dateTime", "date_format": "YYYY"}),
-        facts({"name": "n", "type": "string", "examples": ["a"]}, {"name": "when", "type": "float"}, {"name": "fine", "type": "integer"},
-              {"name": "year", "type": "integer"}))
-    assert [(f["attribute"], f["severity"]) for f in found if f["kind"] == "type_mismatch"] == [("n", "error"), ("when", "warning")]
+        attrs(
+            {"name": "n"},
+            {"name": "when", "scale": "dateTime"},
+            {"name": "fine"},
+            {"name": "year", "scale": "dateTime", "date_format": "YYYY"},
+        ),
+        facts(
+            {"name": "n", "type": "string", "examples": ["a"]},
+            {"name": "when", "type": "float"},
+            {"name": "fine", "type": "integer"},
+            {"name": "year", "type": "integer"},
+        ),
+    )
+    assert [(f["attribute"], f["severity"]) for f in found if f["kind"] == "type_mismatch"] == [
+        ("n", "error"),
+        ("when", "warning"),
+    ]
 
 
 def test_number_type_and_bounds():
     found = run(
-        attrs({"name": "count", "number_type": "integer"}, {"name": "pct", "bounds": {"minimum": "0", "maximum": "100"}},
-              {"name": "pos", "number_type": "natural"}),
-        facts({"name": "count", "type": "float", "min": 0.5, "max": 3.5}, {"name": "pct", "type": "float", "min": -1.0, "max": 104.0},
-              {"name": "pos", "type": "integer", "min": 0, "max": 5}))
+        attrs(
+            {"name": "count", "number_type": "integer"},
+            {"name": "pct", "bounds": {"minimum": "0", "maximum": "100"}},
+            {"name": "pos", "number_type": "natural"},
+        ),
+        facts(
+            {"name": "count", "type": "float", "min": 0.5, "max": 3.5},
+            {"name": "pct", "type": "float", "min": -1.0, "max": 104.0},
+            {"name": "pos", "type": "integer", "min": 0, "max": 5},
+        ),
+    )
     by = {f["attribute"]: f for f in found}
     assert by["count"]["kind"] == "number_type_mismatch"
-    assert by["pct"]["kind"] == "outside_declared_bounds" and by["pct"]["suggested_edit"]["value"] == {"minimum": -1.0, "maximum": 104.0}
+    assert by["pct"]["kind"] == "outside_declared_bounds" and by["pct"]["suggested_edit"]["value"] == {
+        "minimum": -1.0,
+        "maximum": 104.0,
+    }
     assert by["pos"]["kind"] == "outside_declared_bounds"
 
 
 def test_bounds_inside_the_declared_range_are_fine():
-    assert run(attrs({"name": "pct", "bounds": {"minimum": "0", "maximum": "100"}}), facts({"name": "pct", "type": "float", "min": 0.0, "max": 99.0})) == []
+    assert (
+        run(
+            attrs({"name": "pct", "bounds": {"minimum": "0", "maximum": "100"}}),
+            facts({"name": "pct", "type": "float", "min": 0.0, "max": 99.0}),
+        )
+        == []
+    )
 
 
 def test_unit_findings_follow_the_confidence_of_the_data_side():
-    a = attrs({"name": "t", "unit": "celsius"}, {"name": "w", "unit": "meter"}, {"name": "z"}, {"name": "g", "unit": "meter"}, {"name": "u", "unit": "furlong"})
-    f = facts({"name": "t", "type": "float", "unit": "degree_Celsius"},
-              {"name": "w", "type": "float", "unit": "cm", "unit_confidence": "high"},
-              {"name": "z", "type": "float", "unit": "m", "unit_confidence": "low"},
-              {"name": "g", "type": "float", "unit": "cm", "unit_confidence": "low"},
-              {"name": "u", "type": "float", "unit": "fortnight", "unit_confidence": "high"})
+    a = attrs(
+        {"name": "t", "unit": "celsius"},
+        {"name": "w", "unit": "meter"},
+        {"name": "z"},
+        {"name": "g", "unit": "meter"},
+        {"name": "u", "unit": "furlong"},
+    )
+    f = facts(
+        {"name": "t", "type": "float", "unit": "degree_Celsius"},
+        {"name": "w", "type": "float", "unit": "cm", "unit_confidence": "high"},
+        {"name": "z", "type": "float", "unit": "m", "unit_confidence": "low"},
+        {"name": "g", "type": "float", "unit": "cm", "unit_confidence": "low"},
+        {"name": "u", "type": "float", "unit": "fortnight", "unit_confidence": "high"},
+    )
     by = {x["attribute"]: x for x in run(a, f)}
     assert "t" not in by  # celsius == degree_Celsius
     assert (by["w"]["kind"], by["w"]["severity"], by["w"]["confidence"]) == ("unit_mismatch", "warning", "high")
-    assert (by["z"]["kind"], by["z"]["severity"]) == ("missing_unit", "info")  # a unit guessed from a name is only a hint
+    assert (by["z"]["kind"], by["z"]["severity"]) == (
+        "missing_unit",
+        "info",
+    )  # a unit guessed from a name is only a hint
     assert "g" not in by  # and one guessed from a name never contradicts a unit the EML gives
     assert by["u"]["kind"] == "unit_unverified"
 
 
 def test_netcdf_time_variables_skip_the_unit_check():
-    found = run(attrs({"name": "time", "unit": "second"}), facts({"name": "time", "type": "float", "unit": "seconds since 1970-01-01", "role": "time", "unit_confidence": "high"}), kind="netcdf")
+    found = run(
+        attrs({"name": "time", "unit": "second"}),
+        facts(
+            {
+                "name": "time",
+                "type": "float",
+                "unit": "seconds since 1970-01-01",
+                "role": "time",
+                "unit_confidence": "high",
+            }
+        ),
+        kind="netcdf",
+    )
     assert found == []
 
 
 def test_sentinels_and_fill_values_must_be_listed_as_missing_value_codes():
     codes = [{"code": "-9999"}]
-    a = attrs({"name": "a", "missing_values": codes}, {"name": "b"}, {"name": "c", "missing_values": [{"code": "-999"}]}, {"name": "d", "missing_values": codes})
-    f = facts({"name": "a", "type": "float", "sentinel_count": 4}, {"name": "b", "type": "float", "sentinel_count": 2},
-              {"name": "c", "type": "float", "sentinel_count": 1}, {"name": "d", "type": "float", "fill_values": [-1.0e30]})
+    a = attrs(
+        {"name": "a", "missing_values": codes},
+        {"name": "b"},
+        {"name": "c", "missing_values": [{"code": "-999"}]},
+        {"name": "d", "missing_values": codes},
+    )
+    f = facts(
+        {"name": "a", "type": "float", "sentinel_count": 4},
+        {"name": "b", "type": "float", "sentinel_count": 2},
+        {"name": "c", "type": "float", "sentinel_count": 1},
+        {"name": "d", "type": "float", "fill_values": [-1.0e30]},
+    )
     found = {x["attribute"]: x for x in run(a, f)}
     assert "a" not in found
     assert found["b"]["kind"] == found["c"]["kind"] == "undocumented_missing_value"
@@ -156,7 +237,10 @@ def test_sentinels_and_fill_values_must_be_listed_as_missing_value_codes():
 
 
 def test_a_common_missing_code_below_a_natural_range_is_called_out():
-    found = run(attrs({"name": "stems", "number_type": "natural"}), facts({"name": "stems", "type": "integer", "min": -999, "max": 40}))
+    found = run(
+        attrs({"name": "stems", "number_type": "natural"}),
+        facts({"name": "stems", "type": "integer", "min": -999, "max": 40}),
+    )
     assert found[0]["kind"] == "outside_declared_bounds" and "missing-value code" in found[0]["message"]
 
 
@@ -174,79 +258,137 @@ def test_blank_cells_are_info_unless_a_blank_code_is_listed():
 
 
 def test_unpadded_dates_match_a_padded_format_and_other_shapes_do_not():
-    a = attrs(*({"name": n, "scale": "dateTime", "date_format": f} for n, f in
-                (("us", "MM/DD/YYYY"), ("us2", "MM/DD/YY hh:mm"), ("iso", "YYYY-MM-DD"), ("name", "Month"))))
-    f = facts({"name": "us", "type": "datetime", "examples": ["9/24/2019", "10/5/2019"]},
-              {"name": "us2", "type": "datetime", "examples": ["4/29/24 16:00", "4/30/24 0:00"]},
-              {"name": "iso", "type": "datetime", "examples": ["7/27/18"]},
-              {"name": "name", "type": "string", "examples": ["June"]})
-    assert [(x["kind"], x["attribute"]) for x in run(a, f)] == [("date_format_mismatch", "iso")]  # "Month" is not checkable
+    a = attrs(
+        *(
+            {"name": n, "scale": "dateTime", "date_format": f}
+            for n, f in (("us", "MM/DD/YYYY"), ("us2", "MM/DD/YY hh:mm"), ("iso", "YYYY-MM-DD"), ("name", "Month"))
+        )
+    )
+    f = facts(
+        {"name": "us", "type": "datetime", "examples": ["9/24/2019", "10/5/2019"]},
+        {"name": "us2", "type": "datetime", "examples": ["4/29/24 16:00", "4/30/24 0:00"]},
+        {"name": "iso", "type": "datetime", "examples": ["7/27/18"]},
+        {"name": "name", "type": "string", "examples": ["June"]},
+    )
+    assert [(x["kind"], x["attribute"]) for x in run(a, f)] == [
+        ("date_format_mismatch", "iso")
+    ]  # "Month" is not checkable
 
 
 def test_date_format_mismatch_suggests_the_formats_the_data_use():
-    a = attrs({"name": "time", "scale": "dateTime", "date_format": "YYYY-MM-DD hh:mm:ss"}, {"name": "ok", "scale": "dateTime", "date_format": "YYYY-MM-DD"})
-    f = facts({"name": "time", "type": "datetime", "examples": ["2022-08-16T00:33:49Z"]}, {"name": "ok", "type": "datetime", "examples": ["2022-08-16"]})
+    a = attrs(
+        {"name": "time", "scale": "dateTime", "date_format": "YYYY-MM-DD hh:mm:ss"},
+        {"name": "ok", "scale": "dateTime", "date_format": "YYYY-MM-DD"},
+    )
+    f = facts(
+        {"name": "time", "type": "datetime", "examples": ["2022-08-16T00:33:49Z"]},
+        {"name": "ok", "type": "datetime", "examples": ["2022-08-16"]},
+    )
     found = run(a, f)
     assert [(x["kind"], x["attribute"]) for x in found] == [("date_format_mismatch", "time")]
     assert found[0]["suggested_edit"]["value"] == "YYYY-MM-DDThh:mm:ssZ"
 
 
 def test_merged_facts_cover_every_file_and_flag_columns_missing_from_some():
-    one = facts({"name": "a", "type": "integer", "min": 1, "max": 5, "null_count": 1}, {"name": "b", "type": "float", "min": 0.0, "max": 1.0})
+    one = facts(
+        {"name": "a", "type": "integer", "min": 1, "max": 5, "null_count": 1},
+        {"name": "b", "type": "float", "min": 0.0, "max": 1.0},
+    )
     two = facts({"name": "a", "type": "float", "min": -2, "max": 3, "null_count": 2})
     merged = {m["name"]: m for m in compare.merge_facts([one, two])}
-    assert (merged["a"]["type"], merged["a"]["min"], merged["a"]["max"], merged["a"]["null_count"], merged["a"]["n_files"]) == ("float", -2, 5, 3, 2)
+    assert (
+        merged["a"]["type"],
+        merged["a"]["min"],
+        merged["a"]["max"],
+        merged["a"]["null_count"],
+        merged["a"]["n_files"],
+    ) == ("float", -2, 5, 3, 2)
     found = run(attrs({"name": "a"}, {"name": "b"}), list(merged.values()), n_files=2)
     assert "inconsistent_columns" in kinds(found)
 
 
 def test_merged_facts_keep_the_most_trusted_unit():
-    merged = compare.merge_facts([facts({"name": "a", "type": "float", "unit": "guess", "unit_confidence": "low"}),
-                                  facts({"name": "a", "type": "float", "unit": "header", "unit_confidence": "medium"})])
+    merged = compare.merge_facts(
+        [
+            facts({"name": "a", "type": "float", "unit": "guess", "unit_confidence": "low"}),
+            facts({"name": "a", "type": "float", "unit": "header", "unit_confidence": "medium"}),
+        ]
+    )
     assert merged[0]["unit"] == "header"
 
 
 def test_facts_from_a_netcdf_profile():
-    profile = {"kind": "netcdf", "variables": [
-        {"name": "t", "dtype": "float32", "units": "K", "_FillValue": -999.0, "stats": {"min": 1.0, "max": 2.0}},
-        {"name": "lat", "dtype": "float64", "role": "latitude", "units": "degrees_north"},
-        {"name": "later", "profiled": False}]}
+    profile = {
+        "kind": "netcdf",
+        "variables": [
+            {"name": "t", "dtype": "float32", "units": "K", "_FillValue": -999.0, "stats": {"min": 1.0, "max": 2.0}},
+            {"name": "lat", "dtype": "float64", "role": "latitude", "units": "degrees_north"},
+            {"name": "later", "profiled": False},
+        ],
+    }
     f = {x["name"]: x for x in compare.facts_from_profile(profile)}
-    assert (f["t"]["type"], f["t"]["unit"], f["t"]["unit_confidence"], f["t"]["fill_values"]) == ("float", "K", "high", [-999.0])
+    assert (f["t"]["type"], f["t"]["unit"], f["t"]["unit_confidence"], f["t"]["fill_values"]) == (
+        "float",
+        "K",
+        "high",
+        [-999.0],
+    )
     assert f["lat"]["role"] == "latitude" and f["later"]["unprofiled"]
 
 
 def test_dimensionless_in_the_eml_with_percent_in_the_data_is_only_a_refinement():
-    found = run(attrs({"name": "cover", "unit": "dimensionless"}), facts({"name": "cover", "type": "float", "unit": "Percent"}))
+    found = run(
+        attrs({"name": "cover", "unit": "dimensionless"}), facts({"name": "cover", "type": "float", "unit": "Percent"})
+    )
     assert [(f["kind"], f["severity"]) for f in found] == [("unit_more_specific", "info")]
 
 
 def test_names_that_differ_only_by_punctuation_match_without_needing_position():
-    pairs, _, _ = compare.match_columns(attrs({"name": "Elev.m."}, {"name": '"ts"'}), facts({"name": "Elev(m)", "type": "float"}, {"name": "ts", "type": "float"}), positional=False)
+    pairs, _, _ = compare.match_columns(
+        attrs({"name": "Elev.m."}, {"name": '"ts"'}),
+        facts({"name": "Elev(m)", "type": "float"}, {"name": "ts", "type": "float"}),
+        positional=False,
+    )
     assert [p[2] for p in pairs] == ["normalised name", "normalised name"]
 
 
 def test_positional_name_mismatches_are_graded_by_how_alike_the_names_are():
-    found = run(attrs({"name": "id"}, {"name": "Soil Moisture (from Komarkova 1983)"}, {"name": "alpha"}),
-                facts({"name": "id", "type": "float"}, {"name": "Soil Moisture (from Kom\x87rkov\x87 1983)", "type": "float"},
-                      {"name": "zzzz", "type": "float"}))
+    found = run(
+        attrs({"name": "id"}, {"name": "Soil Moisture (from Komarkova 1983)"}, {"name": "alpha"}),
+        facts(
+            {"name": "id", "type": "float"},
+            {"name": "Soil Moisture (from Kom\x87rkov\x87 1983)", "type": "float"},
+            {"name": "zzzz", "type": "float"},
+        ),
+    )
     got = {f["attribute"]: (f["severity"], f["confidence"]) for f in found if f["kind"] == "name_mismatch"}
     assert got == {"Soil Moisture (from Komarkova 1983)": ("info", "medium"), "alpha": ("warning", "low")}
 
 
 def test_floats_that_are_all_whole_numbers_do_not_break_an_integer_declaration():
     a = attrs({"name": "depth", "number_type": "whole"}, {"name": "lat", "number_type": "integer"})
-    f = facts({"name": "depth", "type": "float", "whole_numbers": True}, {"name": "lat", "type": "float", "min": 56.6, "max": 71.8})
+    f = facts(
+        {"name": "depth", "type": "float", "whole_numbers": True},
+        {"name": "lat", "type": "float", "min": 56.6, "max": 71.8},
+    )
     assert [x["attribute"] for x in run(a, f) if x["kind"] == "number_type_mismatch"] == ["lat"]
 
 
 def test_merging_keeps_whole_numbers_only_if_every_file_agrees():
-    merged = compare.merge_facts([facts({"name": "d", "type": "float", "whole_numbers": True}), facts({"name": "d", "type": "float", "whole_numbers": False})])
+    merged = compare.merge_facts(
+        [
+            facts({"name": "d", "type": "float", "whole_numbers": True}),
+            facts({"name": "d", "type": "float", "whole_numbers": False}),
+        ]
+    )
     assert merged[0]["whole_numbers"] is False
 
 
 def test_a_numeric_column_that_is_text_names_the_text_values():
-    found = run(attrs({"name": "thick"}), facts({"name": "thick", "type": "string", "examples": ["34.00"], "top_values": ["34.00", "n/a", "tbd"]}))
+    found = run(
+        attrs({"name": "thick"}),
+        facts({"name": "thick", "type": "string", "examples": ["34.00"], "top_values": ["34.00", "n/a", "tbd"]}),
+    )
     assert found[0]["data"]["non_numeric_values"] == ["n/a", "tbd"]
 
 
@@ -258,17 +400,26 @@ def test_blank_cells_are_reported_once_per_schema():
 
 def test_empty_columns_are_not_called_undocumented():
     cols = [{"name": n, "type": "float"} for n in "abcdefg"]
-    found = run(attrs(*({"name": n} for n in "abcdefg")), facts(*cols, {"name": "Unnamed: 7", "type": "empty"}, {"name": "Unnamed: 8", "type": "empty"}))
+    found = run(
+        attrs(*({"name": n} for n in "abcdefg")),
+        facts(*cols, {"name": "Unnamed: 7", "type": "empty"}, {"name": "Unnamed: 8", "type": "empty"}),
+    )
     assert [(f["kind"], f["severity"]) for f in found] == [("empty_columns", "info")]
 
 
 def test_position_alone_is_not_trusted_when_no_names_match():
-    found = run(attrs({"name": "Borehole Location"}, {"name": "Tare"}), facts({"name": "Dataset Title: Site A", "type": "string"}, {"name": "21-13", "type": "float"}))
+    found = run(
+        attrs({"name": "Borehole Location"}, {"name": "Tare"}),
+        facts({"name": "Dataset Title: Site A", "type": "string"}, {"name": "21-13", "type": "float"}),
+    )
     assert [(f["kind"], f["severity"]) for f in found] == [("columns_not_matched", "warning")]
 
 
 def test_position_is_trusted_when_every_name_is_close():
-    found = run(attrs({"name": "Elev.m."}, {"name": "Temp (C)"}), facts({"name": "Elev(m)", "type": "float"}, {"name": "Temp (C) ", "type": "float"}))
+    found = run(
+        attrs({"name": "Elev.m."}, {"name": "Temp (C)"}),
+        facts({"name": "Elev(m)", "type": "float"}, {"name": "Temp (C) ", "type": "float"}),
+    )
     assert not any(f["kind"] in ("columns_not_matched", "documented_column_missing") for f in found)
 
 
@@ -280,7 +431,10 @@ def test_an_unread_header_stops_column_names_being_compared():
 
 def test_many_findings_of_one_kind_fold_into_one_with_items():
     names = [f"c{i}" for i in range(8)]
-    found = run(attrs(*({"name": n, "number_type": "integer"} for n in names)), facts(*({"name": n, "type": "float", "min": 0.5, "max": 1.5} for n in names)))
+    found = run(
+        attrs(*({"name": n, "number_type": "integer"} for n in names)),
+        facts(*({"name": n, "type": "float", "min": 0.5, "max": 1.5} for n in names)),
+    )
     assert [f["kind"] for f in found] == ["number_type_mismatch"] and len(found[0]["items"]) == 8
     assert found[0]["items"][0]["attribute"] == "c0" and found[0]["message"].startswith("8 attributes")
 
@@ -308,7 +462,12 @@ def test_a_point_that_is_not_where_the_eml_says_is_reported():
 
 
 def test_zero_to_360_longitudes_are_converted_before_comparing():
-    assert compare.compare_coverage(box(-170, -160, 70, 60), [spatial(190, 200, 65, 62, longitude_convention="0-360")], 0.05) == []
+    assert (
+        compare.compare_coverage(
+            box(-170, -160, 70, 60), [spatial(190, 200, 65, 62, longitude_convention="0-360")], 0.05
+        )
+        == []
+    )
 
 
 def test_eml_boxes_across_the_antimeridian():
@@ -319,7 +478,12 @@ def test_eml_boxes_across_the_antimeridian():
 
 
 def test_a_file_must_fit_inside_one_box_not_just_the_union():
-    cov = {"geographic": [{"west": "0", "east": "1", "north": "1", "south": "0"}, {"west": "10", "east": "11", "north": "11", "south": "10"}]}
+    cov = {
+        "geographic": [
+            {"west": "0", "east": "1", "north": "1", "south": "0"},
+            {"west": "10", "east": "11", "north": "11", "south": "10"},
+        ]
+    }
     assert compare.compare_coverage(cov, [spatial(0.2, 0.4, 0.5, 0.2)], 0.05) == []
     assert compare.compare_coverage(cov, [spatial(0.2, 10.5, 10.5, 0.2)], 0.05)
 
@@ -332,15 +496,32 @@ def test_a_box_with_west_and_east_swapped_is_named_as_such():
 
 
 def test_missing_eml_coverage_is_filled_from_the_data():
-    found = compare.compare_coverage({}, [spatial(-150, -149, 61, 60), {"file": "g", "temporal": {"start": "2020-01-02T00:00:00", "end": "2021-05-01T00:00:00"}}], 0.05)
+    found = compare.compare_coverage(
+        {},
+        [
+            spatial(-150, -149, 61, 60),
+            {"file": "g", "temporal": {"start": "2020-01-02T00:00:00", "end": "2021-05-01T00:00:00"}},
+        ],
+        0.05,
+    )
     assert sorted(f["kind"] for f in found) == ["coverage_missing_spatial", "coverage_missing_temporal"]
-    assert next(f for f in found if f["kind"] == "coverage_missing_temporal")["data"] == {"begin": "2020-01-02", "end": "2021-05-01"}
+    assert next(f for f in found if f["kind"] == "coverage_missing_temporal")["data"] == {
+        "begin": "2020-01-02",
+        "end": "2021-05-01",
+    }
 
 
 def test_temporal_coverage_uses_the_whole_period_of_a_coarse_eml_date():
     cov = {"temporal": [{"begin": "2022", "end": "2024"}]}
-    assert compare.compare_coverage(cov, [{"file": "f", "temporal": {"start": "2022-08-16T00:33:49", "end": "2023-12-31T00:00:00"}}], 0.05) == []
-    found = compare.compare_coverage(cov, [{"file": "f", "temporal": {"start": "2021-12-01T00:00:00", "end": "2025-01-05T00:00:00"}}], 0.05)
+    assert (
+        compare.compare_coverage(
+            cov, [{"file": "f", "temporal": {"start": "2022-08-16T00:33:49", "end": "2023-12-31T00:00:00"}}], 0.05
+        )
+        == []
+    )
+    found = compare.compare_coverage(
+        cov, [{"file": "f", "temporal": {"start": "2021-12-01T00:00:00", "end": "2025-01-05T00:00:00"}}], 0.05
+    )
     assert [f["kind"] for f in found] == ["data_outside_temporal_coverage"] and found[0]["data"]["end"] == "2025-01-05"
 
 
@@ -354,12 +535,20 @@ def test_a_year_only_data_range_is_a_period_not_the_first_of_january():
 
 def test_a_1900_start_date_is_explained():
     cov = {"temporal": [{"begin": "2005", "end": "2007"}]}
-    found = compare.compare_coverage(cov, [{"file": "f", "temporal": {"start": "1900-01-01T00:00:00", "end": "2007-01-01T00:00:00"}}], 0.05)
+    found = compare.compare_coverage(
+        cov, [{"file": "f", "temporal": {"start": "1900-01-01T00:00:00", "end": "2007-01-01T00:00:00"}}], 0.05
+    )
     assert "spreadsheet" in found[0]["message"]
 
 
 def test_findings_sort_by_severity():
-    got = compare.sort_findings([compare.finding("b", "info", "low", "m"), compare.finding("a", "error", "high", "m"), compare.finding("c", "warning", "high", "m")])
+    got = compare.sort_findings(
+        [
+            compare.finding("b", "info", "low", "m"),
+            compare.finding("a", "error", "high", "m"),
+            compare.finding("c", "warning", "high", "m"),
+        ]
+    )
     assert [f["severity"] for f in got] == ["error", "warning", "info"]
 
 
@@ -424,9 +613,15 @@ def mock_dataset(mock_api, n_files=3, schema=ATTRS, obsoleted_by=None, current_e
             docs = [{"id": META, "formatType": "METADATA", "resourceMap": ["resource_map_x"], **extra}]
         elif q == 'id:"urn:uuid:file1"':
             docs = [{"id": "urn:uuid:file1", "formatType": "DATA", "isDocumentedBy": ["doi:10.18739/OLD", META]}]
-        elif q.startswith("id:"):  # the metadata record for a data file; a superseded one only turns up without the filter
+        elif q.startswith(
+            "id:"
+        ):  # the metadata record for a data file; a superseded one only turns up without the filter
             superseded_filter = "-obsoletedBy:*" in request.url.params.get_list("fq")
-            docs = [] if superseded_filter and not current_exists else [{"id": META, "resourceMap": ["resource_map_x"], **extra}]
+            docs = (
+                []
+                if superseded_filter and not current_exists
+                else [{"id": META, "resourceMap": ["resource_map_x"], **extra}]
+            )
         else:
             docs = []
         return httpx.Response(200, json={"response": {"numFound": len(docs), "docs": docs}})
@@ -435,8 +630,9 @@ def mock_dataset(mock_api, n_files=3, schema=ATTRS, obsoleted_by=None, current_e
     for i, p in enumerate(pids):
         quoted = p.replace(":", "%3A")
         body = csv_body(i + 1).encode()
-        mock_api.get(f"{MN}/meta/{quoted}").mock(return_value=httpx.Response(
-            200, text=SYSMETA.format(pid=p, fmt="text/csv", size=len(body), name="obs.csv")))
+        mock_api.get(f"{MN}/meta/{quoted}").mock(
+            return_value=httpx.Response(200, text=SYSMETA.format(pid=p, fmt="text/csv", size=len(body), name="obs.csv"))
+        )
         mock_api.get(f"{MN}/object/{quoted}").mock(return_value=httpx.Response(200, content=body))
     return pids
 
@@ -459,8 +655,13 @@ async def test_compare_reports_mismatches_for_a_dataset(client, mock_api):
 async def test_compare_profiles_a_few_files_per_schema_unless_asked_for_all(client, mock_api):
     mock_dataset(mock_api, n_files=5)
     two = (await client.call_tool("compare_eml_vs_data", {"pid": META, "files_per_schema": 2})).structured_content
-    assert two["summary"]["files_profiled"] == 2 and [f["pid"] for f in two["groups"][0]["files"]] == ["urn:uuid:file0", "urn:uuid:file4"]
-    everything = (await client.call_tool("compare_eml_vs_data", {"pid": META, "files_per_schema": "all"})).structured_content
+    assert two["summary"]["files_profiled"] == 2 and [f["pid"] for f in two["groups"][0]["files"]] == [
+        "urn:uuid:file0",
+        "urn:uuid:file4",
+    ]
+    everything = (
+        await client.call_tool("compare_eml_vs_data", {"pid": META, "files_per_schema": "all"})
+    ).structured_content
     assert everything["summary"]["files_profiled"] == 5
 
 
@@ -475,7 +676,11 @@ async def test_compare_stops_starting_files_when_the_budget_is_gone(client, mock
     settings.compare.budget = -1
     mock_dataset(mock_api)
     sc = (await client.call_tool("compare_eml_vs_data", {"pid": META})).structured_content
-    assert sc["summary"]["files_profiled"] == 0 and sc["summary"]["files_skipped"] == 3 and any("budget" in n for n in sc["notes"])
+    assert (
+        sc["summary"]["files_profiled"] == 0
+        and sc["summary"]["files_skipped"] == 3
+        and any("budget" in n for n in sc["notes"])
+    )
 
 
 async def test_compare_with_a_data_file_pid_checks_only_that_file(client, mock_api):
@@ -522,7 +727,9 @@ async def test_compare_rejects_unknown_schema_ids_and_bad_counts(client, mock_ap
 
 async def test_compare_rejects_documents_that_are_not_eml(client, mock_api):
     mock_dataset(mock_api)
-    mock_api.get(f"{MN}/object/doi%3A10.18739%2FCMP").mock(return_value=httpx.Response(200, text="<gmd:MD_Metadata xmlns:gmd='x'/>"))
+    mock_api.get(f"{MN}/object/doi%3A10.18739%2FCMP").mock(
+        return_value=httpx.Response(200, text="<gmd:MD_Metadata xmlns:gmd='x'/>")
+    )
     with pytest.raises(ToolError, match="not EML"):
         await client.call_tool("compare_eml_vs_data", {"pid": META})
 
@@ -536,7 +743,11 @@ async def test_compare_skips_the_rest_of_a_group_after_a_timeout(client, mock_ap
     monkeypatch.setattr(tool, "profile_object", slow)
     mock_dataset(mock_api)
     sc = (await client.call_tool("compare_eml_vs_data", {"pid": META})).structured_content
-    assert [f["status"] for f in sc["groups"][0]["files"]] == ["error", "skipped: an earlier file in this group timed out", "skipped: an earlier file in this group timed out"]
+    assert [f["status"] for f in sc["groups"][0]["files"]] == [
+        "error",
+        "skipped: an earlier file in this group timed out",
+        "skipped: an earlier file in this group timed out",
+    ]
     assert sc["summary"]["files_failed"] == 1 and sc["summary"]["files_skipped"] == 2
     assert any("timed out" in n for n in sc["notes"]) and any("No file could be profiled" in n for n in sc["notes"])
 

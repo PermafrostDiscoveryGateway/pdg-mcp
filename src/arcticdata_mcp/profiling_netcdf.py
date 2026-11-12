@@ -34,14 +34,47 @@ NETCDF_EXTENSIONS = {".nc", ".nc4", ".cdf", ".netcdf"}
 SUPPORTED = "NetCDF (classic and NetCDF-4)"
 
 GLOBAL_ATTRIBUTES = (
-    "title", "summary", "abstract", "description", "institution", "source", "history", "references", "comment",
-    "Conventions", "featureType", "project", "creator_name", "license", "keywords", "time_coverage_start",
-    "time_coverage_end", "geospatial_lat_min", "geospatial_lat_max", "geospatial_lon_min", "geospatial_lon_max",
+    "title",
+    "summary",
+    "abstract",
+    "description",
+    "institution",
+    "source",
+    "history",
+    "references",
+    "comment",
+    "Conventions",
+    "featureType",
+    "project",
+    "creator_name",
+    "license",
+    "keywords",
+    "time_coverage_start",
+    "time_coverage_end",
+    "geospatial_lat_min",
+    "geospatial_lat_max",
+    "geospatial_lon_min",
+    "geospatial_lon_max",
 )
 VARIABLE_ATTRIBUTES = (
-    "units", "long_name", "standard_name", "calendar", "axis", "positive", "coordinates", "grid_mapping",
-    "cell_methods", "valid_min", "valid_max", "valid_range", "scale_factor", "add_offset", "_FillValue",
-    "missing_value", "flag_values", "flag_meanings",
+    "units",
+    "long_name",
+    "standard_name",
+    "calendar",
+    "axis",
+    "positive",
+    "coordinates",
+    "grid_mapping",
+    "cell_methods",
+    "valid_min",
+    "valid_max",
+    "valid_range",
+    "scale_factor",
+    "add_offset",
+    "_FillValue",
+    "missing_value",
+    "flag_values",
+    "flag_meanings",
 )
 LAT_UNITS = {"degrees_north", "degree_north", "degree_n", "degrees_n", "degreen", "degreesn"}
 LON_UNITS = {"degrees_east", "degree_east", "degree_e", "degrees_e", "degreee", "degreese"}
@@ -148,7 +181,10 @@ def _read(var: Any, budget: int) -> tuple[dict[str, Any] | None, int, bool]:
         read += block.size
         values.append(block.compressed().astype("float64"))
     valid = np.concatenate(values) if values else np.array([])
-    out: dict[str, Any] = {"valid_count": int(valid.size), "basis": "all values" if whole else "start and end of the variable"}
+    out: dict[str, Any] = {
+        "valid_count": int(valid.size),
+        "basis": "all values" if whole else "start and end of the variable",
+    }
     if valid.size:
         out.update(min=float(valid.min()), max=float(valid.max()), mean=round(float(valid.mean()), 6))
     return out, read, whole
@@ -235,7 +271,7 @@ def _profile(ds: Any, limits: ProfileSettings, scan: str) -> dict[str, Any]:
                 decoded = _decode_time(var, stats["min"], stats["max"])
                 if decoded:
                     times.append({"variable": name, "start": decoded[0], "end": decoded[1]})
-    variables += [{"name": n, "profiled": False} for n, _ in everything[len(chosen):]]
+    variables += [{"name": n, "profiled": False} for n, _ in everything[len(chosen) :]]
 
     spatial = None
     if lats and lons:
@@ -282,8 +318,12 @@ async def profile_in_subprocess(source: str, limits: ProfileSettings, scan: str,
     """Run ``profile_netcdf`` in a child process that is killed if it outlives ``timeout`` seconds."""
     request = json.dumps({"source": source, "limits": dataclasses.asdict(limits), "scan": scan}).encode()
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "arcticdata_mcp.profiling_netcdf",
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        sys.executable,
+        "-m",
+        "arcticdata_mcp.profiling_netcdf",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     try:
         out, _ = await asyncio.wait_for(proc.communicate(request), timeout)
@@ -291,7 +331,9 @@ async def profile_in_subprocess(source: str, limits: ProfileSettings, scan: str,
         proc.kill()
         await proc.wait()
         if isinstance(exc, TimeoutError):
-            raise ToolError(f"Profiling took longer than {timeout:.0f} seconds; try scan='sample' or a smaller file.") from exc
+            raise ToolError(
+                f"Profiling took longer than {timeout:.0f} seconds; try scan='sample' or a smaller file."
+            ) from exc
         raise
     try:
         reply = json.loads(out)

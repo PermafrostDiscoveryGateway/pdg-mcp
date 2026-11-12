@@ -13,8 +13,17 @@ def make_tif(path, data, crs="EPSG:4326", transform=from_origin(-150, 70, 0.1, 0
     if data.ndim == 2:
         data = data[np.newaxis]
     with rasterio.open(
-        path, "w", driver="GTiff", count=data.shape[0], height=data.shape[1], width=data.shape[2],
-        dtype=data.dtype, crs=crs, transform=transform, nodata=nodata, **options,
+        path,
+        "w",
+        driver="GTiff",
+        count=data.shape[0],
+        height=data.shape[1],
+        width=data.shape[2],
+        dtype=data.dtype,
+        crs=crs,
+        transform=transform,
+        nodata=nodata,
+        **options,
     ) as dst:
         dst.write(data)
         return dst.name
@@ -58,14 +67,22 @@ def test_projected_crs_gets_a_latitude_longitude_box(tmp_path):
 @pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreferencedWarning")
 def test_custom_crs_without_an_epsg_code_shows_its_definition(tmp_path):
     crs = rasterio.crs.CRS.from_proj4("+proj=aea +lat_1=50 +lat_2=70 +lat_0=60 +lon_0=-150 +datum=WGS84 +units=m")
-    r = profile(make_tif(tmp_path / "k.tif", np.ones((10, 10), "uint8"), crs=crs, transform=from_origin(-100000, 100000, 1000, 1000)))
+    r = profile(
+        make_tif(
+            tmp_path / "k.tif", np.ones((10, 10), "uint8"), crs=crs, transform=from_origin(-100000, 100000, 1000, 1000)
+        )
+    )
     assert r["crs"]["epsg"] is None and "+proj=aea" in r["crs"]["proj"] and r["spatial_extent"] is not None
 
 
 @pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreferencedWarning")
 def test_missing_crs_is_reported(tmp_path):
-    r = profile(make_tif(tmp_path / "x.tif", np.ones((10, 10), "uint8"), crs=None, transform=rasterio.Affine.identity()))
-    assert r["crs"] is None and r["spatial_extent"] is None and any("coordinate reference system" in n for n in r["notes"])
+    r = profile(
+        make_tif(tmp_path / "x.tif", np.ones((10, 10), "uint8"), crs=None, transform=rasterio.Affine.identity())
+    )
+    assert (
+        r["crs"] is None and r["spatial_extent"] is None and any("coordinate reference system" in n for n in r["notes"])
+    )
 
 
 def test_classified_raster_lists_its_values(tmp_path):
@@ -112,7 +129,10 @@ def test_full_scan_falls_back_to_sampling_for_huge_rasters(tmp_path):
 
 
 def test_blocks_too_large_to_sample_skip_statistics(tmp_path):
-    r = profile(make_tif(tmp_path / "b.tif", np.ones((64, 64), "float32"), tiled=True, blockxsize=64, blockysize=64), max_full_pixels=1000)
+    r = profile(
+        make_tif(tmp_path / "b.tif", np.ones((64, 64), "float32"), tiled=True, blockxsize=64, blockysize=64),
+        max_full_pixels=1000,
+    )
     assert "min" not in r["bands"][0] and any("too large" in n for n in r["notes"]) and r["complete"] is False
 
 
@@ -141,8 +161,14 @@ def test_a_non_raster_is_rejected(tmp_path):
 
 @pytest.mark.parametrize(
     "fmt,name,expected",
-    [("image/tiff", "a.tif", True), ("image/geotiff", "a", True), ("application/octet-stream", "a.TIF", True),
-     ("application/octet-stream", "a.bin", False), ("image/png", "a.png", False), ("text/csv", "a.csv", False)],
+    [
+        ("image/tiff", "a.tif", True),
+        ("image/geotiff", "a", True),
+        ("application/octet-stream", "a.TIF", True),
+        ("application/octet-stream", "a.bin", False),
+        ("image/png", "a.png", False),
+        ("text/csv", "a.csv", False),
+    ],
 )
 def test_is_raster(fmt, name, expected):
     assert profiling_raster.is_raster(fmt, name) is expected

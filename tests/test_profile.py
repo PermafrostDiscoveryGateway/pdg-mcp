@@ -2,12 +2,12 @@ from pathlib import Path
 
 import httpx
 import pytest
+from conftest import MN
 from fastmcp.exceptions import ToolError
+from test_tools import SYSMETA
 
 from arcticdata_mcp import profiling
 from arcticdata_mcp.config import ProfileSettings
-from conftest import MN
-from test_tools import SYSMETA
 
 CSV = """site,date,Latitude,Longitude,temp_C,depth (m),count,flag,note
 A,2020-06-01,68.5,-149.2,1.5,10,3,true,ok
@@ -67,7 +67,9 @@ def test_extents_come_from_named_columns(tmp_path):
     assert temporal["start"] == "2020-06-01T00:00:00" and temporal["end"] == "2022-08-01T00:00:00"
 
 
-@pytest.mark.parametrize("lat,lon", [("lat", "lon"), ("latitude_dd", "long_dd"), ("LAT", "LNG"), ("decimalLatitude", "decimalLongitude")])
+@pytest.mark.parametrize(
+    "lat,lon", [("lat", "lon"), ("latitude_dd", "long_dd"), ("LAT", "LNG"), ("decimalLatitude", "decimalLongitude")]
+)
 def test_abbreviated_coordinate_names(tmp_path, lat, lon):
     r = profile(tmp_path, f"{lat},{lon}\n60.5,-100.1\n61.0,-101.0\n")
     assert r["inferred_spatial_extent"]["bbox"]["north"] == 61.0
@@ -83,11 +85,13 @@ def test_out_of_range_values_are_not_coordinates(tmp_path):
 
 
 def test_processing_dates_are_not_data_coverage(tmp_path):
-    text = ("obs_date,Processing_time,v\n2020-01-01,2024-06-01,1\n2020-02-01,2024-06-01,2\n2020-03-01,2024-06-02,3\n")
+    text = "obs_date,Processing_time,v\n2020-01-01,2024-06-01,1\n2020-02-01,2024-06-01,2\n2020-03-01,2024-06-02,3\n"
     t = profile(tmp_path, text)["inferred_temporal_extent"]
     assert [c["column"] for c in t["columns"]] == ["obs_date"]
     assert (t["start"], t["end"]) == ("2020-01-01T00:00:00", "2020-03-01T00:00:00")
-    assert [c["column"] for c in t["ignored_columns"]] == ["Processing_time"] and "record was made" in t["ignored_columns"][0]["reason"]
+    assert [c["column"] for c in t["ignored_columns"]] == ["Processing_time"] and "record was made" in t[
+        "ignored_columns"
+    ][0]["reason"]
 
 
 @pytest.mark.parametrize("name", ["date_created", "LastModified", "file_generated_date", "downloaded"])
@@ -136,7 +140,11 @@ UNITS_CSV = "site,temp,depth,flag\n,degC,m,\nA,1.5,10,x\nB,2.5,12,y\nC,3.5,14,x\
 def test_units_row_is_detected_and_not_counted_as_data(tmp_path):
     r = profile(tmp_path, UNITS_CSV)
     assert r["dialect"]["header_rows"] == 2 and r["rows_profiled"] == 3
-    assert (col(r, "temp")["type"], col(r, "temp")["unit_guess"], col(r, "temp")["unit_source"]) == ("float", "degC", "header row")
+    assert (col(r, "temp")["type"], col(r, "temp")["unit_guess"], col(r, "temp")["unit_source"]) == (
+        "float",
+        "degC",
+        "header row",
+    )
     assert col(r, "depth")["unit_guess"] == "m" and "unit_guess" not in col(r, "site")
     assert any("units" in n for n in r["notes"])
 
@@ -165,8 +173,14 @@ def test_blank_lines_before_the_header_do_not_shift_the_skip(tmp_path):
 
 @pytest.mark.parametrize(
     "hint,fmt",
-    [("mm/dd/yy hh:mm:ss", "%m/%d/%y %H:%M:%S"), ("yyyy-mm-dd", "%Y-%m-%d"), ("hh:mm", "%H:%M"),
-     ("dd/mm/yyyy hh:mm", "%d/%m/%Y %H:%M"), ("YYYY-MM-DDThh:mm:ss", "%Y-%m-%dT%H:%M:%S"), ("dd.mm.yyyy", "%d.%m.%Y")],
+    [
+        ("mm/dd/yy hh:mm:ss", "%m/%d/%y %H:%M:%S"),
+        ("yyyy-mm-dd", "%Y-%m-%d"),
+        ("hh:mm", "%H:%M"),
+        ("dd/mm/yyyy hh:mm", "%d/%m/%Y %H:%M"),
+        ("YYYY-MM-DDThh:mm:ss", "%Y-%m-%dT%H:%M:%S"),
+        ("dd.mm.yyyy", "%d.%m.%Y"),
+    ],
 )
 def test_date_patterns_become_strptime_formats(hint, fmt):
     assert profiling.format_from_hint(hint) == fmt
@@ -191,7 +205,11 @@ def test_date_pattern_in_the_units_row_is_a_format_not_a_unit(tmp_path):
 def test_pattern_with_the_other_year_width_still_applies(tmp_path):
     text = "t,v\nmm/dd/yy hh:mm:ss,m\n10/28/1995 22:03:32,1\n10/29/1995 00:03:31,2\n10/30/1995 01:00:00,3\n"
     r = profile(tmp_path, text)
-    assert (col(r, "t")["type"], col(r, "t")["min"], col(r, "t")["max"]) == ("datetime", "1995-10-28T22:03:32", "1995-10-30T01:00:00")
+    assert (col(r, "t")["type"], col(r, "t")["min"], col(r, "t")["max"]) == (
+        "datetime",
+        "1995-10-28T22:03:32",
+        "1995-10-30T01:00:00",
+    )
     assert col(r, "t")["datetime_format"] == "mm/dd/yy hh:mm:ss"
 
 
@@ -202,7 +220,11 @@ def test_day_first_pattern_is_not_misread_as_month_first(tmp_path):
 
 def test_time_pattern_gives_a_time_column(tmp_path):
     r = profile(tmp_path, "clock,v\nhh:mm,m\n08:30,1\n23:15,2\n12:00,3\n")
-    assert (col(r, "clock")["type"], col(r, "clock")["datetime_format"], col(r, "clock")["max"]) == ("time", "hh:mm", "23:15:00")
+    assert (col(r, "clock")["type"], col(r, "clock")["datetime_format"], col(r, "clock")["max"]) == (
+        "time",
+        "hh:mm",
+        "23:15:00",
+    )
 
 
 def test_tab_delimited(tmp_path):
@@ -224,7 +246,9 @@ def test_column_cap_lists_the_rest_by_name(tmp_path):
 
 def test_distinct_values_are_capped(tmp_path):
     r = profile(tmp_path, "id\n" + "".join(f"id{i}\n" for i in range(30)), ProfileSettings(max_distinct=10))
-    assert col(r, "id")["distinct"] == 10 and col(r, "id")["distinct_is_lower_bound"] and "top_values" not in col(r, "id")
+    assert (
+        col(r, "id")["distinct"] == 10 and col(r, "id")["distinct_is_lower_bound"] and "top_values" not in col(r, "id")
+    )
 
 
 def test_all_empty_column(tmp_path):
@@ -248,10 +272,18 @@ def test_trim_partial_line(tmp_path):
 
 @pytest.mark.parametrize(
     "fmt,name,expected",
-    [("text/csv", "a.csv", True), ("text/plain", "a.txt", True), ("text/plain", "readme.md", False),
-     ("netCDF-4", "a.nc", False), ("application/zip", "a.zip", False), ("application/octet-stream", "a.dat", True),
-     ("text/tsv", "a.tsv", True), ("text/tsv", "noext", True), ("application/vnd.ms-excel", "a.csv", True),
-     ("application/vnd.ms-excel", "a.xls", False)],
+    [
+        ("text/csv", "a.csv", True),
+        ("text/plain", "a.txt", True),
+        ("text/plain", "readme.md", False),
+        ("netCDF-4", "a.nc", False),
+        ("application/zip", "a.zip", False),
+        ("application/octet-stream", "a.dat", True),
+        ("text/tsv", "a.tsv", True),
+        ("text/tsv", "noext", True),
+        ("application/vnd.ms-excel", "a.csv", True),
+        ("application/vnd.ms-excel", "a.xls", False),
+    ],
 )
 def test_is_delimited(fmt, name, expected):
     assert profiling.is_delimited(fmt, name) is expected
@@ -259,10 +291,12 @@ def test_is_delimited(fmt, name, expected):
 
 # Tool -----------------------------------------------------------------------------------------------------------
 
+
 def mock_file(mock_api, pid, fmt, name, body):
     quoted = pid.replace(":", "%3A")
-    mock_api.get(f"{MN}/meta/{quoted}").mock(return_value=httpx.Response(
-        200, text=SYSMETA.format(pid=pid, fmt=fmt, size=len(body), name=name)))
+    mock_api.get(f"{MN}/meta/{quoted}").mock(
+        return_value=httpx.Response(200, text=SYSMETA.format(pid=pid, fmt=fmt, size=len(body), name=name))
+    )
     return mock_api.get(f"{MN}/object/{quoted}").mock(return_value=httpx.Response(200, content=body))
 
 
@@ -328,8 +362,10 @@ async def test_profile_file_is_listed_and_read_only(client):
 
 @pytest.mark.parametrize(
     "fmt,name,module,func,kind",
-    [("image/tiff", "map.tif", "profiling_raster", "profile_raster", "raster"),
-     ("netCDF-4", "model.nc", "profiling_netcdf", "profile_netcdf", "netcdf")],
+    [
+        ("image/tiff", "map.tif", "profiling_raster", "profile_raster", "raster"),
+        ("netCDF-4", "model.nc", "profiling_netcdf", "profile_netcdf", "netcdf"),
+    ],
 )
 async def test_profile_file_hands_rasters_and_netcdf_the_object_url(
     client, mock_api, monkeypatch, settings, fmt, name, module, func, kind
@@ -354,7 +390,13 @@ async def test_profile_file_hands_rasters_and_netcdf_the_object_url(
     obj = mock_file(mock_api, "urn:uuid:big", fmt, name, b"x" * 10)
     sc = (await client.call_tool("profile_file", {"pid": "urn:uuid:big", "scan": "full"})).structured_content
     assert seen == {"source": f"{MN}/object/urn%3Auuid%3Abig", "scan": "full"}
-    assert sc["supported"] and sc["kind"] == kind and sc["complete"] is False and sc["scan"] == "full" and sc["fileName"] == name
+    assert (
+        sc["supported"]
+        and sc["kind"] == kind
+        and sc["complete"] is False
+        and sc["scan"] == "full"
+        and sc["fileName"] == name
+    )
     assert not obj.called  # the profiler reads the file itself, over range requests
 
 

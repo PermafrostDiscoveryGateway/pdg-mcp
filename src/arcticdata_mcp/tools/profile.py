@@ -8,14 +8,13 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastmcp import FastMCP
-from pydantic import Field
-
 from fastmcp.exceptions import ToolError
+from pydantic import Field
 
 from arcticdata_mcp import downloads, profiling, profiling_netcdf, profiling_raster
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import ProfileSettings
-from arcticdata_mcp.tools.common import READ_ONLY, Pid, ToolContext
+from arcticdata_mcp.tools.common import READ_ONLY, ToolContext
 
 
 async def fetch_to_file(client: DataONEClient, url: str, path: Path, limit: int) -> tuple[int, bool]:
@@ -64,9 +63,7 @@ async def profile_object(
             with tempfile.TemporaryDirectory(prefix="adc-profile-") as tmp:
                 path = Path(tmp) / "data.nc"
                 try:
-                    await asyncio.wait_for(
-                        fetch_to_file(client, url, path, limits.max_netcdf_download), limits.timeout
-                    )
+                    await asyncio.wait_for(fetch_to_file(client, url, path, limits.max_netcdf_download), limits.timeout)
                 except TimeoutError as exc:
                     raise ToolError(f"Downloading the file took longer than {limits.timeout:.0f} seconds.") from exc
                 report = await profiling_netcdf.profile_in_subprocess(str(path), limits, scan, limits.timeout)
@@ -113,19 +110,25 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pid: Annotated[str, Field(description="PID of the data file (from list_dataset_files or search_data_files).")],
         scan: Annotated[
             Literal["sample", "full"],
-            Field(description=(
-                "'sample' reads only part of the file (fast): the start of a CSV, a few blocks of a raster, the start "
-                "and end of each large NetCDF variable. 'full' reads everything up to the server's limits (see "
-                "get_server_config)."
-            )),
+            Field(
+                description=(
+                    "'sample' reads only part of the file (fast): the start of a CSV, a few blocks of a raster, the start "
+                    "and end of each large NetCDF variable. 'full' reads everything up to the server's limits (see "
+                    "get_server_config)."
+                )
+            ),
         ] = "sample",
         header_rows: Annotated[
             int | Literal["auto"],
-            Field(ge=1, le=5, description=(
-                "Header lines after any preamble: the first holds column names, the second (if present) units, "
-                "and any further lines are skipped. 'auto' reads the second line as units when it looks like one. "
-                "Set it yourself if the header was misread, e.g. 1 when the second line is actually data."
-            )),
+            Field(
+                ge=1,
+                le=5,
+                description=(
+                    "Header lines after any preamble: the first holds column names, the second (if present) units, "
+                    "and any further lines are skipped. 'auto' reads the second line as units when it looks like one. "
+                    "Set it yourself if the header was misread, e.g. 1 when the second line is actually data."
+                ),
+            ),
         ] = "auto",
     ) -> dict[str, Any]:
         """Summarize the contents of a data file so it can be compared with its EML. Supports delimited text

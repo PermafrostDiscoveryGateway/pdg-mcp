@@ -68,7 +68,20 @@ BASE_UNITS: dict[str, tuple[str, ...]] = {
     "c": ("celsius", "degc", "degreec", "degreesc", "degreecelsius", "degreescelsius", "oc"),
     "k": ("kelvin",),
     "f": ("fahrenheit", "degf", "degreefahrenheit", "degreesfahrenheit"),
-    "deg": ("degs", "wgs84dd", "decimaldegrees", "decimaldegree", "degree", "degrees", "degreenorth", "degreesnorth", "degreeeast", "degreeseast", "degn", "dege"),
+    "deg": (
+        "degs",
+        "wgs84dd",
+        "decimaldegrees",
+        "decimaldegree",
+        "degree",
+        "degrees",
+        "degreenorth",
+        "degreesnorth",
+        "degreeeast",
+        "degreeseast",
+        "degn",
+        "dege",
+    ),
     "%": ("pct", "percent"),
     "ppm": ("partspermillion",),
     "ppt": ("permil", "partsperthousand", "\N{PER MILLE SIGN}"),
@@ -89,9 +102,15 @@ def unit_key(unit: str, split: bool = True) -> str:
     """
     u = re.sub(r"(?<=[a-z])Per(?=[A-Z])", "/", unit.strip()) if split else unit.strip()
     u = u.lower()
-    for old, new in (("\N{DEGREE SIGN}", "deg"), ("\N{MASCULINE ORDINAL INDICATOR}", "deg"), ("\N{MICRO SIGN}", "u"),
-                     ("\N{GREEK SMALL LETTER MU}", "u"), ("\N{SUPERSCRIPT TWO}", "2"), ("\N{SUPERSCRIPT THREE}", "3"),
-                     ("\N{SUPERSCRIPT MINUS}\N{SUPERSCRIPT ONE}", "-1")):
+    for old, new in (
+        ("\N{DEGREE SIGN}", "deg"),
+        ("\N{MASCULINE ORDINAL INDICATOR}", "deg"),
+        ("\N{MICRO SIGN}", "u"),
+        ("\N{GREEK SMALL LETTER MU}", "u"),
+        ("\N{SUPERSCRIPT TWO}", "2"),
+        ("\N{SUPERSCRIPT THREE}", "3"),
+        ("\N{SUPERSCRIPT MINUS}\N{SUPERSCRIPT ONE}", "-1"),
+    ):
         u = u.replace(old, new)
     u = re.sub(r"\s+per\s+", "/", u)
     u = re.sub(r"[\s_^*.]+", "", u)
@@ -140,10 +159,17 @@ def eml_regex(fmt: str) -> re.Pattern[str] | None:
         return None
     out, pos = [], 0
     for m in _DATE_TOKEN.finditer(fmt):
-        out.append(re.escape(fmt[pos:m.start()]))
+        out.append(re.escape(fmt[pos : m.start()]))
         token = m.group()
-        out.append(r"\d{4}" if token.upper() == "YYYY" else r"\d{2}" if token.upper() == "YY"
-                   else r"\d{1,2}" if len(token) == 2 else r"\d+")
+        out.append(
+            r"\d{4}"
+            if token.upper() == "YYYY"
+            else r"\d{2}"
+            if token.upper() == "YY"
+            else r"\d{1,2}"
+            if len(token) == 2
+            else r"\d+"
+        )
         pos = m.end()
     out.append(re.escape(fmt[pos:]))
     return re.compile("".join(out))
@@ -190,12 +216,30 @@ def parse_when(text: str, end: bool = False) -> datetime | None:
 # -- findings ------------------------------------------------------------------------------------------------------
 
 
-def finding(kind: str, severity: str, confidence: str, message: str, *, schema_id: str | None = None,
-            attribute: str | None = None, eml: Any = None, data: Any = None, edit: dict[str, Any] | None = None,
-            files: list[str] | None = None, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def finding(
+    kind: str,
+    severity: str,
+    confidence: str,
+    message: str,
+    *,
+    schema_id: str | None = None,
+    attribute: str | None = None,
+    eml: Any = None,
+    data: Any = None,
+    edit: dict[str, Any] | None = None,
+    files: list[str] | None = None,
+    items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     out = {"kind": kind, "severity": severity, "confidence": confidence, "message": message}
-    for key, value in (("schema_id", schema_id), ("attribute", attribute), ("eml", eml), ("data", data),
-                       ("suggested_edit", edit), ("files", files), ("items", items)):
+    for key, value in (
+        ("schema_id", schema_id),
+        ("attribute", attribute),
+        ("eml", eml),
+        ("data", data),
+        ("suggested_edit", edit),
+        ("files", files),
+        ("items", items),
+    ):
         if value not in (None, [], {}):
             out[key] = value
     return out
@@ -227,14 +271,22 @@ def facts_from_profile(profile: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if profile.get("kind") == "table":
         for c in profile.get("columns", []):
-            out.append({
-                "name": c["name"], "type": c.get("type"), "min": c.get("min"), "max": c.get("max"),
-                "null_count": c.get("null_count", 0), "sentinel_count": c.get("sentinel_count", 0),
-                "examples": list(c.get("examples") or []), "datetime_format": c.get("datetime_format"),
-                "whole_numbers": bool(c.get("whole_numbers")) or c.get("type") == "integer",
-                "top_values": [t["value"] for t in c.get("top_values") or []],
-                "unit": c.get("unit_guess"), "unit_confidence": "medium" if c.get("unit_source") == "header row" else "low",
-            })
+            out.append(
+                {
+                    "name": c["name"],
+                    "type": c.get("type"),
+                    "min": c.get("min"),
+                    "max": c.get("max"),
+                    "null_count": c.get("null_count", 0),
+                    "sentinel_count": c.get("sentinel_count", 0),
+                    "examples": list(c.get("examples") or []),
+                    "datetime_format": c.get("datetime_format"),
+                    "whole_numbers": bool(c.get("whole_numbers")) or c.get("type") == "integer",
+                    "top_values": [t["value"] for t in c.get("top_values") or []],
+                    "unit": c.get("unit_guess"),
+                    "unit_confidence": "medium" if c.get("unit_source") == "header row" else "low",
+                }
+            )
     elif profile.get("kind") == "netcdf":
         for v in profile.get("variables", []):
             if v.get("profiled") is False:
@@ -242,11 +294,21 @@ def facts_from_profile(profile: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             stats = v.get("stats") or {}
             fills = [x for k in ("_FillValue", "missing_value") for x in _as_list(v.get(k))]
-            out.append({
-                "name": v["name"], "type": _dtype_kind(v.get("dtype")), "min": stats.get("min"), "max": stats.get("max"),
-                "unit": v.get("units"), "unit_confidence": "high", "fill_values": fills, "role": v.get("role"),
-                "examples": [], "null_count": 0, "sentinel_count": 0,
-            })
+            out.append(
+                {
+                    "name": v["name"],
+                    "type": _dtype_kind(v.get("dtype")),
+                    "min": stats.get("min"),
+                    "max": stats.get("max"),
+                    "unit": v.get("units"),
+                    "unit_confidence": "high",
+                    "fill_values": fills,
+                    "role": v.get("role"),
+                    "examples": [],
+                    "null_count": 0,
+                    "sentinel_count": 0,
+                }
+            )
     return out
 
 
@@ -275,8 +337,18 @@ def merge_facts(per_file: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for facts in per_file:
         for f in facts:
-            m = merged.setdefault(f["name"], {"name": f["name"], "types": set(), "n_files": 0, "null_count": 0,
-                                              "sentinel_count": 0, "examples": [], "fill_values": []})
+            m = merged.setdefault(
+                f["name"],
+                {
+                    "name": f["name"],
+                    "types": set(),
+                    "n_files": 0,
+                    "null_count": 0,
+                    "sentinel_count": 0,
+                    "examples": [],
+                    "fill_values": [],
+                },
+            )
             m["n_files"] += 1
             m["whole_numbers"] = m.get("whole_numbers", True) and bool(f.get("whole_numbers"))
             if f.get("top_values") and not m.get("top_values"):
@@ -300,8 +372,15 @@ def merge_facts(per_file: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     out = []
     for m in merged.values():
         types = m.pop("types")
-        m["type"] = (next(iter(types)) if len(types) == 1 else "float" if types == {"integer", "float"}
-                     else "mixed" if types else None)
+        m["type"] = (
+            next(iter(types))
+            if len(types) == 1
+            else "float"
+            if types == {"integer", "float"}
+            else "mixed"
+            if types
+            else None
+        )
         out.append(m)
     return out
 
@@ -350,7 +429,11 @@ def match_columns(attrs: list[dict[str, Any]], facts: list[dict[str, Any]], posi
                 pairs.append((attrs[i], facts[i], "position"))
                 used_a.add(i)
                 used_f.add(i)
-    return (pairs, [a for i, a in enumerate(attrs) if i not in used_a], [f for j, f in enumerate(facts) if j not in used_f])
+    return (
+        pairs,
+        [a for i, a in enumerate(attrs) if i not in used_a],
+        [f for j, f in enumerate(facts) if j not in used_f],
+    )
 
 
 # -- one attribute against one column ------------------------------------------------------------------------------
@@ -368,8 +451,9 @@ def _num(value: Any) -> float | None:
     return x if math.isfinite(x) else None
 
 
-def _compare_pair(a: dict[str, Any], f: dict[str, Any], schema_id: str | None, sentinels: list[str],
-                  how: str) -> list[dict[str, Any]]:
+def _compare_pair(
+    a: dict[str, Any], f: dict[str, Any], schema_id: str | None, sentinels: list[str], how: str
+) -> list[dict[str, Any]]:
     name = a["name"]
     out: list[dict[str, Any]] = []
 
@@ -378,14 +462,26 @@ def _compare_pair(a: dict[str, Any], f: dict[str, Any], schema_id: str | None, s
 
     if how == "position":
         close = _alike(name, f["name"])
-        add("name_mismatch", "info" if close else "warning", "medium" if close else "low",
+        add(
+            "name_mismatch",
+            "info" if close else "warning",
+            "medium" if close else "low",
             f"Attribute '{name}' lines up by position with data column '{f['name']}'"
             + (", which is spelled almost the same." if close else ", but the names are quite different."),
-            eml=name, data=f["name"], edit=edit("set", attr_path(name, "attributeName"), f["name"]))
+            eml=name,
+            data=f["name"],
+            edit=edit("set", attr_path(name, "attributeName"), f["name"]),
+        )
     elif how == "normalised name" and name != f["name"]:
-        add("name_mismatch", "info", "high",
+        add(
+            "name_mismatch",
+            "info",
+            "high",
             f"Attribute '{name}' matches column '{f['name']}' apart from case or spacing.",
-            eml=name, data=f["name"], edit=edit("set", attr_path(name, "attributeName"), f["name"]))
+            eml=name,
+            data=f["name"],
+            edit=edit("set", attr_path(name, "attributeName"), f["name"]),
+        )
     if f.get("unprofiled") or not f.get("type") or f["type"] == "empty":
         return out
 
@@ -394,23 +490,45 @@ def _compare_pair(a: dict[str, Any], f: dict[str, Any], schema_id: str | None, s
     numeric = dtype in ("integer", "float")
     year_only = bool(a.get("date_format")) and (eml_shape(a["date_format"]) or "") == "dddd"
     if expected == "numeric" and not numeric:
-        add("type_mismatch", "warning" if dtype == "mixed" else "error", "medium" if dtype == "mixed" else "high",
+        add(
+            "type_mismatch",
+            "warning" if dtype == "mixed" else "error",
+            "medium" if dtype == "mixed" else "high",
             f"'{name}' is described as a numeric {scale} but the data contain "
             f"{'a mix of types across files' if dtype == 'mixed' else dtype + ' values'}.",
             eml={"scale": scale, "number_type": a.get("number_type")},
-            data={"type": dtype, "examples": f.get("examples", [])[:3],
-                  "non_numeric_values": [v for v in f.get("top_values", []) if _num(v) is None][:5]},
-            edit=edit("review", attr_path(name, "measurementScale"), "nominal" if dtype == "string" else None))
-    elif (expected == "datetime" and dtype not in ("datetime", "time") and not (numeric and year_only)
-          and not (a.get("date_format") and eml_shape(a["date_format"]) is None)):  # e.g. "Month" names: not checkable
+            data={
+                "type": dtype,
+                "examples": f.get("examples", [])[:3],
+                "non_numeric_values": [v for v in f.get("top_values", []) if _num(v) is None][:5],
+            },
+            edit=edit("review", attr_path(name, "measurementScale"), "nominal" if dtype == "string" else None),
+        )
+    elif (
+        expected == "datetime"
+        and dtype not in ("datetime", "time")
+        and not (numeric and year_only)
+        and not (a.get("date_format") and eml_shape(a["date_format"]) is None)
+    ):  # e.g. "Month" names: not checkable
         sev = "error" if dtype == "string" else "warning"
-        add("type_mismatch", sev, "high" if dtype == "string" else "medium",
+        add(
+            "type_mismatch",
+            sev,
+            "high" if dtype == "string" else "medium",
             f"'{name}' is described as a dateTime but the data contain {dtype} values.",
-            eml={"scale": scale, "date_format": a.get("date_format")}, data={"type": dtype, "examples": f.get("examples", [])[:3]},
-            edit=edit("review", attr_path(name, "measurementScale")))
+            eml={"scale": scale, "date_format": a.get("date_format")},
+            data={"type": dtype, "examples": f.get("examples", [])[:3]},
+            edit=edit("review", attr_path(name, "measurementScale")),
+        )
     elif expected == "datetime" and dtype == "time" and "dddd" in (eml_shape(a.get("date_format") or "") or ""):
-        add("type_mismatch", "warning", "medium", f"'{name}' has a date format but the data hold only a time of day.",
-            eml={"date_format": a["date_format"]}, data={"type": "time", "examples": f.get("examples", [])[:3]})
+        add(
+            "type_mismatch",
+            "warning",
+            "medium",
+            f"'{name}' has a date format but the data hold only a time of day.",
+            eml={"date_format": a["date_format"]},
+            data={"type": "time", "examples": f.get("examples", [])[:3]},
+        )
 
     if numeric:
         _numeric_checks(a, f, add)
@@ -428,26 +546,44 @@ def _numeric_checks(a: dict[str, Any], f: dict[str, Any], add) -> None:
     name, lo, hi = a["name"], _num(f.get("min")), _num(f.get("max"))
     ntype = a.get("number_type")
     if ntype in ("integer", "whole", "natural") and f["type"] == "float" and not f.get("whole_numbers"):
-        add("number_type_mismatch", "warning", "medium",
+        add(
+            "number_type_mismatch",
+            "warning",
+            "medium",
             f"'{name}' is declared {ntype} but the data contain non-integer values.",
-            eml={"number_type": ntype}, data={"type": "float", "min": lo, "max": hi},
-            edit=edit("set", attr_path(name, "measurementScale/*/numericDomain/numberType"), "real"))
+            eml={"number_type": ntype},
+            data={"type": "float", "min": lo, "max": hi},
+            edit=edit("set", attr_path(name, "measurementScale/*/numericDomain/numberType"), "real"),
+        )
     if ntype in ("whole", "natural") and lo is not None and lo < (1 if ntype == "natural" else 0):
         hint = " (a common missing-value code)" if lo in COMMON_MISSING_CODES else ""
-        add("outside_declared_bounds", "warning", "high",
-            f"'{name}' is declared {ntype} but the data go down to {_g(lo)}{hint}.", eml={"number_type": ntype},
-            data={"min": lo, **({"possible_missing_value_code": lo} if hint else {})})
+        add(
+            "outside_declared_bounds",
+            "warning",
+            "high",
+            f"'{name}' is declared {ntype} but the data go down to {_g(lo)}{hint}.",
+            eml={"number_type": ntype},
+            data={"min": lo, **({"possible_missing_value_code": lo} if hint else {})},
+        )
     bounds = a.get("bounds") or {}
     bmin, bmax = _num(bounds.get("minimum")), _num(bounds.get("maximum"))
     below = bmin is not None and lo is not None and lo < bmin
     above = bmax is not None and hi is not None and hi > bmax
     if below or above:
-        add("outside_declared_bounds", "warning", "high",
+        add(
+            "outside_declared_bounds",
+            "warning",
+            "high",
             f"'{name}' has values outside its declared bounds (data {_g(lo)} to {_g(hi)}; EML {bounds.get('minimum', '-')}"
             f" to {bounds.get('maximum', '-')}).",
-            eml=bounds, data={"min": lo, "max": hi},
-            edit=edit("set", attr_path(name, "measurementScale/*/numericDomain/bounds"),
-                      {"minimum": min(lo, bmin) if below else bmin, "maximum": max(hi, bmax) if above else bmax}))
+            eml=bounds,
+            data={"min": lo, "max": hi},
+            edit=edit(
+                "set",
+                attr_path(name, "measurementScale/*/numericDomain/bounds"),
+                {"minimum": min(lo, bmin) if below else bmin, "maximum": max(hi, bmax) if above else bmax},
+            ),
+        )
 
 
 def _date_format_check(a: dict[str, Any], f: dict[str, Any], add) -> None:
@@ -458,10 +594,15 @@ def _date_format_check(a: dict[str, Any], f: dict[str, Any], add) -> None:
     if all(pattern.fullmatch(e.strip()) for e in examples):
         return
     suggestion = suggest_format(a["date_format"], examples[0])
-    add("date_format_mismatch", "warning", "high",
+    add(
+        "date_format_mismatch",
+        "warning",
+        "high",
         f"'{a['name']}' declares date format '{a['date_format']}' but the data look like '{examples[0]}'.",
-        eml={"date_format": a["date_format"]}, data={"examples": examples[:3]},
-        edit=edit("set", attr_path(a["name"], "measurementScale/dateTime/formatString"), suggestion))
+        eml={"date_format": a["date_format"]},
+        data={"examples": examples[:3]},
+        edit=edit("set", attr_path(a["name"], "measurementScale/dateTime/formatString"), suggestion),
+    )
 
 
 def _unit_check(a: dict[str, Any], f: dict[str, Any], add, numeric_scale: bool) -> None:
@@ -471,26 +612,49 @@ def _unit_check(a: dict[str, Any], f: dict[str, Any], add, numeric_scale: bool) 
     tail = "measurementScale/*/unit/standardUnit"
     if not eml_unit:
         if numeric_scale:
-            add("missing_unit", "warning" if conf != "low" else "info", conf,
+            add(
+                "missing_unit",
+                "warning" if conf != "low" else "info",
+                conf,
                 f"'{name}' has no unit in the EML; the data suggest '{data_unit}'.",
-                data={"unit": data_unit}, edit=edit("add", attr_path(name, tail), data_unit))
+                data={"unit": data_unit},
+                edit=edit("add", attr_path(name, tail), data_unit),
+            )
         return
     verdict = compare_units(eml_unit, data_unit)
     if verdict == "same":
         return
     if canonical_unit(eml_unit) == "1" and canonical_unit(data_unit) in DIMENSIONLESS_KINDS:
-        add("unit_more_specific", "info", conf,
+        add(
+            "unit_more_specific",
+            "info",
+            conf,
             f"'{name}' is dimensionless in the EML; the data say '{data_unit}', which is a more specific description.",
-            eml={"unit": eml_unit}, data={"unit": data_unit}, edit=edit("review", attr_path(name, tail), data_unit))
+            eml={"unit": eml_unit},
+            data={"unit": data_unit},
+            edit=edit("review", attr_path(name, tail), data_unit),
+        )
     elif verdict == "different":
         if conf == "low":
             return  # a unit guessed from a column name is too weak to contradict the EML
-        add("unit_mismatch", "warning", conf, f"'{name}' has unit '{eml_unit}' in the EML but the data suggest '{data_unit}'.",
-            eml={"unit": eml_unit}, data={"unit": data_unit}, edit=edit("review", attr_path(name, tail), data_unit))
+        add(
+            "unit_mismatch",
+            "warning",
+            conf,
+            f"'{name}' has unit '{eml_unit}' in the EML but the data suggest '{data_unit}'.",
+            eml={"unit": eml_unit},
+            data={"unit": data_unit},
+            edit=edit("review", attr_path(name, tail), data_unit),
+        )
     elif conf == "high":  # a unit in the file itself that the table cannot yet relate to the EML's
-        add("unit_unverified", "info", conf,
+        add(
+            "unit_unverified",
+            "info",
+            conf,
             f"'{name}' has unit '{eml_unit}' in the EML and '{data_unit}' in the data; they could not be shown equivalent.",
-            eml={"unit": eml_unit}, data={"unit": data_unit})
+            eml={"unit": eml_unit},
+            data={"unit": data_unit},
+        )
 
 
 def _missing_check(a: dict[str, Any], f: dict[str, Any], sentinels: list[str], add) -> None:
@@ -499,29 +663,56 @@ def _missing_check(a: dict[str, Any], f: dict[str, Any], sentinels: list[str], a
     code_nums = {x for c in codes if (x := _num(c)) is not None}
     if f.get("sentinel_count"):
         if not code_nums & {x for s in sentinels if (x := _num(s)) is not None}:
-            add("undocumented_missing_value", "warning", "medium",
+            add(
+                "undocumented_missing_value",
+                "warning",
+                "medium",
                 f"'{name}' has {f['sentinel_count']} cells equal to {' or '.join(sentinels)}, which look like missing-value "
                 f"codes, but the EML lists {codes or 'none'}.",
-                eml={"missing_value_codes": codes}, data={"sentinel_count": f["sentinel_count"], "sentinels": sentinels},
-                edit=edit("add", attr_path(name, "missingValueCode"), {"code": sentinels[0], "codeExplanation": "Missing value"}))
+                eml={"missing_value_codes": codes},
+                data={"sentinel_count": f["sentinel_count"], "sentinels": sentinels},
+                edit=edit(
+                    "add",
+                    attr_path(name, "missingValueCode"),
+                    {"code": sentinels[0], "codeExplanation": "Missing value"},
+                ),
+            )
     for fill in f.get("fill_values", []):
         if (x := _num(fill)) is not None and x not in code_nums:
-            add("undocumented_missing_value", "warning", "high",
+            add(
+                "undocumented_missing_value",
+                "warning",
+                "high",
                 f"'{name}' has fill value {_g(x)} in the file, which the EML does not list as a missing-value code.",
-                eml={"missing_value_codes": codes}, data={"fill_value": fill},
-                edit=edit("add", attr_path(name, "missingValueCode"), {"code": _g(x), "codeExplanation": "Fill value"}))
+                eml={"missing_value_codes": codes},
+                data={"fill_value": fill},
+                edit=edit("add", attr_path(name, "missingValueCode"), {"code": _g(x), "codeExplanation": "Fill value"}),
+            )
     if f.get("null_count") and not any(c.lower() in BLANK_CODES for c in codes):
-        add("blank_values_undocumented", "info", "medium",
+        add(
+            "blank_values_undocumented",
+            "info",
+            "medium",
             f"'{name}' has {f['null_count']} blank or NA cells and the EML lists no code for them.",
-            eml={"missing_value_codes": codes}, data={"blank_count": f["null_count"]},
-            edit=edit("add", attr_path(name, "missingValueCode"), {"code": "NA", "codeExplanation": "No data"}))
+            eml={"missing_value_codes": codes},
+            data={"blank_count": f["null_count"]},
+            edit=edit("add", attr_path(name, "missingValueCode"), {"code": "NA", "codeExplanation": "No data"}),
+        )
 
 
 # -- one group of entities that share an attribute list ------------------------------------------------------------
 
 
-def compare_group(attrs: list[dict[str, Any]], facts: list[dict[str, Any]], *, kind: str, n_files: int,
-                  schema_id: str | None, sentinels: list[str], truncated: bool = False) -> list[dict[str, Any]]:
+def compare_group(
+    attrs: list[dict[str, Any]],
+    facts: list[dict[str, Any]],
+    *,
+    kind: str,
+    n_files: int,
+    schema_id: str | None,
+    sentinels: list[str],
+    truncated: bool = False,
+) -> list[dict[str, Any]]:
     """Compare one attribute list with the merged columns of the files profiled for it."""
     pairs, lone_attrs, lone_facts = match_columns(attrs, facts, positional=kind == "table")
     out: list[dict[str, Any]] = []
@@ -530,65 +721,123 @@ def compare_group(attrs: list[dict[str, Any]], facts: list[dict[str, Any]], *, k
     blanks = [x for x in out if x["kind"] == "blank_values_undocumented"]
     if len(blanks) > 1:  # one finding per schema, not one per column
         out = [x for x in out if x["kind"] != "blank_values_undocumented"]
-        out.append(finding(
-            "blank_values_undocumented", "info", "medium",
-            f"{len(blanks)} attributes have blank or NA cells but the EML lists no missing-value code for them: "
-            f"{', '.join(b['attribute'] for b in blanks[:6])}{' ...' if len(blanks) > 6 else ''}.",
-            schema_id=schema_id, data=[{"attribute": b["attribute"], **b["data"]} for b in blanks],
-            edit=edit("add", "attributeList/attribute/missingValueCode", {"code": "NA", "codeExplanation": "No data"})))
+        out.append(
+            finding(
+                "blank_values_undocumented",
+                "info",
+                "medium",
+                f"{len(blanks)} attributes have blank or NA cells but the EML lists no missing-value code for them: "
+                f"{', '.join(b['attribute'] for b in blanks[:6])}{' ...' if len(blanks) > 6 else ''}.",
+                schema_id=schema_id,
+                data=[{"attribute": b["attribute"], **b["data"]} for b in blanks],
+                edit=edit(
+                    "add", "attributeList/attribute/missingValueCode", {"code": "NA", "codeExplanation": "No data"}
+                ),
+            )
+        )
     unreliable = kind == "table" and header_unreliable(facts)
     if unreliable:
-        out.append(finding(
-            "header_unreliable", "info", "high",
-            "Many columns have no name in the file, so its header row was probably not read correctly; names were "
-            "compared only where they matched.", schema_id=schema_id, data=[f["name"] for f in facts[:8]]))
+        out.append(
+            finding(
+                "header_unreliable",
+                "info",
+                "high",
+                "Many columns have no name in the file, so its header row was probably not read correctly; names were "
+                "compared only where they matched.",
+                schema_id=schema_id,
+                data=[f["name"] for f in facts[:8]],
+            )
+        )
         lone_attrs, lone_facts = [], []
     elif not pairs and lone_attrs and lone_facts:
-        out.append(finding(
-            "columns_not_matched", "warning", "low",
-            f"None of the {len(lone_attrs)} documented attributes matches any of the {len(lone_facts)} columns by name. "
-            "The file may have no header row, or the EML may name the columns differently.",
-            schema_id=schema_id, eml=[a.get("name") for a in lone_attrs[:8]], data=[f["name"] for f in lone_facts[:8]]))
+        out.append(
+            finding(
+                "columns_not_matched",
+                "warning",
+                "low",
+                f"None of the {len(lone_attrs)} documented attributes matches any of the {len(lone_facts)} columns by name. "
+                "The file may have no header row, or the EML may name the columns differently.",
+                schema_id=schema_id,
+                eml=[a.get("name") for a in lone_attrs[:8]],
+                data=[f["name"] for f in lone_facts[:8]],
+            )
+        )
         return out
     if lone_attrs and not truncated:
         names = [a["name"] for a in lone_attrs if a.get("name")]
-        out.append(finding(
-            "documented_column_missing", "error", "high",
-            f"{len(names)} documented attribute(s) were not found in the data: {', '.join(names[:8])}"
-            f"{' ...' if len(names) > 8 else ''}.",
-            schema_id=schema_id, eml=names, edit=edit("review", "attributeList/attribute", "remove or rename")))
+        out.append(
+            finding(
+                "documented_column_missing",
+                "error",
+                "high",
+                f"{len(names)} documented attribute(s) were not found in the data: {', '.join(names[:8])}"
+                f"{' ...' if len(names) > 8 else ''}.",
+                schema_id=schema_id,
+                eml=names,
+                edit=edit("review", "attributeList/attribute", "remove or rename"),
+            )
+        )
     empty = [f for f in lone_facts if f.get("type") == "empty"]
     lone_facts = [f for f in lone_facts if f.get("type") != "empty"]
     if empty:
-        out.append(finding(
-            "empty_columns", "info", "high",
-            f"{len(empty)} column(s) hold no values at all ({', '.join(f['name'] for f in empty[:4])}"
-            f"{' ...' if len(empty) > 4 else ''}); often stray trailing delimiters.", schema_id=schema_id,
-            data=[f["name"] for f in empty]))
+        out.append(
+            finding(
+                "empty_columns",
+                "info",
+                "high",
+                f"{len(empty)} column(s) hold no values at all ({', '.join(f['name'] for f in empty[:4])}"
+                f"{' ...' if len(empty) > 4 else ''}); often stray trailing delimiters.",
+                schema_id=schema_id,
+                data=[f["name"] for f in empty],
+            )
+        )
     if lone_facts:
         coordinate = [f for f in lone_facts if f.get("role")]
         others = [f for f in lone_facts if not f.get("role")]
         for group, severity in ((others, "warning"), (coordinate, "info")):
             if group:
                 drafts = [draft(f) for f in group]
-                out.append(finding(
-                    "undocumented_column", severity, "high",
-                    f"{len(group)} column(s) in the data are not documented: {', '.join(f['name'] for f in group[:8])}"
-                    f"{' ...' if len(group) > 8 else ''}.",
-                    schema_id=schema_id, data=drafts, edit=edit("add", "attributeList/attribute", drafts)))
+                out.append(
+                    finding(
+                        "undocumented_column",
+                        severity,
+                        "high",
+                        f"{len(group)} column(s) in the data are not documented: {', '.join(f['name'] for f in group[:8])}"
+                        f"{' ...' if len(group) > 8 else ''}.",
+                        schema_id=schema_id,
+                        data=drafts,
+                        edit=edit("add", "attributeList/attribute", drafts),
+                    )
+                )
     if n_files > 1:
         seen = [f for f in facts if f.get("n_files", n_files) < n_files and not f["name"].startswith("Unnamed:")]
         if seen:
-            out.append(finding(
-                "inconsistent_columns", "warning", "high",
-                f"{len(seen)} column(s) are missing from some of the {n_files} files checked for this schema: "
-                f"{', '.join(f['name'] for f in seen[:8])}.", schema_id=schema_id,
-                data=[{"name": f["name"], "files_with_column": f["n_files"]} for f in seen]))
+            out.append(
+                finding(
+                    "inconsistent_columns",
+                    "warning",
+                    "high",
+                    f"{len(seen)} column(s) are missing from some of the {n_files} files checked for this schema: "
+                    f"{', '.join(f['name'] for f in seen[:8])}.",
+                    schema_id=schema_id,
+                    data=[{"name": f["name"], "files_with_column": f["n_files"]} for f in seen],
+                )
+            )
     return _collapse(out, schema_id)
 
 
-COLLAPSIBLE = {"type_mismatch", "number_type_mismatch", "outside_declared_bounds", "unit_mismatch", "unit_more_specific",
-               "unit_unverified", "missing_unit", "undocumented_missing_value", "date_format_mismatch", "name_mismatch"}
+COLLAPSIBLE = {
+    "type_mismatch",
+    "number_type_mismatch",
+    "outside_declared_bounds",
+    "unit_mismatch",
+    "unit_more_specific",
+    "unit_unverified",
+    "missing_unit",
+    "undocumented_missing_value",
+    "date_format_mismatch",
+    "name_mismatch",
+}
 
 
 def _collapse(findings: list[dict[str, Any]], schema_id: str | None, limit: int = 5) -> list[dict[str, Any]]:
@@ -603,11 +852,16 @@ def _collapse(findings: list[dict[str, Any]], schema_id: str | None, limit: int 
             continue
         findings = [f for f in findings if f not in group]
         names = [f["attribute"] for f in group]
-        findings.append(finding(
-            kind, severity, min((f["confidence"] for f in group), key=rank.get),
-            f"{len(group)} attributes ({', '.join(names[:5])}{' ...' if len(names) > 5 else ''}): {group[0]['message']}",
-            schema_id=schema_id,
-            items=[{k: f[k] for k in ("attribute", "eml", "data", "suggested_edit") if k in f} for f in group]))
+        findings.append(
+            finding(
+                kind,
+                severity,
+                min((f["confidence"] for f in group), key=rank.get),
+                f"{len(group)} attributes ({', '.join(names[:5])}{' ...' if len(names) > 5 else ''}): {group[0]['message']}",
+                schema_id=schema_id,
+                items=[{k: f[k] for k in ("attribute", "eml", "data", "suggested_edit") if k in f} for f in group],
+            )
+        )
     return findings
 
 
@@ -663,33 +917,63 @@ def compare_coverage(eml_cov: dict[str, Any], extents: list[dict[str, Any]], tol
     placed = [(e["file"], _data_bbox(e["spatial"])) for e in extents if e.get("spatial")]
     placed = [(name, b) for name, b in placed if b]
     if placed and not boxes:
-        union = {"west": min(b["west"] for _, b in placed), "east": max(b["east"] for _, b in placed),
-                 "north": max(b["north"] for _, b in placed), "south": min(b["south"] for _, b in placed)}
-        out.append(finding("coverage_missing_spatial", "warning", "medium",
-                           "The EML has no geographic coverage; the data files contain coordinates.",
-                           data=union, edit=edit("add", "coverage/geographicCoverage/boundingCoordinates", union)))
+        union = {
+            "west": min(b["west"] for _, b in placed),
+            "east": max(b["east"] for _, b in placed),
+            "north": max(b["north"] for _, b in placed),
+            "south": min(b["south"] for _, b in placed),
+        }
+        out.append(
+            finding(
+                "coverage_missing_spatial",
+                "warning",
+                "medium",
+                "The EML has no geographic coverage; the data files contain coordinates.",
+                data=union,
+                edit=edit("add", "coverage/geographicCoverage/boundingCoordinates", union),
+            )
+        )
     elif placed:
         outside = [(name, b) for name, b in placed if not any(_in_box(b, box, tolerance) for box in boxes)]
         for box in boxes:
             flipped = {**box, "west": box["east"], "east": box["west"]}
             if box["west"] > box["east"] and (hits := [(n, b) for n, b in outside if _in_box(b, flipped, tolerance)]):
                 outside = [x for x in outside if x not in hits]
-                out.append(finding(
-                    "bounding_box_swapped", "warning", "medium",
-                    f"An EML bounding box has west ({box['west']:g}) east of its east ({box['east']:g}), which would "
-                    f"cross the antimeridian, but {len(hits)} data file(s) lie inside it when the two are swapped.",
-                    eml=box, data=flipped, files=[n for n, _ in hits[:5]],
-                    edit=edit("set", "coverage/geographicCoverage/boundingCoordinates",
-                              {"west": flipped["west"], "east": flipped["east"]})))
+                out.append(
+                    finding(
+                        "bounding_box_swapped",
+                        "warning",
+                        "medium",
+                        f"An EML bounding box has west ({box['west']:g}) east of its east ({box['east']:g}), which would "
+                        f"cross the antimeridian, but {len(hits)} data file(s) lie inside it when the two are swapped.",
+                        eml=box,
+                        data=flipped,
+                        files=[n for n, _ in hits[:5]],
+                        edit=edit(
+                            "set",
+                            "coverage/geographicCoverage/boundingCoordinates",
+                            {"west": flipped["west"], "east": flipped["east"]},
+                        ),
+                    )
+                )
         if outside:
-            union = {k: (min if k in ("west", "south") else max)(b[k] for _, b in outside)
-                     for k in ("west", "east", "north", "south")}
-            out.append(finding(
-                "data_outside_spatial_coverage", "warning", "high",
-                f"{len(outside)} of {len(placed)} profiled files have coordinates outside every EML bounding box "
-                f"(tolerance {tolerance:g} degrees).",
-                eml=boxes, data=union, files=[n for n, _ in outside[:5]],
-                edit=edit("review", "coverage/geographicCoverage/boundingCoordinates", union)))
+            union = {
+                k: (min if k in ("west", "south") else max)(b[k] for _, b in outside)
+                for k in ("west", "east", "north", "south")
+            }
+            out.append(
+                finding(
+                    "data_outside_spatial_coverage",
+                    "warning",
+                    "high",
+                    f"{len(outside)} of {len(placed)} profiled files have coordinates outside every EML bounding box "
+                    f"(tolerance {tolerance:g} degrees).",
+                    eml=boxes,
+                    data=union,
+                    files=[n for n, _ in outside[:5]],
+                    edit=edit("review", "coverage/geographicCoverage/boundingCoordinates", union),
+                )
+            )
 
     eml_ranges = []
     for t in eml_cov.get("temporal", []):
@@ -707,27 +991,44 @@ def compare_coverage(eml_cov: dict[str, Any], extents: list[dict[str, Any]], tol
             spans.append((e["file"], *lows))
     if spans and not eml_ranges:
         start, end = min(s for _, s, _, _, _ in spans), max(e for _, _, _, _, e in spans)
-        out.append(finding("coverage_missing_temporal", "warning", "medium",
-                           "The EML has no temporal coverage; the data files contain dates.",
-                           data={"begin": start.date().isoformat(), "end": end.date().isoformat()},
-                           edit=edit("add", "coverage/temporalCoverage/rangeOfDates",
-                                     {"begin": start.date().isoformat(), "end": end.date().isoformat()})))
+        out.append(
+            finding(
+                "coverage_missing_temporal",
+                "warning",
+                "medium",
+                "The EML has no temporal coverage; the data files contain dates.",
+                data={"begin": start.date().isoformat(), "end": end.date().isoformat()},
+                edit=edit(
+                    "add",
+                    "coverage/temporalCoverage/rangeOfDates",
+                    {"begin": start.date().isoformat(), "end": end.date().isoformat()},
+                ),
+            )
+        )
     elif spans:
         lo, hi = min(b for b, _ in eml_ranges), max(e for _, e in eml_ranges)
         early = [n for n, _, s_hi, _, _ in spans if s_hi < lo - timedelta(days=1)]
         late = [n for n, _, _, e_lo, _ in spans if e_lo > hi + timedelta(days=1)]
         if early or late:
             start, end = min(s for _, s, _, _, _ in spans), max(e for _, _, _, _, e in spans)
-            note = (" A date in 1900 is often a spreadsheet's empty-date value." if start.year <= 1900 else "")
-            out.append(finding(
-                "data_outside_temporal_coverage", "warning", "high",
-                f"Dates in the data fall outside the EML temporal coverage ({lo.date()} to {hi.date()}); data span "
-                f"{start.date()} to {end.date()}.{note}",
-                eml={"begin": lo.date().isoformat(), "end": hi.date().isoformat()},
-                data={"begin": start.date().isoformat(), "end": end.date().isoformat()},
-                files=list(dict.fromkeys(early + late))[:5],
-                edit=edit("review", "coverage/temporalCoverage/rangeOfDates",
-                          {"begin": min(lo, start).date().isoformat(), "end": max(hi, end).date().isoformat()})))
+            note = " A date in 1900 is often a spreadsheet's empty-date value." if start.year <= 1900 else ""
+            out.append(
+                finding(
+                    "data_outside_temporal_coverage",
+                    "warning",
+                    "high",
+                    f"Dates in the data fall outside the EML temporal coverage ({lo.date()} to {hi.date()}); data span "
+                    f"{start.date()} to {end.date()}.{note}",
+                    eml={"begin": lo.date().isoformat(), "end": hi.date().isoformat()},
+                    data={"begin": start.date().isoformat(), "end": end.date().isoformat()},
+                    files=list(dict.fromkeys(early + late))[:5],
+                    edit=edit(
+                        "review",
+                        "coverage/temporalCoverage/rangeOfDates",
+                        {"begin": min(lo, start).date().isoformat(), "end": max(hi, end).date().isoformat()},
+                    ),
+                )
+            )
     return out
 
 
@@ -740,3 +1041,88 @@ def extent_of(profile: dict[str, Any]) -> dict[str, Any]:
 
 def sort_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(findings, key=lambda f: (SEVERITY_ORDER[f["severity"]], f["kind"]))
+
+
+# -- EML records ---------------------------------------------------------------------------------------------
+# The EML parser copies entities and attributes as trees shaped like the XML. The checks above read flat records,
+# so these two functions pick out the fields they use.
+
+SCALES = ("nominal", "ordinal", "interval", "ratio", "dateTime")
+
+
+def _node(tree: Any, *path: str) -> Any:
+    """The node at ``path`` in a copied EML tree, taking the first of any repeated element."""
+    for key in path:
+        if isinstance(tree, list):
+            tree = tree[0] if tree else None
+        tree = tree.get(key) if isinstance(tree, dict) else None
+    return tree[0] if isinstance(tree, list) and tree else tree
+
+
+def _node_text(tree: Any, *path: str) -> str | None:
+    node = _node(tree, *path)
+    if isinstance(node, dict):
+        node = node.get("#text")
+    return node.strip() or None if isinstance(node, str) else None
+
+
+def _compact(d: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in d.items() if v not in (None, [], {}, "")}
+
+
+def eml_attribute(tree: dict[str, Any]) -> dict[str, Any]:
+    """The fields of one EML attribute that the checks read, from the tree the EML parser copies."""
+    out: dict[str, Any] = {
+        "name": _node_text(tree, "attributeName"),
+        "label": _node_text(tree, "attributeLabel"),
+        "definition": _node_text(tree, "attributeDefinition"),
+        "storage_type": _node_text(tree, "storageType"),
+    }
+    measurement = _node(tree, "measurementScale")
+    name = next((k for k in SCALES if isinstance(measurement, dict) and k in measurement), None)
+    if name:
+        scale = _node(measurement, name)
+        out["scale"] = name
+        if (unit := _node_text(scale, "unit", "standardUnit")) is not None:
+            out["unit"] = unit
+        elif (unit := _node_text(scale, "unit", "customUnit")) is not None:
+            out["unit"], out["unit_source"] = unit, "custom"
+            custom = _node(scale, "unit", "customUnit")
+            out["unit_definition"] = custom.get("unit_definition") if isinstance(custom, dict) else None
+        out["number_type"] = _node_text(scale, "numericDomain", "numberType")
+        bounds = _node(scale, "numericDomain", "bounds")
+        if bounds is not None:
+            out["bounds"] = _compact(
+                {"minimum": _node_text(bounds, "minimum"), "maximum": _node_text(bounds, "maximum")}
+            )
+        out["precision"] = _node_text(scale, "precision")
+        out["date_format"] = _node_text(scale, "formatString")
+        out["date_precision"] = _node_text(scale, "dateTimePrecision")
+        out["text_domain"] = _node_text(scale, "nonNumericDomain", "textDomain", "definition")
+        codes = _node(scale, "nonNumericDomain", "enumeratedDomain")
+        out["codes"] = [
+            _compact({"code": _node_text(c, "code"), "definition": _node_text(c, "definition")})
+            for c in _as_list(codes.get("codeDefinition") if isinstance(codes, dict) else None)
+        ]
+    out["missing_values"] = [
+        _compact({"code": _node_text(m, "code"), "explanation": _node_text(m, "codeExplanation")})
+        for m in _as_list(tree.get("missingValueCode"))
+    ]
+    return _compact(out)
+
+
+def eml_entity(tree: dict[str, Any]) -> dict[str, Any]:
+    """The fields of one EML entity that the comparison reads, from the tree the EML parser copies."""
+    name, file = _node_text(tree, "entityName"), _node_text(tree, "physical", "objectName")
+    return _compact(
+        {
+            "index": tree.get("index"),
+            "type": tree.get("type"),
+            "name": name,
+            "id": tree.get("id"),
+            "file": file if file != name else None,
+            "url": _node_text(tree, "physical", "distribution", "online", "url"),
+            "schema_id": tree.get("schema_id"),
+            "n_attributes": tree.get("n_attributes"),
+        }
+    )

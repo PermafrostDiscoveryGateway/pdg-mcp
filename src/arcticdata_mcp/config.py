@@ -58,10 +58,14 @@ class ProfileSettings:
     sentinels: list[str] = field(default_factory=lambda: ["-9999", "-99999"])  # numeric codes counted as missing
     sample_blocks: int = 16  # raster blocks read in scan="sample" mode, spread evenly over the image
     sample_block_pixels: int = 65536  # a sampled window is grown to about this many pixels (strips are one row high)
-    max_full_pixels: int = 25_000_000  # raster pixels (times bands) read in scan="full" mode; bigger rasters are sampled
+    max_full_pixels: int = (
+        25_000_000  # raster pixels (times bands) read in scan="full" mode; bigger rasters are sampled
+    )
     sample_values: int = 20_000  # values read per NetCDF variable in scan="sample" mode, from its start and its end
     max_full_values: int = 50_000_000  # NetCDF values read in total in scan="full" mode; the rest are sampled
-    max_netcdf_download: int = 64 * 1024 * 1024  # NetCDF files up to this size are downloaded and read locally; bigger ones use range requests
+    max_netcdf_download: int = (
+        64 * 1024 * 1024
+    )  # NetCDF files up to this size are downloaded and read locally; bigger ones use range requests
     timeout: float = 120.0  # seconds a raster or NetCDF profile may take
 
 

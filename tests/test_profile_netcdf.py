@@ -46,13 +46,19 @@ def test_dimensions_attributes_and_variables(tmp_path):
     r = profile(make_nc(tmp_path / "a.nc"))
     assert r["kind"] == "netcdf" and r["file_format"] == "NETCDF4"
     assert r["dimensions"] == [
-        {"name": "time", "size": 3, "unlimited": True}, {"name": "lat", "size": 4, "unlimited": False},
+        {"name": "time", "size": 3, "unlimited": True},
+        {"name": "lat", "size": 4, "unlimited": False},
         {"name": "lon", "size": 5, "unlimited": False},
     ]
     assert r["global_attributes"] == {"title": "Test grid", "Conventions": "CF-1.8", "history": "made in a test"}
     assert r["other_global_attributes"] == 1
     temp = var(r, "temp")
-    assert (temp["units"], temp["long_name"], temp["dtype"], temp["shape"]) == ("K", "air temperature", "float32", [3, 4, 5])
+    assert (temp["units"], temp["long_name"], temp["dtype"], temp["shape"]) == (
+        "K",
+        "air temperature",
+        "float32",
+        [3, 4, 5],
+    )
     assert temp["dimensions"] == ["time", "lat", "lon"] and temp["_FillValue"] == pytest.approx(-999.0)
 
 
@@ -65,7 +71,9 @@ def test_extents_come_from_the_coordinate_variables(tmp_path):
     r = profile(make_nc(tmp_path / "a.nc"))
     assert r["spatial_extent"]["bbox"] == {"north": 63.0, "south": 60.0, "east": -146.0, "west": -150.0}
     assert (r["spatial_extent"]["latitude_variable"], r["spatial_extent"]["longitude_variable"]) == ("lat", "lon")
-    assert r["temporal_extent"]["start"].startswith("2000-01-01") and r["temporal_extent"]["end"].startswith("2000-01-03")
+    assert r["temporal_extent"]["start"].startswith("2000-01-01") and r["temporal_extent"]["end"].startswith(
+        "2000-01-03"
+    )
     assert var(r, "lat")["role"] == "latitude" and var(r, "time")["role"] == "time"
     assert r["complete"] is True
 
@@ -134,7 +142,10 @@ def test_groups_strings_and_scalars(tmp_path):
     r = profile(path)
     assert var(r, "scalar")["stats"]["min"] == 7.5 and var(r, "scalar")["shape"] == []
     assert var(r, "label")["dtype"] == "string" and "stats" not in var(r, "label")
-    assert var(r, "model/x")["stats"]["max"] == 4.0 and {"name": "model/k", "size": 2, "unlimited": False} in r["dimensions"]
+    assert (
+        var(r, "model/x")["stats"]["max"] == 4.0
+        and {"name": "model/k", "size": 2, "unlimited": False} in r["dimensions"]
+    )
 
 
 def test_variable_cap_lists_the_rest(tmp_path):
@@ -171,8 +182,14 @@ def test_slabs_pin_leading_dimensions_to_one_index():
 
 @pytest.mark.parametrize(
     "fmt,name,expected",
-    [("netCDF-4", "a.nc", True), ("netCDF-3", "a.cdf", True), ("application/octet-stream", "a.nc4", True),
-     ("application/octet-stream", "a.bin", False), ("text/csv", "a.csv", False), ("application/x-hdf5", "a.h5", False)],
+    [
+        ("netCDF-4", "a.nc", True),
+        ("netCDF-3", "a.cdf", True),
+        ("application/octet-stream", "a.nc4", True),
+        ("application/octet-stream", "a.bin", False),
+        ("text/csv", "a.csv", False),
+        ("application/x-hdf5", "a.h5", False),
+    ],
 )
 def test_is_netcdf(fmt, name, expected):
     assert profiling_netcdf.is_netcdf(fmt, name) is expected

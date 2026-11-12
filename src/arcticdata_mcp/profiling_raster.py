@@ -75,7 +75,9 @@ class _BandStats:
         if self.n:
             mean = self.total / self.n
             out.update(
-                min=self.lo, max=self.hi, mean=round(mean, 6),
+                min=self.lo,
+                max=self.hi,
+                mean=round(mean, 6),
                 std=round(math.sqrt(max(0.0, self.total_sq / self.n - mean * mean)), 6),
             )
             if self.distinct:
@@ -89,17 +91,25 @@ def _windows(src: rasterio.DatasetReader, limits: ProfileSettings, full: bool) -
     rows = block_h * max(1, math.ceil(limits.sample_block_pixels / max(1, block_w * block_h)))
     n_y, n_x = math.ceil(src.height / rows), math.ceil(src.width / block_w)
     total = n_y * n_x
-    picks = range(total) if full else sorted({int(p) for p in np.linspace(0, total - 1, min(limits.sample_blocks, total))})
+    picks = (
+        range(total) if full else sorted({int(p) for p in np.linspace(0, total - 1, min(limits.sample_blocks, total))})
+    )
     wins = []
     for p in picks:
         by, bx = divmod(p, n_x)
-        wins.append(Window(bx * block_w, by * rows, min(block_w, src.width - bx * block_w), min(rows, src.height - by * rows)))
+        wins.append(
+            Window(bx * block_w, by * rows, min(block_w, src.width - bx * block_w), min(rows, src.height - by * rows))
+        )
     return wins, total
 
 
 def _crs_info(crs: Any) -> dict[str, Any]:
     name = re.match(r'^\w+\["([^"]+)"', crs.wkt or "")
-    out: dict[str, Any] = {"epsg": crs.to_epsg(), "name": name.group(1) if name else None, "geographic": crs.is_geographic}
+    out: dict[str, Any] = {
+        "epsg": crs.to_epsg(),
+        "name": name.group(1) if name else None,
+        "geographic": crs.is_geographic,
+    }
     if not crs.is_geographic:
         out["linear_units"] = crs.linear_units
     if out["epsg"] is None:  # a custom CRS has no code, so show its definition

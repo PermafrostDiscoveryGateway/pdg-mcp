@@ -25,7 +25,9 @@ async def test_search_list_download(live):
     assert r.structured_content["numFound"] > 0
     files = (await live.call_tool("list_dataset_files", {"pid": DOI, "rows": 2})).structured_content
     assert files["numFound"] > 0
-    small = (await live.call_tool("search_data_files", {"file_name": "*.csv", "max_size": 20000, "rows": 1})).structured_content
+    small = (
+        await live.call_tool("search_data_files", {"file_name": "*.csv", "max_size": 20000, "rows": 1})
+    ).structured_content
     pid = small["results"][0]["id"]
     dl = await live.call_tool("download_file", {"pid": pid})
     assert dl.structured_content["delivery"] == "inline"

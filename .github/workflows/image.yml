@@ -8,13 +8,22 @@ env:
   HUB_IMAGE: hub.ncsa.illinois.edu/pdg/pdg-mcp
   GHCR_IMAGE: ghcr.io/permafrostdiscoverygateway/pdg-mcp
 jobs:
+  # Lint, tests and chart checks (ci.yml). The image is only built and pushed if they pass.
+  # This is the only place ci.yml runs on PRs/pushes: don't add `paths:` filters to this workflow's triggers or
+  # disable it, or CI stops running. The required status checks are "ci / test", "ci / lint" and "ci / chart";
+  # renaming this job changes those names and breaks branch protection.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
   build:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Pull requests only build. Pushes go to NCSA Harbor (needs HUB_USERNAME/HUB_PASSWORD secrets, e.g. a
       # Harbor robot account with push access to the pdg project) and to ghcr.io.
       - id: push

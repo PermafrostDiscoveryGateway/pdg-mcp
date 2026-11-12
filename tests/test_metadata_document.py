@@ -1,11 +1,12 @@
+import asyncio
 import json
 
 import httpx
 import pytest
+from conftest import MN
 from fastmcp.exceptions import ToolError
 
 from arcticdata_mcp import eml
-from conftest import MN
 
 PID = "doi:10.18739/TEST"
 OBJECT = f"{MN}/object/doi%3A10.18739%2FTEST"
@@ -72,9 +73,13 @@ EML = f"""<?xml version="1.0"?>
 ISO = '<?xml version="1.0"?><gmi:MI_Metadata xmlns:gmi="http://www.isotc211.org/2005/gmi"><title>ISO</title></gmi:MI_Metadata>'
 
 
+def load(xml):
+    return eml.parse(xml)[1]
+
+
 @pytest.fixture
 def doc():
-    return eml.parse(EML)
+    return load(EML)
 
 
 def test_identical_schemas_are_deduplicated(doc):
@@ -86,19 +91,118 @@ def test_identical_schemas_are_deduplicated(doc):
     assert daily["attribute_names"] == ["time", "reflectivity"]
     assert daily["example_entities"] == ["radar.20220101.nc", "radar.20220102.nc", "radar.20220103.nc"]
     [other] = [g for g in groups if "schema_id" not in g]
-    assert other == {"entity_types": {"otherEntity": 1}, "n_entities": 1, "n_attributes": 0, "example_entities": ["report.pdf"]}
+    assert other == {
+        "entity_types": {"otherEntity": 1},
+        "n_entities": 1,
+        "n_attributes": 0,
+        "example_entities": ["report.pdf"],
+    }
 
 
-def test_attributes_keep_units_codes_and_annotations(doc):
+def test_attributes_are_copied_whole(doc):
     time, refl = doc.schemas["S1"]
-    assert time["unit"] == "second" and "unit_source" not in time
-    assert time["missing_values"] == [{"code": "-999", "explanation": "No data"}]
-    assert time["annotations"][0]["value"] == "time of measurement"
-    assert time["annotations"][0]["value_uri"] == "http://purl.dataone.org/odo/ECSO_00002040"
-    assert refl["unit_source"] == "custom"
-    assert refl["unit_definition"] == {"name": "dBZ", "unit_type": "dimensionless", "description": "Decibels relative to Z"}
+    assert time["attributeName"] == "time" and "id" not in time
+    assert time["measurementScale"] == {
+        "ratio": {"unit": {"standardUnit": "second"}, "numericDomain": {"numberType": "real"}}
+    }
+    assert time["missingValueCode"] == {"code": "-999", "codeExplanation": "No data"}
+    assert time["annotation"]["valueURI"] == {
+        "label": "time of measurement",
+        "#text": "http://purl.dataone.org/odo/ECSO_00002040",
+    }
+    assert refl["measurementScale"]["ratio"]["unit"]["customUnit"] == {
+        "#text": "dBZ",
+        "unit_definition": {"name": "dBZ", "unitType": "dimensionless", "description": "Decibels relative to Z"},
+    }
     [site] = doc.schemas["S2"]
-    assert site["scale"] == "nominal" and site["codes"] == [{"code": "SUM", "definition": "Summit"}]
+    assert eml.attribute_codes(site) == [{"code": "SUM", "definition": "Summit"}]
+
+
+def column(scale):
+    return f"<attribute><attributeName>x</attributeName><measurementScale>{scale}</measurementScale></attribute>"
+
+
+def one_table(*attrs, extra=""):
+    tables = "".join(
+        f'<dataTable id="t{i}"><entityName>t{i}</entityName><attributeList>{a}</attributeList></dataTable>'
+        for i, a in enumerate(attrs)
+    )
+    return f'<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title>{tables}{extra}</dataset></eml:eml>'
+
+
+def test_tree_keeps_what_fixed_paths_dropped():
+    d = load(
+        one_table(
+            column("""<dateTime><formatString>YYYY</formatString><dateTimeDomain>
+          <bounds><minimum exclusive="false">1990</minimum></bounds><bounds><maximum exclusive="true">2030</maximum></bounds>
+          </dateTimeDomain></dateTime>"""),
+            column("<nominal><nonNumericDomain><references>codes</references></nonNumericDomain></nominal>"),
+            column("""<nominal><nonNumericDomain><enumeratedDomain><entityCodeList><entityReference>t0</entityReference>
+          <valueAttributeReference>a</valueAttributeReference><definitionAttributeReference>b</definitionAttributeReference>
+          </entityCodeList></enumeratedDomain></nonNumericDomain></nominal>"""),
+            extra="""<additionalMetadata><nonNumericDomain id="codes"><enumeratedDomain>
+          <codeDefinition><code>A</code><definition>Alpha</definition></codeDefinition>
+          <codeDefinition><code>B</code><definition>Beta</definition></codeDefinition></enumeratedDomain></nonNumericDomain></additionalMetadata>""",
+        )
+    )
+    [date], [ref], [ecl] = d.schemas.values()
+    assert date["measurementScale"]["dateTime"]["dateTimeDomain"]["bounds"] == [
+        {"minimum": {"exclusive": "false", "#text": "1990"}},
+        {"maximum": {"exclusive": "true", "#text": "2030"}},
+    ]
+    assert [c["code"] for c in eml.attribute_codes(ref)] == ["A", "B"]
+    assert (
+        ecl["measurementScale"]["nominal"]["nonNumericDomain"]["enumeratedDomain"]["entityCodeList"]["entityReference"]
+        == "t0"
+    )
+
+
+def test_columns_differing_only_in_a_flag_get_different_schemas():
+    bound = '<ratio><unit><standardUnit>meter</standardUnit></unit><numericDomain><numberType>real</numberType><bounds><minimum exclusive="{}">0</minimum></bounds></numericDomain></ratio>'
+    d = load(one_table(column(bound.format("true")), column(bound.format("false"))))
+    assert len(d.schemas) == 2
+
+
+def test_unresolved_reference_is_flagged():
+    d = load(one_table("<references>nowhere</references>"))
+    assert d.entities[0]["unresolved_reference"] == "nowhere" and "schema_id" not in d.entities[0]
+    assert d.outline()["unresolved_references"] == ["nowhere"]
+
+
+def test_temporal_coverage_ignores_empty_and_non_iso_dates():
+    cov = """<coverage><temporalCoverage><singleDateTime> </singleDateTime></temporalCoverage>
+      <temporalCoverage><singleDateTime><calendarDate>2010</calendarDate></singleDateTime></temporalCoverage>
+      <temporalCoverage><rangeOfDates><beginDate><calendarDate>2009-06-01</calendarDate><time>12:00:00</time></beginDate>
+        <endDate><calendarDate>2011-01-01</calendarDate></endDate></rangeOfDates></temporalCoverage>
+      <temporalCoverage><singleDateTime><alternativeTimeScale><timeScaleName>Ma</timeScaleName><timeScaleAgeEstimate>66</timeScaleAgeEstimate>
+        </alternativeTimeScale></singleDateTime></temporalCoverage></coverage>"""
+    d = load(one_table(extra=cov))
+    assert d.outline()["coverage"]["temporal"] == {
+        "begin": "2009-06-01T12:00:00",
+        "end": "2011-01-01",
+        "other_values": ["Ma 66"],
+    }
+    empty = load(one_table(extra="<coverage><temporalCoverage><singleDateTime/></temporalCoverage></coverage>"))
+    assert "temporal" not in empty.outline().get("coverage", {})
+
+
+def test_fit_codes_cuts_an_oversized_code_list():
+    codes = "".join(
+        f"<codeDefinition><code>C{i}</code><definition>Station {i}</definition></codeDefinition>" for i in range(2000)
+    )
+    [[attr]] = load(
+        one_table(
+            column(
+                f"<nominal><nonNumericDomain><enumeratedDomain>{codes}</enumeratedDomain></nonNumericDomain></nominal>"
+            )
+        )
+    ).schemas.values()
+    fitted = eml.fit_codes(attr, 1000)
+    assert len(json.dumps(fitted)) <= 1000
+    kept = eml.attribute_codes(fitted)
+    assert kept and kept == eml.attribute_codes(attr)[: len(kept)]
+    assert fitted["codeDefinition_omitted"] == 2000 - len(kept)
+    assert eml.fit_codes(attr, 10**7) is attr
 
 
 def test_outline(doc):
@@ -126,28 +230,46 @@ def test_find_schema(doc):
 
 def test_sections(doc):
     people = doc.people()
-    assert people["creators"][0]["user_id"] == ["https://orcid.org/0000-0000-0000-0001"]
-    assert people["contacts"] == [{"organization": "NOAA", "email": ["x@noaa.gov"]}]
+    assert people["creators"][0]["userId"] == {
+        "directory": "https://orcid.org",
+        "#text": "https://orcid.org/0000-0000-0000-0001",
+    }
+    assert people["contacts"] == [{"organizationName": "NOAA", "electronicMailAddress": "x@noaa.gov"}]
     [project] = doc.project()
-    assert project["awards"] == [{"funder": "National Science Foundation", "award_number": "1303879", "title": "ICECAPS award"}]
-    assert project["personnel"] == [{"name": "Neely", "role": "coPrincipalInvestigator"}]
+    assert project["award"] == {
+        "funderName": "National Science Foundation",
+        "awardNumber": "1303879",
+        "title": "ICECAPS award",
+    }
+    assert project["personnel"] == {"individualName": {"surName": "Neely"}, "role": "coPrincipalInvestigator"}
     anns = doc.annotations()
     assert [a["attribute"] for a in anns["attributes"]["S1"]] == ["time", "reflectivity"]
     assert anns["dataset"][0]["property"] == "theme"
 
 
 def test_antimeridian_boxes_are_not_merged():
-    two = EML.replace("</coverage>", """<geographicCoverage><geographicDescription>Chukchi</geographicDescription>
+    two = EML.replace(
+        "</coverage>",
+        """<geographicCoverage><geographicDescription>Chukchi</geographicDescription>
       <boundingCoordinates><westBoundingCoordinate>170</westBoundingCoordinate><eastBoundingCoordinate>-170</eastBoundingCoordinate>
       <northBoundingCoordinate>75</northBoundingCoordinate><southBoundingCoordinate>70</southBoundingCoordinate></boundingCoordinates>
-      </geographicCoverage></coverage>""")
-    cov = eml.parse(two).coverage_summary()
+      </geographicCoverage></coverage>""",
+    )
+    cov = load(two).coverage_summary()
     assert cov["n_geographic"] == 2 and "bounding_box" not in cov
 
 
 def test_missing_sections():
-    bare = eml.parse('<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title></dataset></eml:eml>')
-    assert bare.outline() == {"format": "EML", "eml_namespace": "https://eml.ecoinformatics.org/eml-2.2.0", "title": "T", "n_entities": 0, "n_schemas": 0}
+    bare = load(
+        '<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title></dataset></eml:eml>'
+    )
+    assert bare.outline() == {
+        "format": "EML",
+        "eml_namespace": "https://eml.ecoinformatics.org/eml-2.2.0",
+        "title": "T",
+        "n_entities": 0,
+        "n_schemas": 0,
+    }
     assert bare.methods_text() is None and bare.coverage() == {} and bare.project() == []
 
 
@@ -182,9 +304,9 @@ async def test_tool_attributes_paging(client, mock_api):
     call = {"pid": PID, "section": "attributes", "entity": "radar.20220102.nc", "max_chars": 1000}
     first = (await client.call_tool("get_metadata_document", call)).structured_content
     assert first["schema_id"] == "S1" and first["n_entities"] == 4 and first["n_attributes"] == 2
-    assert [a["name"] for a in first["attributes"]] == ["time"] and first["next_offset"] == 1
+    assert [a["attributeName"] for a in first["attributes"]] == ["time"] and first["next_offset"] == 1
     rest = (await client.call_tool("get_metadata_document", {**call, "offset": 1})).structured_content
-    assert [a["name"] for a in rest["attributes"]] == ["reflectivity"] and rest["next_offset"] is None
+    assert [a["attributeName"] for a in rest["attributes"]] == ["reflectivity"] and rest["next_offset"] is None
 
 
 async def test_tool_entities_and_methods(client, mock_api):
@@ -192,18 +314,34 @@ async def test_tool_entities_and_methods(client, mock_api):
     ents = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "entities"})).structured_content
     assert ents["n_entities"] == 6 and ents["next_offset"] is None
     assert ents["entities"][0] == {
-        "index": 0, "type": "dataTable", "name": "radar.20220101.nc", "id": "t1", "description": "Day 1",
-        "format": "netCDF-4", "size": "100", "schema_id": "S1", "n_attributes": 2,
+        "index": 0,
+        "type": "dataTable",
+        "id": "t1",
+        "schema_id": "S1",
+        "n_attributes": 2,
+        "entityName": "radar.20220101.nc",
+        "entityDescription": "Day 1",
+        "physical": {
+            "objectName": "radar.20220101.nc",
+            "size": "100",
+            "dataFormat": {"externallyDefinedFormat": {"formatName": "netCDF-4"}},
+        },
     }
-    first = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "max_chars": 1000})).structured_content
-    rest = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "offset": 1000})).structured_content
+    first = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "max_chars": 1000})
+    ).structured_content
+    rest = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "methods", "offset": 1000})
+    ).structured_content
     assert first["next_offset"] == 1000 and rest["next_offset"] is None
     assert first["text"] + rest["text"] == METHODS.strip()
 
 
 async def test_tool_raw_paging(client, mock_api):
     mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=EML))
-    r = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "raw", "offset": 10, "max_chars": 1000})).structured_content
+    r = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "raw", "offset": 10, "max_chars": 1000})
+    ).structured_content
     assert r["document"] == EML[10:1010] and r["next_offset"] == 1010
 
 
@@ -215,10 +353,185 @@ async def test_tool_non_eml_falls_back_to_raw(client, mock_api):
         await client.call_tool("get_metadata_document", {"pid": PID, "section": "coverage"})
 
 
-async def test_dataset_details_uses_curated_fields(client, mock_api):
-    route = mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [{"id": PID}]}}))
+async def test_tool_eml_without_dataset_falls_back_to_raw(client, mock_api):
+    software = '<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><software><title>Tool</title></software></eml:eml>'
+    mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=software))
+    r = (await client.call_tool("get_metadata_document", {"pid": PID})).structured_content
+    assert r["format"] == "eml/software" and r["document"] == software
+    with pytest.raises(ToolError, match=r"<eml/software>"):
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "people"})
+
+
+async def test_tool_pages_oversized_codes(client, mock_api):
+    codes = "".join(
+        f"<codeDefinition><code>C{i}</code><definition>Station {i}</definition></codeDefinition>" for i in range(500)
+    )
+    xml = one_table(
+        column(f"<nominal><nonNumericDomain><enumeratedDomain>{codes}</enumeratedDomain></nonNumericDomain></nominal>")
+    )
+    mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=xml))
+    r = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "attributes", "max_chars": 2000})
+    ).structured_content
+    assert len(json.dumps(r["attributes"])) <= 2000 and r["attributes"][0]["codeDefinition_omitted"] > 0 and "note" in r
+    seen, offset = [], 0
+    while offset is not None:
+        page = (
+            await client.call_tool(
+                "get_metadata_document",
+                {"pid": PID, "section": "codes", "attribute": "x", "offset": offset, "max_chars": 2000},
+            )
+        ).structured_content
+        assert len(json.dumps(page["codes"])) <= 2000
+        seen += page["codes"]
+        offset = page["next_offset"]
+    assert [c["code"] for c in seen] == [f"C{i}" for i in range(500)] and page["n_codes"] == 500
+
+
+async def test_tool_fetches_each_document_once_while_paging(client, mock_api):
+    route = mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=EML))
+    for offset in (0, 1000):
+        await client.call_tool(
+            "get_metadata_document", {"pid": PID, "section": "raw", "offset": offset, "max_chars": 1000}
+        )
+    await client.call_tool("get_metadata_document", {"pid": PID, "section": "entities"})
+    assert route.call_count == 1
+
+
+def fetcher(log, text):
+    async def fetch():
+        log.append(text)
+        await asyncio.sleep(0)
+        return text
+
+    return fetch
+
+
+async def test_document_cache_is_bounded_by_size():
+    cache, fetched = eml.DocumentCache(max_chars=10, ttl=60), []
+    for pid in ("aaaa", "bbbb", "aaaa", "cccc", "bbbb"):
+        await cache.get(pid, fetcher(fetched, pid))
+    assert fetched == ["aaaa", "bbbb", "cccc", "bbbb"]  # "bbbb" was evicted to make room for "cccc"
+    assert cache.cached_chars <= 10
+    big = "x" * 11
+    await cache.get(big, fetcher(fetched, big))
+    await cache.get(big, fetcher(fetched, big))
+    assert fetched.count(big) == 2 and big not in cache._entries  # larger than the budget: never cached
+    cache.ttl = 0
+    await cache.get("cccc", fetcher(fetched, "cccc"))
+    assert fetched[-1] == "cccc"
+
+
+async def test_document_cache_shares_one_download_and_one_parse():
+    cache, fetched = eml.DocumentCache(), []
+    docs = await asyncio.gather(*(cache.get(PID, fetcher(fetched, EML)) for _ in range(3)))
+    assert fetched == [EML] and docs[0] is docs[1] is docs[2]
+    calls = []
+    real_parse = eml.parse
+
+    def counting_parse(text):
+        calls.append(1)
+        return real_parse(text)
+
+    eml.parse = counting_parse
+    try:
+        results = await asyncio.gather(*(docs[0].parsed() for _ in range(3)))
+    finally:
+        eml.parse = real_parse
+    assert len(calls) == 1 and results[0] is results[1] is results[2] and results[0][0] == "eml"
+
+
+async def test_document_cache_failed_fetch_is_not_cached():
+    cache, attempts = eml.DocumentCache(), []
+
+    async def failing():
+        attempts.append(1)
+        raise ToolError("down")
+
+    for _ in range(2):
+        with pytest.raises(ToolError, match="down"):
+            await cache.get(PID, failing)
+    assert len(attempts) == 2
+
+
+def test_values_beyond_attributes_are_copied_whole():
+    d = load("""<eml:eml xmlns:eml="https://eml.ecoinformatics.org/eml-2.2.0"><dataset><title>T</title>
+      <creator><individualName><surName>Doe</surName></individualName><phone phonetype="voice">555-0100</phone>
+        <userId directory="https://orcid.org">0000-0001</userId></creator>
+      <keywordSet><keyword keywordType="place">Utqiagvik</keyword><keywordThesaurus>GCMD</keywordThesaurus></keywordSet>
+      <distribution><online><url function="information">https://example.org/project</url></online></distribution>
+      <project><title>P</title><personnel><individualName><surName>Roe</surName></individualName><phone>555-0101</phone>
+        <role>PI</role></personnel></project>
+      <otherEntity id="e1"><entityName>a.zip</entityName>
+        <physical><objectName>a_v2.zip</objectName><size unit="bytes">42</size>
+          <authentication method="MD5">abc123</authentication>
+          <distribution><online><url function="download">https://example.org/a.zip</url></online></distribution></physical>
+        <entityType>application/zip</entityType></otherEntity>
+      <dataTable><entityName>t</entityName><attributeList><attribute><attributeName>x</attributeName>
+        <measurementScale><ratio><unit><customUnit>dBZ</customUnit></unit></ratio></measurementScale></attribute></attributeList></dataTable>
+      </dataset><additionalMetadata><metadata><unitList>
+        <unit id="dBZ" name="dBZ" abbreviation="dBZ" unitType="dimensionless"/></unitList></metadata></additionalMetadata></eml:eml>""")
+    people = d.people()["creators"][0]
+    assert people["phone"] == {"phonetype": "voice", "#text": "555-0100"}
+    assert people["userId"] == {"directory": "https://orcid.org", "#text": "0000-0001"}
+    assert d.project()[0]["personnel"]["phone"] == "555-0101"
+    o = d.outline()
+    assert o["keyword_sets"] == [
+        {"keyword": {"keywordType": "place", "#text": "Utqiagvik"}, "keywordThesaurus": "GCMD"}
+    ]
+    assert o["distribution"] == [
+        {"online": {"url": {"function": "information", "#text": "https://example.org/project"}}}
+    ]
+    ent = d.entities[0]
+    assert ent["entityType"] == "application/zip" and ent["id"] == "e1"
+    assert ent["physical"]["size"] == {"unit": "bytes", "#text": "42"}
+    assert ent["physical"]["authentication"] == {"method": "MD5", "#text": "abc123"}
+    assert ent["physical"]["distribution"]["online"]["url"]["function"] == "download"
+    assert d.find_schema(None, "t") == "S1" and eml.entity_file(ent) == "a_v2.zip"
+    assert "attributeList" not in d.entities[1]
+    [attr] = d.schemas["S1"]
+    assert attr["measurementScale"]["ratio"]["unit"]["customUnit"]["unit_definition"]["abbreviation"] == "dBZ"
+
+
+FIELD_LIST = """<queryEngineDescription><name>solr</name>
+  <queryField><name>id</name><returnable>true</returnable></queryField>
+  <queryField><name>title</name><returnable>true</returnable></queryField>
+  <queryField><name>licenseName</name><returnable>true</returnable></queryField>
+  <queryField><name>attributeName</name><returnable>true</returnable></queryField>
+  <queryField><name>text</name><returnable>true</returnable></queryField>
+  <queryField><name>documents</name><returnable>true</returnable></queryField>
+  <queryField><name>_version_</name><returnable>true</returnable></queryField>
+  <queryField><name>hidden</name><returnable>false</returnable></queryField>
+</queryEngineDescription>"""
+FULL_DOC = {
+    "id": PID,
+    "title": "T",
+    "attribute": ["a"],
+    "attributeName": ["a"],
+    "text": "t",
+    "documents": ["d"],
+    "_version_": 1,
+}
+
+
+async def test_dataset_details_uses_index_field_list(client, mock_api):
+    fields = mock_api.get(f"{MN}/query/solr").mock(return_value=httpx.Response(200, text=FIELD_LIST))
+    route = mock_api.get(f"{MN}/query/solr/").mock(
+        return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [{"id": PID}]}})
+    )
     await client.call_tool("get_dataset_details", {"pid": PID})
-    fl = route.calls.last.request.url.params["fl"].split(",")
-    assert "abstract" in fl and "attribute" not in fl and "attributeName" not in fl
+    await client.call_tool("get_dataset_details", {"pid": PID})
+    assert route.calls.last.request.url.params["fl"] == "id,title,licenseName"
+    assert fields.call_count == 1  # cached
     await client.call_tool("get_dataset_details", {"pid": PID, "fields": "*"})
     assert route.calls.last.request.url.params["fl"] == "*"
+
+
+async def test_dataset_details_falls_back_when_field_list_fails(client, mock_api):
+    mock_api.get(f"{MN}/query/solr").mock(return_value=httpx.Response(500, text="boom"))
+    route = mock_api.get(f"{MN}/query/solr/").mock(
+        return_value=httpx.Response(200, json={"response": {"numFound": 1, "docs": [FULL_DOC]}})
+    )
+    r = (await client.call_tool("get_dataset_details", {"pid": PID})).structured_content
+    assert route.calls.last.request.url.params["fl"] == "*"
+    assert {k for k in r if k != "landing_url"} == {"id", "title"}

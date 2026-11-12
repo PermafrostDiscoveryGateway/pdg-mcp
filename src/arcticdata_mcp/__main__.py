@@ -15,7 +15,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--transport", choices=["http", "stdio"], default=None)
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
-    parser.add_argument("--insecure", action="store_true", help="Allow HTTP transport without authentication (NOT recommended)")
+    parser.add_argument(
+        "--insecure", action="store_true", help="Allow HTTP transport without authentication (NOT recommended)"
+    )
     args = parser.parse_args(argv)
 
     config_path = args.config

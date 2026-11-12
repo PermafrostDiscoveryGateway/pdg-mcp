@@ -100,6 +100,15 @@ class PortalSettings:
 
 
 @dataclass
+class MetadataSettings:
+    # get_metadata_document keeps recent documents so paging through one does not refetch and reparse it.
+    # The budget is the total length of the cached XML texts; a parsed EML document takes roughly 5-6x its text
+    # size in memory, so keep this well under the pod's memory limit. 0 disables the cache.
+    cache_max_chars: int = 20_000_000
+    cache_ttl: float = 600.0  # seconds to keep a cached document
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
@@ -110,6 +119,7 @@ class Settings:
     compare: CompareSettings = field(default_factory=CompareSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
+    metadata: MetadataSettings = field(default_factory=MetadataSettings)
 
 
 def _coerce(value: str, target: type) -> Any:

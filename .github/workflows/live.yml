@@ -1,10 +1,16 @@
 name: live
-# Runs the tests marked `live`, which call the real arcticdata.io API. Manual only (Actions tab > live > Run workflow),
-# so we don't add load to ADC.
+# Runs the tests marked `live`, which call the real arcticdata.io API. They include the drift checks that compare
+# what this repo hard-codes with its upstream sources, such as Solr field names with the ADC index (#28, epic #38).
+# Weekly rather than nightly, so we add little load to ADC; it can also be run by hand (Actions tab > live > Run
+# workflow). Scheduled runs only happen on the default branch, use UTC, and are disabled by GitHub after 60 days
+# without repository activity (re-enable from the Actions tab).
 on:
+  schedule:
+    - cron: "17 14 * * 1" # Mondays 14:17 UTC; off the hour to avoid scheduling delays
   workflow_dispatch:
 permissions:
   contents: read
+  issues: write
 jobs:
   live:
     runs-on: ubuntu-latest
@@ -18,3 +24,19 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run pytest -m live
+      # A failed scheduled run opens an issue, or comments on the one already open, so the team sees it.
+      - if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: Scheduled live checks failed
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="The scheduled live tests failed on $(date -u +%F): $RUN_URL
+
+          The failing test names the field, element or term that no longer matches its upstream source."
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$body"
+          fi

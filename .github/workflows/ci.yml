@@ -17,7 +17,7 @@ jobs:
           enable-cache: true
       # --locked fails if uv.lock is out of date with pyproject.toml (--frozen would silently use the stale lock).
       - run: uv sync --locked
-      # Live tests (-m live) are deselected by pyproject.toml; run them by hand via live.yml instead.
+      # Live tests (-m live) are deselected by pyproject.toml; live.yml runs them weekly and on demand.
       - run: uv run pytest
   # Config is in ruff.toml; the ruff version is pinned by uv.lock (and by rev in .pre-commit-config.yaml).
   lint:

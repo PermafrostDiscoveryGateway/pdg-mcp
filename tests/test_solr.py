@@ -51,19 +51,34 @@ def test_bbox_validates():
         solr.bbox_clause(60, 70, 0, 0)
 
 
-INDEX = solr.index_fields({"queryField": [
-    {"name": "id", "type": "string", "searchable": "true", "returnable": "true", "sortable": "true"},
-    {"name": "title", "description": " The title ", "searchable": "true", "returnable": "true", "sortable": "false"},
-    {"name": "licenseUrl", "searchable": "false", "returnable": "true", "sortable": "true"},
-    {"name": "text", "searchable": "true", "returnable": "false", "sortable": "false"},
-    {"name": "pubDate", "type": "date_range", "searchable": "true", "returnable": "true", "sortable": "true"},
-]})
+INDEX = solr.index_fields(
+    {
+        "queryField": [
+            {"name": "id", "type": "string", "searchable": "true", "returnable": "true", "sortable": "true"},
+            {
+                "name": "title",
+                "description": " The title ",
+                "searchable": "true",
+                "returnable": "true",
+                "sortable": "false",
+            },
+            {"name": "licenseUrl", "searchable": "false", "returnable": "true", "sortable": "true"},
+            {"name": "text", "searchable": "true", "returnable": "false", "sortable": "false"},
+            {"name": "pubDate", "type": "date_range", "searchable": "true", "returnable": "true", "sortable": "true"},
+        ]
+    }
+)
 
 
 def test_index_fields_parses_flags():
     assert INDEX["title"] == {
-        "name": "title", "type": None, "description": "The title",
-        "searchable": True, "returnable": True, "sortable": False, "multivalued": False,
+        "name": "title",
+        "type": None,
+        "description": "The title",
+        "searchable": True,
+        "returnable": True,
+        "sortable": False,
+        "multivalued": False,
     }
     # xmltodict gives a single dict, not a list, when the description has one field
     assert list(solr.index_fields({"queryField": {"name": "id", "returnable": "true"}})) == ["id"]
@@ -76,7 +91,9 @@ def test_check_fields_passes_when_every_field_has_its_flag():
 
 
 def test_check_fields_names_each_problem_field():
-    use = solr.FieldUse(returned={"id", "text", "gone"}, searched={"licenseUrl", "renamed"}, sorted_by={"pubDate", "title"})
+    use = solr.FieldUse(
+        returned={"id", "text", "gone"}, searched={"licenseUrl", "renamed"}, sorted_by={"pubDate", "title"}
+    )
     assert solr.check_fields(INDEX, use) == [
         "gone: not in the index (we need it returnable)",
         "text: in the index but not returnable",

@@ -182,13 +182,19 @@ They modify the repository or need a DataONE admin token.
 
 ```bash
 uv run pytest            # unit and mocked tests
-uv run pytest -m live    # smoke tests against arcticdata.io
+uv run pytest -m live    # smoke tests and drift checks against arcticdata.io
 uv run ruff check .      # lint
 uv run ruff format .     # format
 ```
 
 CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the optional
 pre-commit hook.
+
+The Solr field names this server uses are kept in constants (`solr.py` and the top of each `tools/` module) and
+collected by `tools.fields_in_use()`. `solr.check_fields` compares them with the index's own field list
+(`GET /query/solr`): the live tests fail, and the server logs a warning at startup, if a field has been renamed,
+removed or is no longer returnable, searchable or sortable. The `live` workflow runs the live tests every Monday
+and opens an issue when they fail. When you add a field name to a query, add it to that module's constants too.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`

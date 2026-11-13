@@ -39,6 +39,12 @@ SEARCH_FIELDS = [
     "awardNumber",
     "collectionQuery",
 ]
+# Fields written directly into query strings in this module, and the fields and sort of the dataset lookup
+# in find_portals_for_dataset. solr.check_fields compares all of these with the index (see tools.fields_in_use).
+QUERY_FIELDS = ["formatId", "obsoletedBy", "id", "seriesId"]
+DATASET_LOOKUP_FIELDS = ["id", "title", "obsoletedBy"]
+DATASET_LOOKUP_SORT = "dateUploaded desc"
+SORTS = [DATASET_LOOKUP_SORT]
 # Collection queries per facet request, by total length, to keep the GET URL well under server limits.
 FACET_BATCH_CHARS = 4000
 DESCRIPTION_CHARS = 300
@@ -352,8 +358,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 raise ToolError("Give all four of north, south, east and west, or none of them.")
             q.append(solr.bbox_clause(north, south, east, west))  # type: ignore[arg-type]
         if start_date or end_date:
-            q.append(f"beginDate:[* TO {solr.solr_date(end_date, end_of_period=True)}]")
-            q.append(f"endDate:[{solr.solr_date(start_date)} TO *]")
+            q += solr.coverage_clauses(start_date, end_date)
         res = await solr.search(client, q, rows=rows, start=start, sort=sort, extra_fq=[p["collectionQuery"]])
         return {"portal": {"label": p.get("label"), "title": p.get("title"), "portal_url": portal_url(p)}, **res}
 
@@ -370,9 +375,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         data = await client.solr(
             [
                 ("q", q),
-                ("fl", "id,title,obsoletedBy"),
+                ("fl", ",".join(DATASET_LOOKUP_FIELDS)),
                 ("rows", 1),
-                ("sort", "dateUploaded desc"),
+                ("sort", DATASET_LOOKUP_SORT),
             ]
         )
         docs = data.get("response", {}).get("docs", [])

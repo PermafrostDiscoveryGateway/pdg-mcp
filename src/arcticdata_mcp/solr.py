@@ -60,8 +60,14 @@ SORT_OPTIONS = {
 
 # Index fields that the helpers in this module write into q and fq (bbox_clause, coverage_clauses, search).
 QUERY_FIELDS = [
-    "northBoundCoord", "southBoundCoord", "eastBoundCoord", "westBoundCoord",
-    "beginDate", "endDate", "formatType", "obsoletedBy",
+    "northBoundCoord",
+    "southBoundCoord",
+    "eastBoundCoord",
+    "westBoundCoord",
+    "beginDate",
+    "endDate",
+    "formatType",
+    "obsoletedBy",
 ]
 FIELD_FLAGS = ("searchable", "returnable", "sortable", "multivalued")
 # Field types Solr refuses to sort on ("Sorting not supported on SpatialField"), though the index lists them as sortable.

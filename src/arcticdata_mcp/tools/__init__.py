@@ -14,13 +14,21 @@ def fields_in_use() -> solr.FieldUse:
 
     return solr.FieldUse(
         returned={
-            *solr.METADATA_FIELDS, *solr.DATA_FIELDS, *search.EXTRA_RETURN_FIELDS,
-            *datasets.PACKAGE_LOOKUP_FIELDS, *datasets.CITATION_FIELDS, *datasets.VERSION_FIELDS,
-            *portals.PORTAL_FIELDS, *portals.DATASET_LOOKUP_FIELDS,
+            *solr.METADATA_FIELDS,
+            *solr.DATA_FIELDS,
+            *search.EXTRA_RETURN_FIELDS,
+            *datasets.PACKAGE_LOOKUP_FIELDS,
+            *datasets.CITATION_FIELDS,
+            *datasets.VERSION_FIELDS,
+            *portals.PORTAL_FIELDS,
+            *portals.DATASET_LOOKUP_FIELDS,
         },
         searched={
-            *solr.QUERY_FIELDS, *search.QUERY_FIELDS, *datasets.QUERY_FIELDS,
-            *portals.QUERY_FIELDS, *portals.SEARCH_FIELDS,
+            *solr.QUERY_FIELDS,
+            *search.QUERY_FIELDS,
+            *datasets.QUERY_FIELDS,
+            *portals.QUERY_FIELDS,
+            *portals.SEARCH_FIELDS,
         },
         sorted_by=solr.sort_fields([*solr.SORT_OPTIONS.values(), *datasets.SORTS, *portals.SORTS]),
     )

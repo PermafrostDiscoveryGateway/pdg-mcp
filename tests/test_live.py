@@ -100,17 +100,21 @@ SORTS = ["relevance", "newest", "oldest", "published_newest", "title", "size_des
 
 @pytest.mark.parametrize(("tool", "args"), QUERY_TOOL_CALLS, ids=[t for t, _ in QUERY_TOOL_CALLS])
 async def test_query_tools_run(live, tool, args):
-    schemas = {t.name: t.inputSchema for t in await live.list_tools()}
+    schemas = {t.name: t.input_schema for t in await live.list_tools()}
     if "rows" in schemas[tool]["properties"]:
         args = {**args, "rows": 1}
     await live.call_tool(tool, args)  # raises if the tool returns an error
 
 
-@pytest.mark.parametrize("sort", [
-    pytest.param(s, marks=pytest.mark.xfail(strict=True, reason="index cannot sort on datePublished"))
-    if s in KNOWN_BROKEN_SORTS else s
-    for s in SORTS
-])
+@pytest.mark.parametrize(
+    "sort",
+    [
+        pytest.param(s, marks=pytest.mark.xfail(strict=True, reason="index cannot sort on datePublished"))
+        if s in KNOWN_BROKEN_SORTS
+        else s
+        for s in SORTS
+    ],
+)
 async def test_sort_options_run(live, sort):
     assert set(SORTS) == set(solr.SORT_OPTIONS)
     await live.call_tool("search_datasets", {"query": "permafrost", "rows": 1, "sort": sort})

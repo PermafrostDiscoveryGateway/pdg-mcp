@@ -13,6 +13,7 @@ import arcticdata_mcp
 from arcticdata_mcp import solr
 from arcticdata_mcp.server import create_server
 from arcticdata_mcp.tools import fields_in_use
+
 MN = "https://arcticdata.io/metacat/d1/mn/v2"
 
 SRC = Path(arcticdata_mcp.__file__).parent
@@ -61,7 +62,9 @@ def test_field_names_written_into_queries_are_listed(path):
     """Catches a field added to a query string but not to a QUERY_FIELDS list, which the check would then miss."""
     found = set(INLINE_FIELD.findall((SRC / path).read_text()))
     assert found, f"no query fields found in {path}; has the pattern stopped matching?"
-    assert found <= fields_in_use().searched, f"add to QUERY_FIELDS in {path}: {sorted(found - fields_in_use().searched)}"
+    assert found <= fields_in_use().searched, (
+        f"add to QUERY_FIELDS in {path}: {sorted(found - fields_in_use().searched)}"
+    )
 
 
 async def test_startup_check_warns_about_a_renamed_field(settings, mock_api, caplog):
@@ -69,7 +72,7 @@ async def test_startup_check_warns_about_a_renamed_field(settings, mock_api, cap
     index["keywordsTextV2"] = {**index.pop("keywordsText"), "name": "keywordsTextV2"}
     route = mock_api.get(f"{MN}/query/solr").mock(return_value=httpx.Response(200, text=field_list_xml(index)))
     with caplog.at_level(logging.WARNING, logger="arcticdata_mcp.server"):
-        async with Client(create_server(settings, require_auth=False, check_index_fields=True)) as c:
+        async with Client(create_server(settings, require_auth=False, check_index_fields=True)):
             for _ in range(100):
                 if route.called and caplog.records:
                     break

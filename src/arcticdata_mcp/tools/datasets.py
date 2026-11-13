@@ -6,18 +6,17 @@ import asyncio
 import logging
 import re
 import time
-
-import defusedxml.ElementTree as ET
 from html.parser import HTMLParser
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
+import defusedxml.ElementTree as ET
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from arcticdata_mcp import downloads, eml, solr
-from arcticdata_mcp.client import quote_pid
+from arcticdata_mcp.client import as_list, quote_pid
 from arcticdata_mcp.tools.common import READ_ONLY, Pid, Rows, Start, ToolContext
 
 NS = {
@@ -43,15 +42,6 @@ DETAIL_EXCLUDED = {
 }
 FIELD_LIST_TTL = 3600.0
 
-# Index fields named in this module, compared with the index by solr.check_fields (see tools.fields_in_use).
-PACKAGE_LOOKUP_FIELDS = ["id", "formatType", "resourceMap"]
-CITATION_FIELDS = ["id", "seriesId", "title", "origin", "pubDate", "datePublished", "dateUploaded"]
-VERSION_FIELDS = ["id", "seriesId", "obsoletes", "obsoletedBy", "dateUploaded", "title", "formatType"]
-# Fields written directly into query strings (size is also the stats field for package totals).
-QUERY_FIELDS = ["id", "seriesId", "resourceMap", "isDocumentedBy", "fileName", "size"]
-VERSION_SORT = "dateUploaded asc"
-SORTS = [VERSION_SORT]
-
 
 def is_detail_field(name: str) -> bool:
     return name not in DETAIL_EXCLUDED and not name.startswith(DETAIL_EXCLUDED_PREFIXES)
@@ -72,7 +62,11 @@ class IndexFields:
             if self._names is None or time.monotonic() - self._fetched >= self.ttl:
                 try:
                     desc = await self.client.get_xml(self.client.mn("query/solr"))
-                    names = [name for name, f in solr.index_fields(desc).items() if f["returnable"]]
+                    names = [
+                        f["name"]
+                        for f in as_list(desc.get("queryField"))
+                        if f.get("returnable") == "true" and f.get("name")
+                    ]
                 except Exception as exc:  # noqa: BLE001 - fall back to fl=* rather than fail the tool
                     log.warning("Could not read the Solr field list: %s", exc)
                     return None
@@ -141,7 +135,13 @@ def parse_resource_map(xml_text: str) -> dict[str, Any]:
             elif tag == f"{{{NS['cito']}}}documents" and obj:
                 documents.setdefault(_pid_from_uri(subj), []).append(_pid_from_uri(obj))
             elif tag.startswith(f"{{{NS['prov']}}}") and obj:
-                prov.append({"subject": _pid_from_uri(subj), "predicate": "prov:" + tag.split("}")[1], "object": _pid_from_uri(obj)})
+                prov.append(
+                    {
+                        "subject": _pid_from_uri(subj),
+                        "predicate": "prov:" + tag.split("}")[1],
+                        "object": _pid_from_uri(obj),
+                    }
+                )
     metadata = sorted(documents)
     return {
         "aggregation": aggregation,
@@ -166,7 +166,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         return docs[0]
 
     async def resource_map_pid(pid: str) -> str:
-        doc = await solr_doc(pid, ",".join(PACKAGE_LOOKUP_FIELDS))
+        doc = await solr_doc(pid, "id,formatType,resourceMap")
         if doc.get("formatType") == "RESOURCE":
             return doc["id"]
         maps = doc.get("resourceMap") or []
@@ -179,7 +179,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pid: Pid,
         fields: Annotated[
             str | None,
-            Field(description="Comma-separated Solr fields to return. Default: every field except per-attribute ones, 'text' and 'documents'; '*' for every indexed field."),
+            Field(
+                description="Comma-separated Solr fields to return. Default: every field except per-attribute ones, 'text' and 'documents'; '*' for every indexed field."
+            ),
         ] = None,
     ) -> dict[str, Any]:
         """Return the indexed metadata record for a dataset (title, abstract, authors, coverage, funding,
@@ -202,14 +204,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI) or resource-map PID of the dataset.")],
         rows: Rows = 100,
         start: Start = 0,
-        file_name: Annotated[str | None, Field(description="Optional file-name filter (wildcards allowed, e.g. '*.csv').")] = None,
+        file_name: Annotated[
+            str | None, Field(description="Optional file-name filter (wildcards allowed, e.g. '*.csv').")
+        ] = None,
     ) -> dict[str, Any]:
         """List the data files in a dataset package: file name, size, format, checksum and direct download URL.
 
         Use download_file / preview_file with a returned id to retrieve content.
         Example: list_dataset_files(pid="doi:10.18739/A29K4B", file_name="*.csv")
         """
-        doc = await solr_doc(pid, ",".join(PACKAGE_LOOKUP_FIELDS))
+        doc = await solr_doc(pid, "id,formatType,resourceMap")
         if doc.get("formatType") == "RESOURCE":
             clause = f"resourceMap:{solr.phrase(pid)}"
         else:
@@ -231,11 +235,29 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             Literal[*eml.SECTIONS],  # type: ignore[valid-type]
             Field(description="'outline' (default) = compact overview; or one section; 'raw' = the XML itself."),
         ] = "outline",
-        schema_id: Annotated[str | None, Field(description="section='attributes': schema to describe, from the outline's entity_groups.")] = None,
-        entity: Annotated[str | None, Field(description="section='attributes' or 'codes': entity name, file name, id or index instead of schema_id.")] = None,
-        attribute: Annotated[str | None, Field(description="section='codes': attribute name or index whose enumerated codes to page.")] = None,
-        offset: Annotated[int, Field(ge=0, description="Where to resume: pass the previous response's next_offset.")] = 0,
-        max_chars: Annotated[int, Field(ge=1000, le=2_000_000, description="Approximate size limit per response for raw, free-text sections, entities, attributes and codes.")] = 50_000,
+        schema_id: Annotated[
+            str | None, Field(description="section='attributes': schema to describe, from the outline's entity_groups.")
+        ] = None,
+        entity: Annotated[
+            str | None,
+            Field(
+                description="section='attributes' or 'codes': entity name, file name, id or index instead of schema_id."
+            ),
+        ] = None,
+        attribute: Annotated[
+            str | None, Field(description="section='codes': attribute name or index whose enumerated codes to page.")
+        ] = None,
+        offset: Annotated[
+            int, Field(ge=0, description="Where to resume: pass the previous response's next_offset.")
+        ] = 0,
+        max_chars: Annotated[
+            int,
+            Field(
+                ge=1000,
+                le=2_000_000,
+                description="Approximate size limit per response for raw, free-text sections, entities, attributes and codes.",
+            ),
+        ] = 50_000,
     ) -> dict[str, Any]:
         """Read a dataset's science-metadata document (EML, sometimes ISO 19115) in navigable pieces.
 
@@ -257,7 +279,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         out: dict[str, Any] = {"pid": pid, "section": section, "document_chars": len(text)}
         kind, doc = await cached.parsed() if section != "raw" else ("", None)
         if doc is None and section not in ("raw", "outline"):
-            raise ToolError(f"Sections are only available for EML datasets; this document is <{kind}>. Use section='raw'.")
+            raise ToolError(
+                f"Sections are only available for EML datasets; this document is <{kind}>. Use section='raw'."
+            )
         if doc is None:
             if section == "outline":
                 out["format"] = kind
@@ -289,31 +313,43 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             attrs = [eml.fit_codes(a, max_chars) for a in doc.schemas[sid]]
             page, nxt = eml.page_items(attrs, offset, max_chars)
             if any("codeDefinition_omitted" in a for a in page):
-                out["note"] = "Some code lists were cut to fit max_chars; page them with section='codes' and attribute=<name>."
-            out.update({
-                "schema_id": sid,
-                "n_entities": len(used_by),
-                "example_entities": [eml.entity_name(e) for e in used_by[:eml.EXAMPLE_ENTITIES]],
-                "n_attributes": len(attrs),
-                "offset": offset,
-                "next_offset": nxt,
-                "attributes": page,
-            })
+                out["note"] = (
+                    "Some code lists were cut to fit max_chars; page them with section='codes' and attribute=<name>."
+                )
+            out.update(
+                {
+                    "schema_id": sid,
+                    "n_entities": len(used_by),
+                    "example_entities": [eml.entity_name(e) for e in used_by[: eml.EXAMPLE_ENTITIES]],
+                    "n_attributes": len(attrs),
+                    "offset": offset,
+                    "next_offset": nxt,
+                    "attributes": page,
+                }
+            )
         elif section == "codes":
             sid = doc.find_schema(schema_id, entity)
             attr = doc.find_attribute(sid, attribute)
             codes = eml.attribute_codes(attr)
             page, nxt = eml.page_items(codes, offset, max_chars)
-            out.update({
-                "schema_id": sid, "attribute": eml.attribute_name(attr), "n_codes": len(codes),
-                "offset": offset, "next_offset": nxt, "codes": page,
-            })
+            out.update(
+                {
+                    "schema_id": sid,
+                    "attribute": eml.attribute_name(attr),
+                    "n_codes": len(codes),
+                    "offset": offset,
+                    "next_offset": nxt,
+                    "codes": page,
+                }
+            )
         return out
 
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "metadata"})
     async def get_metadata_html(
         pid: Annotated[str, Field(description="Metadata PID (e.g. DOI).")],
-        max_chars: Annotated[int, Field(ge=1000, le=500_000, description="Truncate after this many characters.")] = 50_000,
+        max_chars: Annotated[
+            int, Field(ge=1000, le=500_000, description="Truncate after this many characters.")
+        ] = 50_000,
     ) -> dict[str, Any]:
         """Render a dataset's metadata through the MNView 'metacatui' view (GET /views/metacatui/{pid}),
         returned as readable plain text. A human-friendly alternative to the raw XML.
@@ -322,7 +358,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         parser = _TextExtractor()
         parser.feed(html)
         text = parser.text()
-        return {"pid": pid, "truncated": len(text) > max_chars, "text": text[:max_chars], "landing_url": client.landing_url(pid)}
+        return {
+            "pid": pid,
+            "truncated": len(text) > max_chars,
+            "text": text[:max_chars],
+            "landing_url": client.landing_url(pid),
+        }
 
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "package"})
     async def get_resource_map(
@@ -343,7 +384,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"dataset", "package", "download"})
     async def get_package_download_info(
         pid: Annotated[str, Field(description="Resource map PID, or the dataset's metadata PID.")],
-        save_to_server: Annotated[bool, Field(description="Stream the zip to the server's download directory (only if enabled in config).")] = False,
+        save_to_server: Annotated[
+            bool, Field(description="Stream the zip to the server's download directory (only if enabled in config).")
+        ] = False,
     ) -> dict[str, Any]:
         """Get the URL to download an entire dataset package as a BagIt zip (MNPackage GET /packages),
         plus the estimated total size. Optionally save the zip on the MCP server host.
@@ -351,10 +394,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Packages can be very large; check the size before downloading.
         """
         rm = await resource_map_pid(pid)
-        data = await client.solr([
-            ("q", f"resourceMap:{solr.phrase(rm)}"), ("fl", "size"), ("rows", 0),
-            ("stats", "true"), ("stats.field", "size"),
-        ])
+        data = await client.solr(
+            [
+                ("q", f"resourceMap:{solr.phrase(rm)}"),
+                ("fl", "size"),
+                ("rows", 0),
+                ("stats", "true"),
+                ("stats.field", "size"),
+            ]
+        )
         stats = data.get("stats", {}).get("stats_fields", {}).get("size") or {}
         url = client.mn(f"packages/{BAGIT_FORMAT}/{quote_pid(rm)}")
         info: dict[str, Any] = {
@@ -376,7 +424,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         style: Annotated[Literal["text", "bibtex"], Field(description="Citation format.")] = "text",
     ) -> dict[str, Any]:
         """Build a citation for a dataset from its indexed metadata (authors, year, title, repository, DOI)."""
-        doc = await solr_doc(pid, ",".join(CITATION_FIELDS))
+        doc = await solr_doc(pid, "id,seriesId,title,origin,pubDate,datePublished,dateUploaded")
         authors: list[str] = doc.get("origin") or []
         date = doc.get("datePublished") or doc.get("pubDate") or doc.get("dateUploaded") or ""
         year = date[:4] or "n.d."
@@ -411,11 +459,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Return the full version chain of an object (following obsoletes/obsoletedBy), oldest first,
         and identify the latest version.
         """
-        fl = ",".join(VERSION_FIELDS)
-        data = await client.solr([
-            ("q", f"id:{solr.phrase(pid)} OR seriesId:{solr.phrase(pid)}"),
-            ("fl", fl), ("rows", 100), ("sort", VERSION_SORT),
-        ])
+        fl = "id,seriesId,obsoletes,obsoletedBy,dateUploaded,title,formatType"
+        data = await client.solr(
+            [
+                ("q", f"id:{solr.phrase(pid)} OR seriesId:{solr.phrase(pid)}"),
+                ("fl", fl),
+                ("rows", 100),
+                ("sort", "dateUploaded asc"),
+            ]
+        )
         docs = {d["id"]: d for d in data.get("response", {}).get("docs", [])}
         if not docs:
             raise ToolError(f"No public object with id or seriesId '{pid}'")

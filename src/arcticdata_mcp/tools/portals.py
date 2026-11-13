@@ -30,14 +30,15 @@ PORTAL_FORMAT_CLAUSE = "formatId:(" + " OR ".join(solr.phrase(f) for f in PORTAL
 PORTAL_FIELDS = ["id", "seriesId", "label", "title", "abstract", "collectionQuery", "logo", "dateUploaded"]
 # The fields the Arctic Data Center portal list searches (NCEAS/metacatui#2953), so results match the website.
 SEARCH_FIELDS = [
-    "title", "abstract", "label", "investigator", "funderName", "funderIdentifier", "awardNumber", "collectionQuery",
+    "title",
+    "abstract",
+    "label",
+    "investigator",
+    "funderName",
+    "funderIdentifier",
+    "awardNumber",
+    "collectionQuery",
 ]
-# Fields written directly into query strings in this module, and the fields and sort of the dataset lookup
-# in find_portals_for_dataset. solr.check_fields compares all of these with the index (see tools.fields_in_use).
-QUERY_FIELDS = ["formatId", "obsoletedBy", "id", "seriesId"]
-DATASET_LOOKUP_FIELDS = ["id", "title", "obsoletedBy"]
-DATASET_LOOKUP_SORT = "dateUploaded desc"
-SORTS = [DATASET_LOOKUP_SORT]
 # Collection queries per facet request, by total length, to keep the GET URL well under server limits.
 FACET_BATCH_CHARS = 4000
 DESCRIPTION_CHARS = 300
@@ -45,7 +46,9 @@ DEFINITION_VALUES = 50
 
 Lat = Annotated[float | None, Field(ge=-90, le=90)]
 Lon = Annotated[float | None, Field(ge=-180, le=180)]
-PortalKey = Annotated[str, Field(description="Portal label (e.g. 'PerCS-Net', as in the portal URL), series ID or PID.")]
+PortalKey = Annotated[
+    str, Field(description="Portal label (e.g. 'PerCS-Net', as in the portal URL), series ID or PID.")
+]
 
 
 def _batches(portals: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -104,13 +107,17 @@ class PortalIndex:
             return self._portals
 
     async def _load(self) -> list[dict[str, Any]]:
-        data = await self.client.solr([
-            ("q", PORTAL_FORMAT_CLAUSE), ("fq", "-obsoletedBy:*"), ("fl", ",".join(PORTAL_FIELDS)), ("rows", 1000),
-        ])
+        data = await self.client.solr(
+            [
+                ("q", PORTAL_FORMAT_CLAUSE),
+                ("fq", "-obsoletedBy:*"),
+                ("fl", ",".join(PORTAL_FIELDS)),
+                ("rows", 1000),
+            ]
+        )
         excluded = {label.lower() for label in self.settings.exclude_labels}
         portals = [
-            d for d in data.get("response", {}).get("docs", [])
-            if (d.get("label") or "").lower() not in excluded
+            d for d in data.get("response", {}).get("docs", []) if (d.get("label") or "").lower() not in excluded
         ]
         counts = await count_matches(self.client, "*:*", portals)
         for p in portals:
@@ -167,7 +174,9 @@ def _definition(defn: Any) -> list[dict[str, Any]]:
 
 
 def _section(s: dict[str, Any], max_chars: int) -> dict[str, Any]:
-    options = {_text(o.get("optionName")): o.get("optionValue") for o in as_list(s.get("option")) if isinstance(o, dict)}
+    options = {
+        _text(o.get("optionName")): o.get("optionValue") for o in as_list(s.get("option")) if isinstance(o, dict)
+    }
     markdown = _text((s.get("content") or {}).get("markdown")) if isinstance(s.get("content"), dict) else None
     out = {
         "label": _text(s.get("label")),
@@ -218,10 +227,17 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"portals"})
     async def search_portals(
-        query: Annotated[str | None, Field(description="Optional keywords matched against portal title, description, label, investigators, funders, award numbers and collection query. All words must match; quote a phrase to keep it together. Omit to list every portal.")] = None,
+        query: Annotated[
+            str | None,
+            Field(
+                description="Optional keywords matched against portal title, description, label, investigators, funders, award numbers and collection query. All words must match; quote a phrase to keep it together. Omit to list every portal."
+            ),
+        ] = None,
         sort: Annotated[
             Literal["relevance", "title", "datasets"],
-            Field(description="'relevance' (with a query; title otherwise), 'title', or 'datasets' (most datasets first)."),
+            Field(
+                description="'relevance' (with a query; title otherwise), 'title', or 'datasets' (most datasets first)."
+            ),
         ] = "relevance",
         rows: Rows = 20,
         start: Start = 0,
@@ -239,11 +255,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             words = [w for w in words if w.strip()]
             if not words:
                 raise ToolError("query must contain at least one word")
-            data = await client.solr([
-                ("q", " AND ".join(solr.any_field(SEARCH_FIELDS, w) for w in words)),
-                ("fq", PORTAL_FORMAT_CLAUSE), ("fq", "-obsoletedBy:*"),
-                ("fl", "id"), ("rows", 1000), ("sort", "score desc"),
-            ])
+            data = await client.solr(
+                [
+                    ("q", " AND ".join(solr.any_field(SEARCH_FIELDS, w) for w in words)),
+                    ("fq", PORTAL_FORMAT_CLAUSE),
+                    ("fq", "-obsoletedBy:*"),
+                    ("fl", "id"),
+                    ("rows", 1000),
+                    ("sort", "score desc"),
+                ]
+            )
             by_id = {p["id"]: p for p in portals}
             hits = [by_id[d["id"]] for d in data.get("response", {}).get("docs", []) if d["id"] in by_id]
         else:
@@ -252,7 +273,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             hits.sort(key=lambda p: p.get("dataset_count") or 0, reverse=True)
         elif sort == "title" and query:
             hits.sort(key=lambda p: (p.get("title") or p.get("label") or "").lower())
-        page = hits[start:start + rows]
+        page = hits[start : start + rows]
         return {
             "numFound": len(hits),
             "start": start,
@@ -264,7 +285,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"portals"})
     async def get_portal(
         portal: PortalKey,
-        max_section_chars: Annotated[int, Field(ge=0, le=50000, description="Truncate each section's markdown to this many characters.")] = 4000,
+        max_section_chars: Annotated[
+            int, Field(ge=0, le=50000, description="Truncate each section's markdown to this many characters.")
+        ] = 4000,
     ) -> dict[str, Any]:
         """Get a project portal's full description: its content sections (About, Publications, ... as
         markdown), people, funding awards, logo, the rules that pick its datasets, and the resulting
@@ -296,7 +319,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"portals", "search", "spatial"}, app=AppConfig(resource_uri=SEARCH_MAP_URI))
     async def search_portal_datasets(
         portal: PortalKey,
-        text: Annotated[str | None, Field(description="Optional free-text query within the portal. Solr syntax (AND/OR/quotes) is allowed.")] = None,
+        text: Annotated[
+            str | None,
+            Field(description="Optional free-text query within the portal. Solr syntax (AND/OR/quotes) is allowed."),
+        ] = None,
         north: Lat = None,
         south: Lat = None,
         east: Lon = None,
@@ -326,7 +352,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 raise ToolError("Give all four of north, south, east and west, or none of them.")
             q.append(solr.bbox_clause(north, south, east, west))  # type: ignore[arg-type]
         if start_date or end_date:
-            q += solr.coverage_clauses(start_date, end_date)
+            q.append(f"beginDate:[* TO {solr.solr_date(end_date, end_of_period=True)}]")
+            q.append(f"endDate:[{solr.solr_date(start_date)} TO *]")
         res = await solr.search(client, q, rows=rows, start=start, sort=sort, extra_fq=[p["collectionQuery"]])
         return {"portal": {"label": p.get("label"), "title": p.get("title"), "portal_url": portal_url(p)}, **res}
 
@@ -340,9 +367,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """
         ident = solr.phrase(pid.strip())
         q = f"id:{ident} OR seriesId:{ident}"
-        data = await client.solr([
-            ("q", q), ("fl", ",".join(DATASET_LOOKUP_FIELDS)), ("rows", 1), ("sort", DATASET_LOOKUP_SORT),
-        ])
+        data = await client.solr(
+            [
+                ("q", q),
+                ("fl", "id,title,obsoletedBy"),
+                ("rows", 1),
+                ("sort", "dateUploaded desc"),
+            ]
+        )
         docs = data.get("response", {}).get("docs", [])
         if not docs:
             raise ToolError(f"No public object with PID or series ID '{pid}'.")

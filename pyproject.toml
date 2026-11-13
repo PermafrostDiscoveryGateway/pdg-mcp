@@ -3,6 +3,8 @@ name = "arcticdata-mcp"
 version = "0.1.0"
 description = "FastMCP server exposing the Arctic Data Center (DataONE) search and download API"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Luigi Marini", email = "lmarini@illinois.edu" }
 ]
@@ -32,4 +34,10 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "respx>=0.23.1",
+    "ruff==0.17.4",
 ]
+
+[tool.uv]
+# A floor, not a pin: CI still gets the latest uv, but an older uv errors out instead of rewriting uv.lock in an
+# older format. Kept in line with the uv_build requirement above.
+required-version = ">=0.11"

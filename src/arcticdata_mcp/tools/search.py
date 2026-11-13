@@ -10,6 +10,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from arcticdata_mcp import solr
+from arcticdata_mcp.client import as_list
 from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
 from arcticdata_mcp.tools.common import (
     READ_ONLY,
@@ -37,55 +38,6 @@ PROV_FIELDS = {
     "was_informed_by": "prov_wasInformedBy",
 }
 
-# Index fields each search tool queries, by tool option. solr.check_fields compares them with the index
-# (see tools.fields_in_use), so keep field names here rather than inline in the tools.
-AUTHOR_FIELDS = {
-    "any": ["originText", "author", "authorLastName", "investigatorText"],
-    "creator": ["originText", "author"],
-    "last_name": ["authorLastName", "authorSurName"],
-    "investigator": ["investigatorText"],
-}
-KEYWORD_FIELDS = {
-    "any": ["keywordsText", "gcmdKeyword", "topicText"],
-    "author_keywords": ["keywordsText"],
-    "gcmd": ["gcmdKeyword"],
-    "topic": ["topicText"],
-}
-FUNDING_FIELDS = {
-    "any": ["awardNumber", "fundingText", "funderName", "awardTitle"],
-    "award_number": ["awardNumber", "fundingText"],
-    "funder_name": ["funderName"],
-    "award_title": ["awardTitle"],
-}
-VARIABLE_FIELDS = {
-    "any": ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"],
-    "name": ["attributeName"],
-    "label": ["attributeLabel"],
-    "description": ["attributeDescription"],
-    "unit": ["attributeUnit"],
-}
-RIGHTS_FIELDS = {"rights_holder": ["rightsHolder"], "submitter": ["submitter"], "either": ["rightsHolder", "submitter"]}
-TAXON_FIELDS = ("scientificName", "kingdom", "phylum", "class", "order", "family", "genus", "species")
-PUBLICATION_DATE_FIELDS = ("datePublished", "dateUploaded", "dateModified")
-PROJECT_FIELDS = ["projectText", "project"]
-PLACE_FIELDS = ["placeKey", "siteText", "namedLocation"]
-ORGANIZATION_FIELDS = ["contactOrganizationText", "relatedOrganizations"]
-COUNT_KEYWORD_FIELDS = ["keywordsText", "gcmdKeyword"]
-COUNT_AUTHOR_FIELDS = ["originText", "author"]
-# Fields written directly into query strings in this module.
-INLINE_QUERY_FIELDS = [
-    "title", "sem_annotation", "licenseName", "fileName", "formatId", "size", "isDocumentedBy",
-    "id", "seriesId", "identifier", "documents",
-]
-QUERY_FIELDS = {
-    *INLINE_QUERY_FIELDS, *PROV_FIELDS.values(), *TAXON_FIELDS, *PUBLICATION_DATE_FIELDS,
-    *PROJECT_FIELDS, *PLACE_FIELDS, *ORGANIZATION_FIELDS, *COUNT_KEYWORD_FIELDS, *COUNT_AUTHOR_FIELDS,
-    *(f for group in (AUTHOR_FIELDS, KEYWORD_FIELDS, FUNDING_FIELDS, VARIABLE_FIELDS, RIGHTS_FIELDS)
-      for fields in group.values() for f in fields),
-}
-# Returned by search_by_provenance and search_by_format on top of the default summary fields.
-EXTRA_RETURN_FIELDS = ["fileName", "formatType", "size", "title"]
-
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     client = ctx.client
@@ -95,7 +47,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_datasets(
-        query: Annotated[str, Field(description="Free-text query, e.g. 'permafrost thaw methane'. Solr syntax (AND/OR/quotes) is allowed.")],
+        query: Annotated[
+            str,
+            Field(
+                description="Free-text query, e.g. 'permafrost thaw methane'. Solr syntax (AND/OR/quotes) is allowed."
+            ),
+        ],
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "relevance",
@@ -124,10 +81,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_author(
-        name: Annotated[str, Field(description="Creator/author name, e.g. 'Schuur' or 'Edward Schuur'. Wildcards allowed.")],
+        name: Annotated[
+            str, Field(description="Creator/author name, e.g. 'Schuur' or 'Edward Schuur'. Wildcards allowed.")
+        ],
         role: Annotated[
             Literal["any", "creator", "last_name", "investigator"],
-            Field(description="'creator' = dataset origin/authors, 'last_name' = author surname only, 'investigator' = PI/associated party."),
+            Field(
+                description="'creator' = dataset origin/authors, 'last_name' = author surname only, 'investigator' = PI/associated party."
+            ),
         ] = "any",
         rows: Rows = 10,
         start: Start = 0,
@@ -138,7 +99,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_author(name="Romanovsky", role="last_name")
         """
-        return await run(solr.any_field(AUTHOR_FIELDS[role], name), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        fields = {
+            "any": ["originText", "author", "authorLastName", "investigatorText"],
+            "creator": ["originText", "author"],
+            "last_name": ["authorLastName", "authorSurName"],
+            "investigator": ["investigatorText"],
+        }[role]
+        return await run(solr.any_field(fields, name), rows=rows, start=start, sort=sort, latest_only=latest_only)
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_keyword(
@@ -157,7 +124,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Tip: use get_facet_counts(field="keywords") to discover popular keywords.
         Example: search_by_keyword(keyword="active layer")
         """
-        return await run(solr.any_field(KEYWORD_FIELDS[vocabulary], keyword), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        fields = {
+            "any": ["keywordsText", "gcmdKeyword", "topicText"],
+            "author_keywords": ["keywordsText"],
+            "gcmd": ["gcmdKeyword"],
+            "topic": ["topicText"],
+        }[vocabulary]
+        return await run(solr.any_field(fields, keyword), rows=rows, start=start, sort=sort, latest_only=latest_only)
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"}, app=AppConfig(resource_uri=SEARCH_MAP_URI))
     async def search_by_bounding_box(
@@ -167,9 +140,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         west: Lon,
         mode: Annotated[
             Literal["intersects", "within"],
-            Field(description="'intersects' = dataset extent overlaps the box; 'within' = dataset extent lies fully inside it."),
+            Field(
+                description="'intersects' = dataset extent overlaps the box; 'within' = dataset extent lies fully inside it."
+            ),
         ] = "intersects",
-        text: Annotated[str | None, Field(description="Optional free-text filter to combine with the spatial filter.")] = None,
+        text: Annotated[
+            str | None, Field(description="Optional free-text filter to combine with the spatial filter.")
+        ] = None,
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "relevance",
@@ -203,7 +180,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """
         if not start_date and not end_date:
             raise ToolError("Provide at least one of start_date or end_date")
-        q = solr.coverage_clauses(start_date, end_date)
+        q = [
+            f"beginDate:[* TO {solr.solr_date(end_date, end_of_period=True)}]",
+            f"endDate:[{solr.solr_date(start_date)} TO *]",
+        ]
         if text:
             q.append(text)
         return await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only)
@@ -213,7 +193,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         start_date: DateStr = None,
         end_date: DateStr = None,
         date_field: Annotated[
-            Literal[PUBLICATION_DATE_FIELDS],  # type: ignore[valid-type]
+            Literal["datePublished", "dateUploaded", "dateModified"],
             Field(description="Which date to filter on."),
         ] = "dateUploaded",
         text: Annotated[str | None, Field(description="Optional free-text filter.")] = None,
@@ -233,7 +213,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_funding(
-        award: Annotated[str, Field(description="Award number (e.g. '1503559'), funder name (e.g. 'National Science Foundation') or award title text.")],
+        award: Annotated[
+            str,
+            Field(
+                description="Award number (e.g. '1503559'), funder name (e.g. 'National Science Foundation') or award title text."
+            ),
+        ],
         field: Annotated[
             Literal["any", "award_number", "funder_name", "award_title"],
             Field(description="Which funding field to search."),
@@ -247,11 +232,19 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_funding(award="1503559", field="award_number")
         """
-        return await run(solr.any_field(FUNDING_FIELDS[field], award), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        fields = {
+            "any": ["awardNumber", "fundingText", "funderName", "awardTitle"],
+            "award_number": ["awardNumber", "fundingText"],
+            "funder_name": ["funderName"],
+            "award_title": ["awardTitle"],
+        }[field]
+        return await run(solr.any_field(fields, award), rows=rows, start=start, sort=sort, latest_only=latest_only)
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_project(
-        project: Annotated[str, Field(description="Project name, e.g. 'Arctic Observing Network' or 'NGEE Arctic'. Wildcards allowed.")],
+        project: Annotated[
+            str, Field(description="Project name, e.g. 'Arctic Observing Network' or 'NGEE Arctic'. Wildcards allowed.")
+        ],
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "relevance",
@@ -262,11 +255,22 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Tip: get_facet_counts(field="project") lists project names.
         Example: search_by_project(project="Arctic Observing Network")
         """
-        return await run(solr.any_field(PROJECT_FIELDS, project), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        return await run(
+            solr.any_field(["projectText", "project"], project),
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
+        )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_measured_variable(
-        variable: Annotated[str, Field(description="Variable/attribute name, label, description or unit, e.g. 'soil temperature', 'celsius', 'CH4'.")],
+        variable: Annotated[
+            str,
+            Field(
+                description="Variable/attribute name, label, description or unit, e.g. 'soil temperature', 'celsius', 'CH4'."
+            ),
+        ],
         field: Annotated[
             Literal["any", "name", "label", "description", "unit"],
             Field(description="Which attribute field to match."),
@@ -280,13 +284,22 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_measured_variable(variable="snow water equivalent")
         """
-        return await run(solr.any_field(VARIABLE_FIELDS[field], variable), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        fields = {
+            "any": ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"],
+            "name": ["attributeName"],
+            "label": ["attributeLabel"],
+            "description": ["attributeDescription"],
+            "unit": ["attributeUnit"],
+        }[field]
+        return await run(solr.any_field(fields, variable), rows=rows, start=start, sort=sort, latest_only=latest_only)
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_taxon(
-        taxon: Annotated[str, Field(description="Scientific name or taxon, e.g. 'Rangifer tarandus', 'Salix', 'Mammalia'.")],
+        taxon: Annotated[
+            str, Field(description="Scientific name or taxon, e.g. 'Rangifer tarandus', 'Salix', 'Mammalia'.")
+        ],
         rank: Annotated[
-            Literal[("any", *TAXON_FIELDS)],  # type: ignore[valid-type]
+            Literal["any", "scientificName", "kingdom", "phylum", "class", "order", "family", "genus", "species"],
             Field(description="Taxonomic rank to match."),
         ] = "any",
         rows: Rows = 10,
@@ -298,12 +311,21 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_taxon(taxon="Ursus maritimus")
         """
-        fields = list(TAXON_FIELDS) if rank == "any" else [rank]
+        fields = (
+            ["scientificName", "kingdom", "phylum", "class", "order", "family", "genus", "species"]
+            if rank == "any"
+            else [rank]
+        )
         return await run(solr.any_field(fields, taxon), rows=rows, start=start, sort=sort, latest_only=latest_only)
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "semantic"})
     async def search_by_semantic_annotation(
-        concept_uri: Annotated[str, Field(description="Ontology concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001197' (ECSO), or a wildcard.")],
+        concept_uri: Annotated[
+            str,
+            Field(
+                description="Ontology concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001197' (ECSO), or a wildcard."
+            ),
+        ],
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "relevance",
@@ -313,7 +335,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Tip: get_facet_counts(field="sem_annotation") lists concept URIs in use.
         """
-        return await run(f"sem_annotation:{solr.term(concept_uri)}", rows=rows, start=start, sort=sort, latest_only=latest_only)
+        return await run(
+            f"sem_annotation:{solr.term(concept_uri)}", rows=rows, start=start, sort=sort, latest_only=latest_only
+        )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"})
     async def search_by_location_name(
@@ -327,7 +351,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_location_name(place="Toolik Lake")
         """
-        return await run(solr.any_field(PLACE_FIELDS, place), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        return await run(
+            solr.any_field(["placeKey", "siteText", "namedLocation"], place),
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
+        )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_organization(
@@ -341,11 +371,22 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_organization(organization="University of Alaska Fairbanks")
         """
-        return await run(solr.any_field(ORGANIZATION_FIELDS, organization), rows=rows, start=start, sort=sort, latest_only=latest_only)
+        return await run(
+            solr.any_field(["contactOrganizationText", "relatedOrganizations"], organization),
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
+        )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_license(
-        license: Annotated[str, Field(description="License name fragment (case-sensitive), e.g. 'Creative Commons Zero', 'Attribution', or an exact name from get_facet_counts(field='licenseName').")],
+        license: Annotated[
+            str,
+            Field(
+                description="License name fragment (case-sensitive), e.g. 'Creative Commons Zero', 'Attribution', or an exact name from get_facet_counts(field='licenseName')."
+            ),
+        ],
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "relevance",
@@ -358,12 +399,20 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Example: search_by_license(license="Creative Commons Zero")
         """
         value = license if ("*" in license or "?" in license) else f"*{license}*"
-        # licenseUrl is returnable but not searchable in the index, so only the name can be matched.
-        return await run(f"licenseName:{solr.term(value)}", rows=rows, start=start, sort=sort, latest_only=latest_only)
+        return await run(
+            f"licenseName:{solr.term(value)} OR licenseUrl:{solr.term(value)}",
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
+        )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def search_by_rights_holder(
-        subject: Annotated[str, Field(description="DataONE subject, usually an ORCID URL, e.g. 'http://orcid.org/0000-0002-1825-0097'.")],
+        subject: Annotated[
+            str,
+            Field(description="DataONE subject, usually an ORCID URL, e.g. 'http://orcid.org/0000-0002-1825-0097'."),
+        ],
         role: Annotated[
             Literal["rights_holder", "submitter", "either"],
             Field(description="Match the object's owner (rightsHolder), its submitter, or either."),
@@ -381,9 +430,17 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
         Example: search_by_rights_holder(subject="http://orcid.org/0000-0003-1846-5140")
         """
+        fields = {
+            "rights_holder": ["rightsHolder"],
+            "submitter": ["submitter"],
+            "either": ["rightsHolder", "submitter"],
+        }[role]
         return await run(
-            solr.any_field(RIGHTS_FIELDS[role], subject),
-            rows=rows, start=start, sort=sort, latest_only=latest_only,
+            solr.any_field(fields, subject),
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
             format_type=None if format_type == "any" else format_type,
         )
 
@@ -392,7 +449,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pid: Pid,
         relation: Annotated[
             Literal[tuple(PROV_FIELDS)],  # type: ignore[valid-type]
-            Field(description="Provenance relation, read as '<result> <relation> <pid>', e.g. was_derived_from = objects derived from pid."),
+            Field(
+                description="Provenance relation, read as '<result> <relation> <pid>', e.g. was_derived_from = objects derived from pid."
+            ),
         ] = "was_derived_from",
         rows: Rows = 10,
         start: Start = 0,
@@ -403,14 +462,21 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """
         return await run(
             f"{PROV_FIELDS[relation]}:{solr.phrase(pid)}",
-            rows=rows, start=start, format_type=None, latest_only=False,
-            fl=[*solr.METADATA_FIELDS, *(f for f in EXTRA_RETURN_FIELDS if f not in solr.METADATA_FIELDS)],
+            rows=rows,
+            start=start,
+            format_type=None,
+            latest_only=False,
+            fl=[*solr.METADATA_FIELDS, "fileName", "formatType", "size"],
         )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "files"})
     async def search_data_files(
-        file_name: Annotated[str | None, Field(description="File name or wildcard pattern, e.g. '*.nc', 'ODEN-*'.")] = None,
-        format_id: Annotated[str | None, Field(description="DataONE format ID, e.g. 'text/csv', 'netCDF-4', 'image/tiff'.")] = None,
+        file_name: Annotated[
+            str | None, Field(description="File name or wildcard pattern, e.g. '*.nc', 'ODEN-*'.")
+        ] = None,
+        format_id: Annotated[
+            str | None, Field(description="DataONE format ID, e.g. 'text/csv', 'netCDF-4', 'image/tiff'.")
+        ] = None,
         min_size: Annotated[int | None, Field(ge=0, description="Minimum size in bytes.")] = None,
         max_size: Annotated[int | None, Field(ge=0, description="Maximum size in bytes.")] = None,
         documented_by: Annotated[str | None, Field(description="Only files documented by this metadata PID.")] = None,
@@ -429,7 +495,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if format_id:
             q.append(f"formatId:{solr.phrase(format_id)}")
         if min_size is not None or max_size is not None:
-            q.append(f"size:[{min_size if min_size is not None else '*'} TO {max_size if max_size is not None else '*'}]")
+            q.append(
+                f"size:[{min_size if min_size is not None else '*'} TO {max_size if max_size is not None else '*'}]"
+            )
         if documented_by:
             q.append(f"isDocumentedBy:{solr.phrase(documented_by)}")
         if not q:
@@ -438,7 +506,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "files"})
     async def search_by_format(
-        format_id: Annotated[str, Field(description="DataONE format ID, e.g. 'text/csv', 'netCDF-4', 'https://eml.ecoinformatics.org/eml-2.2.0'.")],
+        format_id: Annotated[
+            str,
+            Field(
+                description="DataONE format ID, e.g. 'text/csv', 'netCDF-4', 'https://eml.ecoinformatics.org/eml-2.2.0'."
+            ),
+        ],
         rows: Rows = 10,
         start: Start = 0,
         sort: Sort = "newest",
@@ -449,14 +522,23 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Tip: list_object_formats() shows valid format IDs; get_facet_counts(field="formatId") shows which are used.
         """
         return await run(
-            f"formatId:{solr.phrase(format_id)}", rows=rows, start=start, sort=sort,
-            latest_only=latest_only, format_type=None,
-            fl=[*solr.DATA_FIELDS, *(f for f in EXTRA_RETURN_FIELDS if f not in solr.DATA_FIELDS)],
+            f"formatId:{solr.phrase(format_id)}",
+            rows=rows,
+            start=start,
+            sort=sort,
+            latest_only=latest_only,
+            format_type=None,
+            fl=[*solr.DATA_FIELDS, "title"],
         )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
     async def find_dataset_by_identifier(
-        identifier: Annotated[str, Field(description="A DOI ('doi:10.18739/A2...' or 'https://doi.org/10.18739/...'), PID, series ID, or a data file PID.")],
+        identifier: Annotated[
+            str,
+            Field(
+                description="A DOI ('doi:10.18739/A2...' or 'https://doi.org/10.18739/...'), PID, series ID, or a data file PID."
+            ),
+        ],
     ) -> dict[str, Any]:
         """Resolve an identifier to its dataset(s): matches the PID, series ID, alternate identifiers,
         or—if a data-file PID is given—the dataset(s) that document it.
@@ -466,11 +548,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ident = identifier.strip()
         for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/"):
             if ident.lower().startswith(prefix):
-                ident = "doi:" + ident[len(prefix):]
+                ident = "doi:" + ident[len(prefix) :]
         p = solr.phrase(ident)
         return await run(
             f"id:{p} OR seriesId:{p} OR identifier:{p} OR documents:{p}",
-            rows=20, latest_only=False,
+            rows=20,
+            latest_only=False,
         )
 
     @mcp.tool(annotations=READ_ONLY, tags={"search"})
@@ -494,18 +577,27 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if text:
             q.append(text)
         if keyword:
-            q.append(solr.any_field(COUNT_KEYWORD_FIELDS, keyword))
+            q.append(solr.any_field(["keywordsText", "gcmdKeyword"], keyword))
         if author:
-            q.append(solr.any_field(COUNT_AUTHOR_FIELDS, author))
+            q.append(solr.any_field(["originText", "author"], author))
         if start_date or end_date:
-            q += solr.coverage_clauses(start_date, end_date)
+            q.append(
+                f"beginDate:[* TO {solr.solr_date(end_date, True)}] AND endDate:[{solr.solr_date(start_date)} TO *]"
+            )
         res = await run(q, rows=0, latest_only=latest_only, format_type=None if format_type == "any" else format_type)
         return {"count": res["numFound"], "query": res["query"]}
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "facets"})
     async def get_facet_counts(
-        field: Annotated[str, Field(description="Solr field to facet on, e.g. 'keywords', 'formatId', 'project', 'funding', 'licenseName', 'authorLastName', 'placeKey', 'sem_annotation'.")],
-        query: Annotated[str | None, Field(description="Optional Solr/free-text query restricting the documents counted.")] = None,
+        field: Annotated[
+            str,
+            Field(
+                description="Solr field to facet on, e.g. 'keywords', 'formatId', 'project', 'funding', 'licenseName', 'authorLastName', 'placeKey', 'sem_annotation'."
+            ),
+        ],
+        query: Annotated[
+            str | None, Field(description="Optional Solr/free-text query restricting the documents counted.")
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=500, description="Maximum number of values.")] = 50,
         prefix: Annotated[str | None, Field(description="Only values starting with this prefix.")] = None,
         format_type: Annotated[
@@ -522,8 +614,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if format_type != "any":
             fq.append(f"formatType:{format_type}")
         params: list[tuple[str, Any]] = [
-            ("q", query or "*:*"), ("rows", 0), ("facet", "true"), ("facet.field", field),
-            ("facet.limit", limit), ("facet.mincount", 1), ("facet.sort", "count"),
+            ("q", query or "*:*"),
+            ("rows", 0),
+            ("facet", "true"),
+            ("facet.field", field),
+            ("facet.limit", limit),
+            ("facet.mincount", 1),
+            ("facet.sort", "count"),
         ]
         if prefix:
             params.append(("facet.prefix", prefix))
@@ -535,24 +632,52 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "reference"})
     async def list_search_fields(
-        name_contains: Annotated[str | None, Field(description="Optional case-insensitive filter on field name.")] = None,
+        name_contains: Annotated[
+            str | None, Field(description="Optional case-insensitive filter on field name.")
+        ] = None,
     ) -> dict[str, Any]:
         """List every searchable Solr index field (name, type, description, multivalued) from GET /query/solr.
 
         Use this to build advanced_solr_query calls.
         """
         desc = await client.get_xml(client.mn("query/solr"))
-        fields = [
-            f for name, f in solr.index_fields(desc).items()
-            if not name_contains or name_contains.lower() in name.lower()
-        ]
-        return {"engine": desc.get("name"), "version": desc.get("queryEngineVersion"), "count": len(fields), "fields": fields}
+        fields = []
+        for f in as_list(desc.get("queryField")):
+            name = f.get("name")
+            if name_contains and name_contains.lower() not in (name or "").lower():
+                continue
+            fields.append(
+                {
+                    "name": name,
+                    "type": f.get("type"),
+                    "description": (f.get("description") or "").strip() or None,
+                    "searchable": f.get("searchable") == "true",
+                    "returnable": f.get("returnable") == "true",
+                    "multivalued": f.get("multivalued") == "true",
+                }
+            )
+        return {
+            "engine": desc.get("name"),
+            "version": desc.get("queryEngineVersion"),
+            "count": len(fields),
+            "fields": fields,
+        }
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "advanced"})
     async def advanced_solr_query(
-        q: Annotated[str, Field(description="Solr q parameter, e.g. 'keywords:permafrost AND beginDate:[2010-01-01T00:00:00Z TO *]'.")],
-        fq: Annotated[list[str] | None, Field(description="Filter queries, e.g. ['formatType:METADATA', '-obsoletedBy:*'].")] = None,
-        fl: Annotated[str | None, Field(description="Comma-separated fields to return (see list_search_fields). Default: summary fields.")] = None,
+        q: Annotated[
+            str,
+            Field(
+                description="Solr q parameter, e.g. 'keywords:permafrost AND beginDate:[2010-01-01T00:00:00Z TO *]'."
+            ),
+        ],
+        fq: Annotated[
+            list[str] | None, Field(description="Filter queries, e.g. ['formatType:METADATA', '-obsoletedBy:*'].")
+        ] = None,
+        fl: Annotated[
+            str | None,
+            Field(description="Comma-separated fields to return (see list_search_fields). Default: summary fields."),
+        ] = None,
         sort: Annotated[str | None, Field(description="Solr sort, e.g. 'dateUploaded desc'.")] = None,
         rows: Rows = 10,
         start: Start = 0,
@@ -563,7 +688,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         Returns raw Solr documents. Only public content is visible.
         """
         params: list[tuple[str, Any]] = [
-            ("q", q), ("rows", min(rows, solr.MAX_ROWS)), ("start", start),
+            ("q", q),
+            ("rows", min(rows, solr.MAX_ROWS)),
+            ("start", start),
             ("fl", fl or ",".join(sorted({*solr.METADATA_FIELDS, *solr.DATA_FIELDS}))),
         ]
         if sort:
@@ -574,8 +701,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             params += [("facet.field", f) for f in facet_fields]
         data = await client.solr(params)
         resp = data.get("response", {})
-        out: dict[str, Any] = {"numFound": resp.get("numFound"), "start": resp.get("start"), "docs": resp.get("docs", [])}
+        out: dict[str, Any] = {
+            "numFound": resp.get("numFound"),
+            "start": resp.get("start"),
+            "docs": resp.get("docs", []),
+        }
         if facet_fields:
             ff = data.get("facet_counts", {}).get("facet_fields", {})
-            out["facets"] = {k: [{"value": v[i], "count": v[i + 1]} for i in range(0, len(v) - 1, 2)] for k, v in ff.items()}
+            out["facets"] = {
+                k: [{"value": v[i], "count": v[i + 1]} for i in range(0, len(v) - 1, 2)] for k, v in ff.items()
+            }
         return out

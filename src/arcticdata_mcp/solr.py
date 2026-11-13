@@ -15,13 +15,37 @@ MAX_ROWS = 100
 ABSTRACT_CHARS = 400
 
 METADATA_FIELDS = [
-    "id", "seriesId", "title", "origin", "pubDate", "datePublished", "dateUploaded",
-    "beginDate", "endDate", "northBoundCoord", "southBoundCoord", "eastBoundCoord",
-    "westBoundCoord", "keywords", "abstract", "formatId", "resourceMap", "obsoletedBy",
+    "id",
+    "seriesId",
+    "title",
+    "origin",
+    "pubDate",
+    "datePublished",
+    "dateUploaded",
+    "beginDate",
+    "endDate",
+    "northBoundCoord",
+    "southBoundCoord",
+    "eastBoundCoord",
+    "westBoundCoord",
+    "keywords",
+    "abstract",
+    "formatId",
+    "resourceMap",
+    "obsoletedBy",
 ]
 DATA_FIELDS = [
-    "id", "fileName", "formatId", "formatType", "size", "checksum", "checksumAlgorithm",
-    "isDocumentedBy", "resourceMap", "dateUploaded", "obsoletedBy",
+    "id",
+    "fileName",
+    "formatId",
+    "formatType",
+    "size",
+    "checksum",
+    "checksumAlgorithm",
+    "isDocumentedBy",
+    "resourceMap",
+    "dateUploaded",
+    "obsoletedBy",
 ]
 
 SORT_OPTIONS = {
@@ -196,9 +220,7 @@ def summarize(doc: dict[str, Any], client: DataONEClient) -> dict[str, Any]:
     if "beginDate" in doc or "endDate" in doc:
         out["temporal"] = {"begin": doc.get("beginDate"), "end": doc.get("endDate")}
     if "northBoundCoord" in doc:
-        out["bbox"] = {
-            k: _first(doc.get(f"{k}BoundCoord")) for k in ("north", "south", "east", "west")
-        }
+        out["bbox"] = {k: _first(doc.get(f"{k}BoundCoord")) for k in ("north", "south", "east", "west")}
     if "keywords" in doc:
         out["keywords"] = doc["keywords"][:15]
     if "abstract" in doc:

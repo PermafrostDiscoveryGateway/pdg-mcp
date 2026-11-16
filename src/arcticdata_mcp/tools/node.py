@@ -72,7 +72,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             Literal["any", "DATA", "METADATA", "RESOURCE"],
             Field(description="Restrict to data, metadata or resource formats."),
         ] = "any",
-        contains: Annotated[str | None, Field(description="Case-insensitive filter on format ID, name, media type or extension.")] = None,
+        contains: Annotated[
+            str | None, Field(description="Case-insensitive filter on format ID, name, media type or extension.")
+        ] = None,
     ) -> dict[str, Any]:
         """List DataONE object format IDs (from the DataONE Coordinating Node GET /formats), e.g. to pick
         a formatId for search_by_format or search_data_files.
@@ -88,7 +90,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=READ_ONLY, tags={"reference"})
     async def get_object_format(
-        format_id: Annotated[str, Field(description="DataONE format ID, e.g. 'text/csv' or 'https://eml.ecoinformatics.org/eml-2.2.0'.")],
+        format_id: Annotated[
+            str, Field(description="DataONE format ID, e.g. 'text/csv' or 'https://eml.ecoinformatics.org/eml-2.2.0'.")
+        ],
     ) -> dict[str, Any]:
         """Describe one DataONE object format (CN GET /formats/{formatId}): name, type, media type, extension."""
         return _format(await client.get_xml(client.cn(f"formats/{quote_pid(format_id)}")))

@@ -30,7 +30,9 @@ def _simplify_sysmeta(sm: dict[str, Any]) -> dict[str, Any]:
         "formatId": sm.get("formatId"),
         "mediaType": (sm.get("mediaType") or {}).get("@name") if isinstance(sm.get("mediaType"), dict) else None,
         "size": int(sm["size"]) if sm.get("size") else None,
-        "checksum": {"algorithm": checksum.get("@algorithm"), "value": checksum.get("#text")} if isinstance(checksum, dict) else checksum,
+        "checksum": {"algorithm": checksum.get("@algorithm"), "value": checksum.get("#text")}
+        if isinstance(checksum, dict)
+        else checksum,
         "submitter": sm.get("submitter"),
         "rightsHolder": sm.get("rightsHolder"),
         "accessPolicy": access,
@@ -39,10 +41,17 @@ def _simplify_sysmeta(sm: dict[str, Any]) -> dict[str, Any]:
             "numberReplicas": rp.get("@numberReplicas"),
             "preferred": as_list(rp.get("preferredMemberNode")),
             "blocked": as_list(rp.get("blockedMemberNode")),
-        } if rp else None,
+        }
+        if rp
+        else None,
         "replicas": [
-            {"node": r.get("replicaMemberNode"), "status": r.get("replicationStatus"), "verified": r.get("replicaVerified")}
-            for r in as_list(sm.get("replica")) if isinstance(r, dict)
+            {
+                "node": r.get("replicaMemberNode"),
+                "status": r.get("replicationStatus"),
+                "verified": r.get("replicaVerified"),
+            }
+            for r in as_list(sm.get("replica"))
+            if isinstance(r, dict)
         ],
         "obsoletes": sm.get("obsoletes"),
         "obsoletedBy": sm.get("obsoletedBy"),
@@ -63,11 +72,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pid: Annotated[str, Field(description="PID of the data file (from list_dataset_files or search_data_files).")],
         delivery: Annotated[
             Literal["auto", "inline", "url", "server"],
-            Field(description=(
-                "'auto' = return contents inline if within the size limit, else the download URL; "
-                "'inline' = require inline contents (errors if too large); 'url' = only the URL; "
-                "'server' = save to the MCP server's download directory (if enabled)."
-            )),
+            Field(
+                description=(
+                    "'auto' = return contents inline if within the size limit, else the download URL; "
+                    "'inline' = require inline contents (errors if too large); 'url' = only the URL; "
+                    "'server' = save to the MCP server's download directory (if enabled)."
+                )
+            ),
         ] = "auto",
     ) -> ToolResult:
         """Download a raw file (MNRead GET /object/{pid}) and deliver its bytes to the agent.
@@ -90,7 +101,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if size is not None and size > limit:
             if delivery == "inline":
                 raise ToolError(f"File is {size} bytes, above the inline limit of {limit} bytes. Use delivery='url'.")
-            return ToolResult(structured_content=downloads.url_result(info, settings, f"File size {size} bytes exceeds inline limit"))
+            return ToolResult(
+                structured_content=downloads.url_result(info, settings, f"File size {size} bytes exceeds inline limit")
+            )
         data = await downloads.fetch_bytes(client, url, limit)
         mime = downloads.guess_mime(info.get("formatId"), info.get("fileName"))
         return downloads.inline_result(url, data, mime, info)
@@ -98,8 +111,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"files"})
     async def preview_file(
         pid: Annotated[str, Field(description="PID of the data file.")],
-        max_bytes: Annotated[int, Field(ge=256, le=1_048_576, description="Read at most this many bytes from the start of the file.")] = 16_384,
-        max_lines: Annotated[int | None, Field(ge=1, le=10_000, description="Optionally stop after this many lines.")] = 50,
+        max_bytes: Annotated[
+            int, Field(ge=256, le=1_048_576, description="Read at most this many bytes from the start of the file.")
+        ] = 16_384,
+        max_lines: Annotated[
+            int | None, Field(ge=1, le=10_000, description="Optionally stop after this many lines.")
+        ] = 50,
     ) -> dict[str, Any]:
         """Peek at the first bytes/lines of a file without downloading all of it — ideal for checking CSV headers,
         text formats, or file signatures of large files.
@@ -127,12 +144,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         truncated_lines = max_lines is not None and len(lines) > max_lines
         if truncated_lines:
             lines = lines[:max_lines]
-        out.update({
-            "binary": False,
-            "lines_returned": len(lines),
-            "truncated": truncated_lines or (total_size is not None and len(head) < total_size),
-            "preview": "\n".join(lines),
-        })
+        out.update(
+            {
+                "binary": False,
+                "lines_returned": len(lines),
+                "truncated": truncated_lines or (total_size is not None and len(head) < total_size),
+                "preview": "\n".join(lines),
+            }
+        )
         return out
 
     @mcp.tool(annotations=READ_ONLY, tags={"files", "download"})
@@ -162,7 +181,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=READ_ONLY, tags={"files", "metadata"})
     async def get_system_metadata(
         pid: Pid,
-        raw: Annotated[bool, Field(description="Return the full parsed system metadata instead of the simplified view.")] = False,
+        raw: Annotated[
+            bool, Field(description="Return the full parsed system metadata instead of the simplified view.")
+        ] = False,
     ) -> dict[str, Any]:
         """Get DataONE system metadata (GET /meta/{pid}): owner, submitter, access policy, replicas,
         checksum, size, format, file name, and version links (obsoletes/obsoletedBy).
@@ -185,8 +206,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     async def list_objects(
         from_date: DateStr = None,
         to_date: DateStr = None,
-        format_id: Annotated[str | None, Field(description="Only objects with this DataONE format ID, e.g. 'text/csv'.")] = None,
-        identifier: Annotated[str | None, Field(description="Only objects with this identifier (or series ID).")] = None,
+        format_id: Annotated[
+            str | None, Field(description="Only objects with this DataONE format ID, e.g. 'text/csv'.")
+        ] = None,
+        identifier: Annotated[
+            str | None, Field(description="Only objects with this identifier (or series ID).")
+        ] = None,
         start: Annotated[int, Field(ge=0)] = 0,
         count: Annotated[int, Field(ge=0, le=1000)] = 50,
     ) -> dict[str, Any]:
@@ -209,19 +234,30 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         items = []
         for o in as_list(ol.get("objectInfo")):
             cs = o.get("checksum") or {}
-            items.append({
-                "identifier": o.get("identifier"),
-                "formatId": o.get("formatId"),
-                "size": int(o["size"]) if o.get("size") else None,
-                "checksum": {"algorithm": cs.get("@algorithm"), "value": cs.get("#text")} if isinstance(cs, dict) else cs,
-                "dateSysMetadataModified": o.get("dateSysMetadataModified"),
-            })
-        return {"total": int(ol.get("@total", 0)), "start": int(ol.get("@start", 0)), "count": len(items), "objects": items}
+            items.append(
+                {
+                    "identifier": o.get("identifier"),
+                    "formatId": o.get("formatId"),
+                    "size": int(o["size"]) if o.get("size") else None,
+                    "checksum": {"algorithm": cs.get("@algorithm"), "value": cs.get("#text")}
+                    if isinstance(cs, dict)
+                    else cs,
+                    "dateSysMetadataModified": o.get("dateSysMetadataModified"),
+                }
+            )
+        return {
+            "total": int(ol.get("@total", 0)),
+            "start": int(ol.get("@start", 0)),
+            "count": len(items),
+            "objects": items,
+        }
 
     @mcp.tool(annotations=READ_ONLY, tags={"files", "auth"})
     async def is_authorized(
         pid: Pid,
-        action: Annotated[Literal["read", "write", "changePermission"], Field(description="Permission to check.")] = "read",
+        action: Annotated[
+            Literal["read", "write", "changePermission"], Field(description="Permission to check.")
+        ] = "read",
     ) -> dict[str, Any]:
         """Check whether an anonymous (public) user may perform an action on an object (GET /isAuthorized/{pid}).
         Mostly useful to confirm a file is publicly downloadable.

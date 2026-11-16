@@ -110,9 +110,7 @@ class UpstreamLimiter:
         try:
             await asyncio.wait_for(self._sem.acquire(), timeout=self.settings.queue_timeout)
         except TimeoutError as exc:
-            raise ToolError(
-                "The Arctic Data Center is busy serving other requests; please retry shortly."
-            ) from exc
+            raise ToolError("The Arctic Data Center is busy serving other requests; please retry shortly.") from exc
         try:
             yield
         finally:

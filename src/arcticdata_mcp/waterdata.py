@@ -237,9 +237,7 @@ class ParquetWaterData(WaterData):
         )
         cols = ", ".join(PROPERTY_COLUMNS)
 
-        counts = self._rows(
-            f"SELECT count(*) AS n, count(date_break_year) AS drained FROM lakes {where}", params
-        )[0]
+        counts = self._rows(f"SELECT count(*) AS n, count(date_break_year) AS drained FROM lakes {where}", params)[0]
         page = self._rows(f"SELECT {cols} FROM lakes {where} {order} LIMIT ? OFFSET ?", [*params, limit, offset])
         geom = "geom" if polygons else "NULL AS geom"
         cap = MAX_POLYGONS if polygons else MAX_POINTS

@@ -57,7 +57,9 @@ def main(src: str, test_data: str, dest: str, mode: str = "") -> None:
     Path(dest).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(dest, compression="zstd", index=False)
     missing = keep_ids - set(out["id_geohash"])
-    print(f"{len(out)} lakes ({out['date_break'].notna().sum()} drained) -> {dest}; missing test lakes: {missing or 'none'}")
+    print(
+        f"{len(out)} lakes ({out['date_break'].notna().sum()} drained) -> {dest}; missing test lakes: {missing or 'none'}"
+    )
 
 
 if __name__ == "__main__":

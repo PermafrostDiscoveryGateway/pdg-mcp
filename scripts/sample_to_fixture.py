@@ -47,7 +47,9 @@ def main(src: str, dest: str) -> None:
         features.append({"type": "Feature", "properties": props, "geometry": shapely.geometry.mapping(geom)})
     out = Path(dest)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "lakes.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": features}, separators=(",", ":")))
+    (out / "lakes.geojson").write_text(
+        json.dumps({"type": "FeatureCollection", "features": features}, separators=(",", ":"))
+    )
     shutil.copy(BUNDLED / "timeseries.json", out / "timeseries.json")
     print(f"{len(features)} lakes -> {out}")
 

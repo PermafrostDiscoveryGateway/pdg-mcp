@@ -115,6 +115,23 @@ async def test_unknown_tool_and_bad_arguments_are_logged(settings, toolcalls):
     assert (invalid["tool"], invalid["status"]) == ("count_datasets", "invalid_arguments")
 
 
+async def test_rate_limited_invented_tool_name_is_not_logged(settings, mock_api, toolcalls):
+    settings.ratelimit.per_user_rate = 0.001
+    settings.ratelimit.per_user_burst = 1
+    mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
+    long_name = "B" * 200
+    async with Client(create_server(settings, require_auth=False)) as c:
+        await c.call_tool("count_datasets", {"text": "x"})
+        for name in ("attacker_tool_1", long_name):
+            with pytest.raises(ToolError, match="Rate limit exceeded"):
+                await c.call_tool(name, {})
+    ok, first, second = toolcalls()
+    assert ok["tool"] == "count_datasets"
+    assert (first["tool"], first["status"]) == ("unknown", "rate_limited")
+    assert (second["tool"], second["status"]) == ("unknown", "rate_limited")
+    assert "attacker_tool" not in json.dumps([first, second]) and long_name not in json.dumps(second)
+
+
 async def test_retries_are_recorded(settings, mock_api, toolcalls):
     settings.ratelimit.retry_backoff = 0
     mock_api.get(f"{MN}/query/solr/").mock(

@@ -29,7 +29,7 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolResult
 
 from arcticdata_mcp.config import ObservabilitySettings
-from arcticdata_mcp.metrics import UNKNOWN_TOOL, Metrics
+from arcticdata_mcp.metrics import Metrics
 from arcticdata_mcp.ratelimit import ANONYMOUS, RateLimitExceeded, UpstreamBusy, UserRateLimitMiddleware
 
 LOGGER_NAME = "arcticdata_mcp"
@@ -109,7 +109,9 @@ class ToolCallLogMiddleware(Middleware):
         recorder = CallRecorder()
         reset = _recorder.set(recorder)
         started = time.perf_counter()
-        tool = context.message.name
+        # Never use a client-supplied name directly: a call can fail (e.g. rate limited) before the tool
+        # lookup, so the name may not exist. Unregistered names are reported as "unknown".
+        tool = self.metrics.tool_label(context.message.name)
         status, error_type = "ok", None
         try:
             return await call_next(context)
@@ -123,8 +125,7 @@ class ToolCallLogMiddleware(Middleware):
             status, error_type = "error", type(exc).__name__
             raise
         except NotFoundError as exc:
-            # Unknown tool name: never use a client-supplied name as a metric label or log field.
-            status, error_type, tool = "not_found", type(exc).__name__, UNKNOWN_TOOL
+            status, error_type = "not_found", type(exc).__name__
             raise
         except ValidationError as exc:
             status, error_type = "invalid_arguments", type(exc).__name__

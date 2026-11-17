@@ -133,6 +133,37 @@ async def test_unknown_tool_does_not_create_label(settings, metrics):
     assert b"made_up_tool_name" not in metrics.render()
 
 
+async def test_invented_tool_names_never_become_labels_even_when_rate_limited(settings, mock_api, metrics):
+    """The rate limiter rejects a call before the tool is looked up, so the name may not exist."""
+    settings.ratelimit.per_user_rate = 0.001
+    settings.ratelimit.per_user_burst = 1
+    mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
+    invented = ["attacker_tool_1", "attacker_tool_2", "A" * 200]
+    async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
+        await c.call_tool("count_datasets", {"text": "x"})  # uses up the only burst token
+        for name in invented:
+            with pytest.raises(ToolError, match="Rate limit exceeded"):
+                await c.call_tool(name, {})
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="unknown", status="rate_limited") == 3
+    assert sample(metrics, "pdg_mcp_rate_limit_rejections_total") == 3
+    text = metrics.render().decode()
+    assert "attacker_tool" not in text and "AAAA" not in text
+
+
+def test_tool_names_are_unknown_until_registered_and_bounded_after():
+    m = Metrics()
+    assert m.tool_label("count_datasets") == "unknown"  # nothing registered yet: nothing is trusted
+    m.observe_tool_call("count_datasets", "ok", 0.1)
+    assert sample(m, "pdg_mcp_tool_calls_total", tool="unknown", status="ok") == 1
+    m.init_tools(["count_datasets"])
+    assert m.tool_label("count_datasets") == "count_datasets"
+    assert m.tool_label("anything_else") == "unknown"
+    assert m.tool_label("unknown") == "unknown"
+    # every status of the unknown bucket exists at zero too, so increase() sees its first event
+    assert sample(m, "pdg_mcp_tool_calls_total", tool="unknown", status="rate_limited") == 0
+    assert m.registry.get_sample_value("pdg_mcp_tool_calls_total", {"tool": "unknown", "status": "cancelled"}) == 0.0
+
+
 async def test_invalid_arguments_are_their_own_status(settings, metrics):
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
         with pytest.raises(ToolError):
@@ -159,12 +190,15 @@ async def test_exposition_has_no_query_text(settings, mock_api, metrics):
 
 def test_metrics_are_isolated_per_instance():
     a, b = Metrics(), Metrics()
+    a.init_tools(["t"])
+    b.init_tools(["t"])
     a.observe_tool_call("t", "ok", 0.1)
     assert sample(a, "pdg_mcp_tool_calls_total", tool="t", status="ok") == 1
     assert sample(b, "pdg_mcp_tool_calls_total", tool="t", status="ok") == 0
 
 
 def test_metrics_server_serves_exposition(metrics):
+    metrics.init_tools(["t"])
     metrics.observe_tool_call("t", "ok", 0.1)
     server = start_metrics_server(ObservabilitySettings(metrics_port=0), metrics)
     try:

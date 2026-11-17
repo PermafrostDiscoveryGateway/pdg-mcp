@@ -54,6 +54,8 @@ class Metrics:
 
     def __init__(self) -> None:
         self.registry = CollectorRegistry()
+        # Tool names that may be used as labels. Until init_tools runs, every name maps to "unknown".
+        self._known_tools: frozenset[str] = frozenset({UNKNOWN_TOOL})
         ProcessCollector(registry=self.registry, namespace=PREFIX)  # memory, CPU, open fds (Linux)
         r = self.registry
 
@@ -115,20 +117,32 @@ class Metrics:
         )
 
     def init_tools(self, tools: Iterable[str]) -> None:
-        """Create every tool's series at zero.
+        """Register the server's tool names and create every tool's series at zero.
 
-        Prometheus's ``increase()`` / ``rate()`` cannot see the 0 -> 1 step of a series that first appears
-        already at 1, so without this the first call to each tool after a restart would not be counted.
+        Registering the names bounds the ``tool`` label to them (see :meth:`tool_label`). Creating the series
+        at zero matters because Prometheus's ``increase()`` / ``rate()`` cannot see the 0 -> 1 step of a series
+        that first appears already at 1, so without it the first call to each tool after a restart would not
+        be counted.
         """
-        for tool in tools:
+        names = list(tools)
+        self._known_tools = frozenset(names) | {UNKNOWN_TOOL}
+        for tool in (*names, UNKNOWN_TOOL):
             self.tool_duration.labels(tool)
             for status in TOOL_STATUSES:
                 self.tool_calls.labels(tool, status)
-        self.tool_calls.labels(UNKNOWN_TOOL, "not_found")
-        self.tool_duration.labels(UNKNOWN_TOOL)
+
+    def tool_label(self, name: str) -> str:
+        """``name`` if it is a registered tool, otherwise ``unknown``.
+
+        A client can send any tool name, and a call can fail (for example rate limited) before the server
+        looks the tool up. Using the raw name as a label or log field would let a client create unlimited
+        series, so everything that is not a registered tool is reported as ``unknown``.
+        """
+        return name if name in self._known_tools else UNKNOWN_TOOL
 
     # Events -------------------------------------------------------------------------------------------
     def observe_tool_call(self, tool: str, status: str, seconds: float) -> None:
+        tool = self.tool_label(tool)  # enforce the bound here too, whatever the caller passes
         self.tool_calls.labels(tool, status).inc()
         self.tool_duration.labels(tool).observe(seconds)
         if status == "rate_limited":

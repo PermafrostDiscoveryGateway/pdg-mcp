@@ -59,7 +59,7 @@ def create_server(
         try:
             metrics.init_tools(tool.name for tool in await server.list_tools())
         except Exception:  # metrics are best-effort; never block startup
-            log.warning("Could not pre-create tool metrics", exc_info=True)
+            log.warning("Could not register tool names for metrics; calls will be counted as \"unknown\"", exc_info=True)
         try:
             yield
         finally:

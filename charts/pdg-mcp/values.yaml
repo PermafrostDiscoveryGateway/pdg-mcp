@@ -31,10 +31,41 @@ observability:
 # Prometheus metrics (/metrics). Served on their own pod port, which the Service and Ingress do not expose, so
 # they are reachable only from inside the cluster by scraping the pod. scrapeAnnotations adds the conventional
 # prometheus.io/* pod annotations; drop them if your Prometheus discovers targets another way.
+#
+# podMonitor creates a Prometheus Operator PodMonitor, which is how an Operator-based Prometheus (for example
+# Rancher Monitoring) finds the pods: it ignores the annotations above. Leave it off on clusters without the
+# monitoring.coreos.com CRDs, or the install fails. `labels` are extra labels for the PodMonitor, needed only if
+# your Prometheus has a podMonitorSelector (empty selector = it picks up every PodMonitor, no labels needed).
 metrics:
   enabled: true
   port: 9100
   scrapeAnnotations: true
+  podMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# Daily archive of usage numbers. Prometheus only keeps data for its retention period (10 days on software-dev),
+# so this CronJob saves each finished UTC day to a persistent volume as usage-YYYY-MM-DD.json plus daily-summary.csv
+# and daily-tools.csv (counts only; distinct users cannot be added up across days). Off by default: it needs the
+# metrics scraped by a Prometheus and a volume. `days` is how many previous days each run checks, so a missed run
+# is caught up. `schedule` is in the cluster controller's timezone (normally UTC); days are always UTC days.
+report:
+  enabled: false
+  schedule: "15 1 * * *"
+  days: 3
+  prometheusUrl: http://rancher-monitoring-prometheus.cattle-monitoring-system:9090
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 128Mi}
+  persistence:
+    existingClaim: ""    # use a claim you created yourself instead of the chart's
+    size: 1Gi            # the archive grows by well under 100 KB a day
+    accessMode: ReadWriteOnce
+    storageClassName: "" # empty = the cluster's default storage class
+    pv:
+      enabled: false     # true = also create a static PersistentVolume (cluster-scoped) and bind the claim to it
+      source: {}         # volume backend, e.g.  nfs: {server: nfs.example.org, path: /exports/pdg-mcp-usage}
 
 # Extra ARCTICDATA_MCP_* settings, e.g. ARCTICDATA_MCP_DOWNLOADS_MAX_INLINE_BYTES: "10485760".
 # Rate limits are enforced per pod, so with replicaCount > 1 the effective limits multiply. Example:

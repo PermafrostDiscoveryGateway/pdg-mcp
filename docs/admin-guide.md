@@ -95,11 +95,35 @@ The pod serves Prometheus metrics on a separate port (`metrics.port`, default 91
 cluster. Keep it that way: do not add the metrics port to the Service or Ingress unless it is protected some other
 way.
 
-Prometheus has to scrape the pods directly. By default the chart adds `prometheus.io/scrape`, `prometheus.io/port`
-and `prometheus.io/path` annotations to the pod, which works if the cluster's Prometheus discovers pods by
-annotation. If it uses a `ServiceMonitor` or a static config instead, set `metrics.scrapeAnnotations: false` and
-point it at the pods' `metrics` port. Counters live in each pod, so scrape every pod (each replica has its own
-limits and counts). Set `metrics.enabled: false` to turn the endpoint off. Metric names are listed in the README.
+Prometheus has to scrape the pods directly, and there are two ways to tell it to:
+
+- **Prometheus Operator** (a cluster with the `monitoring.coreos.com` CRDs, such as Rancher Monitoring): set
+  `metrics.podMonitor.enabled: true`. The chart then creates a `PodMonitor` that targets the pods' `metrics`
+  port. The Operator ignores the `prometheus.io/*` annotations, so without this nothing scrapes the pod. If your
+  Prometheus has a `podMonitorSelector`, add the labels it needs under `metrics.podMonitor.labels`; an empty
+  selector picks up every PodMonitor. The option is off by default so the chart still installs on clusters
+  without those CRDs.
+- **Annotation-based Prometheus:** by default the chart adds `prometheus.io/scrape`, `prometheus.io/port` and
+  `prometheus.io/path` annotations to the pod. Turn them off with `metrics.scrapeAnnotations: false` if unused.
+
+Counters live in each pod, so scrape every pod (each replica has its own limits and counts). Set
+`metrics.enabled: false` to turn the endpoint off. Metric names are listed in the README.
+
+On software-dev the app is deployed by an ArgoCD `Application` that sets Helm values inline (see the README), so
+the environment-specific settings (`metrics.podMonitor.enabled: true` and `observability.userHashKeySecret`) go
+into that `Application`'s `helm.values`, not into this repository.
+
+**software-dev cluster, as checked on 2026-11-17** (it may have changed):
+
+- Rancher Monitoring runs in `cattle-monitoring-system` (Prometheus Operator, Prometheus v3.5.0, Grafana 12.1.1).
+  Its `podMonitorSelector` and `podMonitorNamespaceSelector` are empty, so a PodMonitor in the `pdg` namespace is
+  picked up with no extra labels.
+- Prometheus scrapes every 30 seconds and **keeps data for 10 days (and at most 10 GiB)**. The dashboard and
+  `scripts/usage_report.py` can only look back that far, so numbers for a month or longer have to be recorded
+  before they age out. The chart's daily archive job does this (see "Keeping numbers past Prometheus's
+  retention" below); longer retention or remote storage would be the alternative.
+- No log aggregation (no Loki, Elasticsearch or log collector) was found, so usage cannot be counted from the logs
+  there; `kubectl logs` shows only recent output.
 
 ### Dashboard and reports
 
@@ -154,6 +178,115 @@ Things that affect the numbers:
   across pods. Every tool's series is created at zero on startup, so tool-call counts are not affected by
   restarts. The ADC request counters are created on first use, so after a restart the requests made before
   Prometheus first scrapes a new series are not counted: ADC totals can run a few requests low per restart.
+
+### Keeping numbers past Prometheus's retention
+
+Prometheus on software-dev keeps 10 days of data. The chart can run a daily CronJob that archives each finished UTC
+day to a persistent volume, so monthly and longer totals stay possible. It is off by default.
+
+**What it writes.** In the volume (mounted at `/data`): one `usage-YYYY-MM-DD.json` per day (the same totals and
+per-tool table that `scripts/usage_report.py` prints), plus `daily-summary.csv` and `daily-tools.csv`, which are
+rebuilt from all the daily files on every run, so re-running never duplicates rows. These are counts only. Distinct
+users cannot be added up across days, so monthly active users need a different source.
+
+**How it behaves.**
+- It runs at 01:15 (`report.schedule`, in the cluster controller's timezone, normally UTC) and archives each of the
+  previous 3 finished UTC days (`report.days`) that is not archived yet, so a missed run is caught up on the next one.
+- A day for which Prometheus has no data (outside its retention, or never scraped) is **not written**, because it
+  would look like a quiet day. If yesterday could not be archived the job exits 1, so a failed Job
+  (`kubectl -n pdg get jobs`) means scraping or retention is broken. It also fails on the first run after
+  deployment, until a full UTC day of data exists; that is expected.
+- Days are UTC days, and each total is Prometheus's `increase()` over the day, so a day can differ from the true
+  count by a few calls at its edges.
+
+**Enable it.** In the Argo CD `Application`'s `helm.values` (or `--set` for Helm), together with the PodMonitor:
+
+```yaml
+metrics:
+  podMonitor:
+    enabled: true
+report:
+  enabled: true
+```
+
+The Prometheus URL defaults to `http://rancher-monitoring-prometheus.cattle-monitoring-system:9090`
+(`report.prometheusUrl`). The job's image is the app image, which contains `scripts/usage_report.py`, so the image
+must be rebuilt after this change.
+
+**Storage.** By default the chart creates a `PersistentVolumeClaim` (`<release>-usage`, 1Gi, `ReadWriteOnce`) and
+the cluster's default storage class provisions the volume, so no PersistentVolume file is needed. Check what the
+cluster offers with `kubectl get storageclass`, and name one with `report.persistence.storageClassName` if the
+default is not what you want. To use your own claim, set `report.persistence.existingClaim`.
+
+If volumes must be created by hand (a static PersistentVolume), set `report.persistence.pv.enabled: true` and give
+the backend in `report.persistence.pv.source`, for example an NFS export:
+
+```yaml
+report:
+  enabled: true
+  persistence:
+    pv:
+      enabled: true
+      source:
+        nfs: {server: nfs.example.org, path: /exports/pdg-mcp-usage}
+```
+
+The chart then also creates a `PersistentVolume` (reclaim policy `Retain`, reserved for this claim) and binds the
+claim to it by name. To get plain YAML files you can review or apply yourself:
+
+```bash
+helm template pdg-mcp charts/pdg-mcp -n pdg --set report.enabled=true --set report.persistence.pv.enabled=true \
+  --set report.persistence.pv.source.nfs.server=nfs.example.org --set report.persistence.pv.source.nfs.path=/exports/pdg-mcp-usage \
+  --show-only templates/usage-report-pv.yaml --show-only templates/usage-report-pvc.yaml > usage-volume.yaml
+```
+
+Things to know about the volume:
+- The claim carries `helm.sh/resource-policy: keep` and `argocd.argoproj.io/sync-options: Prune=false`, so removing
+  the release or an Argo CD prune does not delete the archive. Delete it by hand if you want it gone.
+- A PersistentVolume is cluster-scoped. If Argo CD manages the chart, its `AppProject` must allow that kind
+  (`clusterResourceWhitelist`), or an administrator has to create the volume. Dynamic provisioning avoids this.
+- The job runs as user 10001 with `fsGroup: 10001`. Some storage (plain NFS in particular) ignores `fsGroup`, so
+  the directory may need to be writable by that user.
+
+**Try it now, without waiting for 01:15.**
+
+```bash
+kubectl -n pdg create job --from=cronjob/pdg-mcp-usage-report usage-report-test
+kubectl -n pdg logs job/usage-report-test
+kubectl -n pdg delete job usage-report-test
+```
+
+The log lists each day as `archived`, `already archived` or `no data in Prometheus ...`. If it cannot reach
+Prometheus the job fails with `error: Prometheus query failed ...`; that would also reveal a network policy in the way.
+
+**Reading the files.** Mount the claim in a short-lived pod and copy the files out (run it when the job is not
+running, because a `ReadWriteOnce` volume attaches to one node):
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: usage-reader
+  namespace: pdg
+spec:
+  restartPolicy: Never
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+  containers:
+    - name: reader
+      image: busybox:1.37
+      command: ["sleep", "3600"]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: usage, mountPath: /data, readOnly: true}]
+  volumes:
+    - name: usage
+      persistentVolumeClaim: {claimName: pdg-mcp-usage}   # <release>-usage
+```
+
+```bash
+kubectl -n pdg apply -f usage-reader.yaml
+kubectl -n pdg cp usage-reader:/data ./usage-archive
+kubectl -n pdg delete pod usage-reader
+```
 
 ## Usage data and privacy
 

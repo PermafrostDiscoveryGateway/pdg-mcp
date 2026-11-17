@@ -166,3 +166,144 @@ def test_cli_reports_prometheus_down(capsys):
         rc = usage_report.main(["--prometheus-url", PROM, "--from", "2026-10-01", "--to", "2026-11-01"])
     assert rc == 1
     assert "error:" in capsys.readouterr().err
+
+
+# --- archive mode -------------------------------------------------------------------------------------------
+NOW = datetime(2026, 11, 10, 1, 15, tzinfo=UTC)  # a day's job runs shortly after midnight UTC
+EMPTY = {"status": "success", "data": {"resultType": "vector", "result": []}}
+
+
+def day_end(day: int) -> float:
+    return datetime(2026, 11, day, tzinfo=UTC).timestamp()
+
+
+def archive_router(router, nodata_days=()):
+    """Mock Prometheus; the days in ``nodata_days`` (their end = midnight starting that day + 1) have no samples."""
+    nodata_ends = {day_end(d + 1) for d in nodata_days}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        q = request.url.params["query"]
+        if q.startswith("count(count_over_time(") and float(request.url.params["time"]) in nodata_ends:
+            return httpx.Response(200, json=EMPTY)
+        if q.startswith("count(count_over_time("):
+            return httpx.Response(200, json=vec(({}, 1)))
+        return fake_prometheus(request)
+
+    return router.get(f"{PROM}/api/v1/query").mock(side_effect=handler)
+
+
+def run_archive(tmp_path, days=3, force=False):
+    with httpx.Client() as c:
+        return usage_report.archive(c, PROM, tmp_path, days, NOW, force=force)
+
+
+def test_archive_writes_one_file_per_finished_day(tmp_path):
+    with respx.mock() as router:
+        archive_router(router)
+        lines, ok = run_archive(tmp_path)
+    assert ok is True
+    assert lines == ["2026-11-07: archived", "2026-11-08: archived", "2026-11-09: archived"]
+    assert sorted(p.name for p in tmp_path.glob("usage-*.json")) == [
+        "usage-2026-11-07.json", "usage-2026-11-08.json", "usage-2026-11-09.json"]
+    day = json.loads((tmp_path / "usage-2026-11-09.json").read_text())
+    assert day["period"] == {"from": "2026-11-09T00:00:00+00:00", "to": "2026-11-10T00:00:00+00:00"}
+    assert day["summary"]["tool_calls"] == 100 and day["tools"][0]["tool"] == "search_datasets"
+    assert not list(tmp_path.glob("*.tmp"))  # atomic writes leave nothing behind
+
+
+def test_archive_queries_a_full_day_ending_at_midnight(tmp_path):
+    with respx.mock() as router:
+        route = archive_router(router)
+        run_archive(tmp_path, days=1)
+    queries = [(c.request.url.params["query"], float(c.request.url.params["time"])) for c in route.calls]
+    assert queries and all("[86400s]" in q for q, _ in queries)
+    assert all(t == day_end(10) for _, t in queries)  # evaluated at the end of 2026-11-09
+
+
+def test_archive_rerun_skips_finished_days_and_force_rewrites(tmp_path):
+    with respx.mock() as router:
+        route = archive_router(router)
+        run_archive(tmp_path)
+        calls_after_first = route.call_count
+        lines, ok = run_archive(tmp_path)
+        assert ok and set(lines) == {f"2026-11-0{d}: already archived" for d in (7, 8, 9)}
+        assert route.call_count == calls_after_first  # nothing was queried again
+        lines, _ = run_archive(tmp_path, force=True)
+        assert all(line.endswith("archived") and "already" not in line for line in lines)
+        assert route.call_count > calls_after_first
+
+
+def test_a_day_without_data_is_not_archived_as_zeros(tmp_path):
+    with respx.mock() as router:
+        archive_router(router, nodata_days=[7])  # e.g. aged out of Prometheus's retention
+        lines, ok = run_archive(tmp_path)
+    assert "no data" in lines[0] and lines[0].startswith("2026-11-07")
+    assert not (tmp_path / "usage-2026-11-07.json").exists()
+    assert ok is True  # only a missing *yesterday* is a failure
+    assert (tmp_path / "usage-2026-11-08.json").exists()
+
+
+def test_missing_yesterday_is_reported_as_failure(tmp_path):
+    with respx.mock() as router:
+        archive_router(router, nodata_days=[9])
+        lines, ok = run_archive(tmp_path)
+    assert ok is False and "no data" in lines[-1]
+    assert not (tmp_path / "usage-2026-11-09.json").exists()
+
+
+def test_archive_catches_up_a_missed_run(tmp_path):
+    """Only the 9th is archived (the earlier runs were missed); a later run with --days 3 fills the gap."""
+    with respx.mock() as router:
+        archive_router(router)
+        run_archive(tmp_path, days=1)
+        lines, ok = run_archive(tmp_path, days=3)
+    assert ok and lines == ["2026-11-07: archived", "2026-11-08: archived", "2026-11-09: already archived"]
+
+
+def test_csvs_are_rebuilt_from_the_daily_files_without_duplicates(tmp_path):
+    with respx.mock() as router:
+        archive_router(router)
+        run_archive(tmp_path)
+        first = (tmp_path / "daily-summary.csv").read_text()
+        run_archive(tmp_path)  # a re-run must not add rows
+        run_archive(tmp_path, force=True)
+    summary = (tmp_path / "daily-summary.csv").read_text().splitlines()
+    assert summary[0].split(",")[:3] == ["date", "tool_calls", "tool_calls_ok"]
+    assert [row.split(",")[0] for row in summary[1:]] == ["2026-11-07", "2026-11-08", "2026-11-09"]
+    assert (tmp_path / "daily-summary.csv").read_text() == first
+    tools = (tmp_path / "daily-tools.csv").read_text().splitlines()
+    assert tools[0] == "date,tool,calls,not_ok,p95_seconds"
+    assert "2026-11-08,search_datasets,80,6,1.235" in tools
+    assert len(tools) == 1 + 3 * 3  # header + 3 tools per day
+
+
+def test_cli_archive_mode(tmp_path, capsys):
+    with respx.mock() as router:
+        archive_router(router)
+        rc = usage_report.main(["--prometheus-url", PROM, "--archive-dir", str(tmp_path / "out"), "--days", "2"])
+    assert rc == 0
+    assert len(list((tmp_path / "out").glob("usage-*.json"))) == 2
+    assert capsys.readouterr().out.count("archived") == 2
+
+
+def test_cli_archive_exits_nonzero_when_yesterday_has_no_data(tmp_path, capsys):
+    with respx.mock() as router:
+        router.get(f"{PROM}/api/v1/query").mock(return_value=httpx.Response(200, json=EMPTY))
+        rc = usage_report.main(["--prometheus-url", PROM, "--archive-dir", str(tmp_path), "--days", "2"])
+    assert rc == 1
+    assert "yesterday is not archived" in capsys.readouterr().err
+    assert not list(tmp_path.glob("usage-*.json"))
+
+
+def test_cli_archive_reports_prometheus_down(tmp_path, capsys):
+    with respx.mock() as router:
+        router.get(f"{PROM}/api/v1/query").mock(side_effect=httpx.ConnectError("refused"))
+        rc = usage_report.main(["--prometheus-url", PROM, "--archive-dir", str(tmp_path)])
+    assert rc == 1 and "error:" in capsys.readouterr().err
+
+
+def test_cli_archive_rejects_from_and_to_and_bad_days(tmp_path):
+    with pytest.raises(SystemExit):
+        usage_report.main(["--archive-dir", str(tmp_path), "--from", "2026-10-01"])
+    with pytest.raises(SystemExit):
+        usage_report.main(["--archive-dir", str(tmp_path), "--days", "0"])

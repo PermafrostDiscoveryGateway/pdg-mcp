@@ -11,6 +11,17 @@ totals and a per-tool table. Output is aggregate counts only, never per-user dat
 ``--from`` / ``--to`` take ``YYYY-MM-DD`` (midnight UTC), an ISO-8601 timestamp, or ``now``. The default period is
 the last 30 days. Set ``PROMETHEUS_TOKEN`` to send ``Authorization: Bearer <token>``.
 
+Archiving (for a scheduled job): Prometheus only keeps data for its retention period (10 days on software-dev), so
+to keep numbers for months, archive each finished UTC day to a directory:
+
+    uv run python scripts/usage_report.py --archive-dir /data --days 3
+
+This writes ``usage-YYYY-MM-DD.json`` for each of the previous 3 UTC days that is not archived yet (re-running is
+safe, and a missed run is caught up), then rebuilds ``daily-summary.csv`` and ``daily-tools.csv`` from all the
+daily files. A day Prometheus has no data for is not written (it would look like a quiet day) and the command
+exits 1 if yesterday could not be archived, so a failing job signals that scraping or retention is broken.
+Distinct users cannot be added up across days; these files hold counts only.
+
 Caveats: numbers come from Prometheus, so they only reach back as far as its retention. ``increase()``
 extrapolates slightly at the edges of the period, so counts can be off by a small fraction of a call.
 """
@@ -25,6 +36,7 @@ import math
 import os
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -126,6 +138,74 @@ def fetch_report(client: httpx.Client, base_url: str, start: datetime, end: date
     }
 
 
+# --- archiving ----------------------------------------------------------------------------------------------
+def has_data(client: httpx.Client, base_url: str, start: datetime, end: datetime) -> bool:
+    """True if Prometheus holds any sample of the tool-call counter in the period.
+
+    Without this check, a day outside Prometheus's retention (or one that was never scraped) would be archived
+    as zeros, which cannot be told apart from a quiet day.
+    """
+    window = f"[{int((end - start).total_seconds())}s]"
+    return bool(query(client, base_url, f"count(count_over_time({CALLS}{window}))", end))
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)  # a reader never sees a half-written file
+
+
+def _csv_text(header: list[str], rows: list[list[Any]]) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(header)
+    w.writerows(rows)
+    return buf.getvalue()
+
+
+def rebuild_csvs(directory: Path) -> None:
+    """Rewrite daily-summary.csv and daily-tools.csv from every usage-*.json (so re-runs never duplicate rows)."""
+    summary_rows: list[list[Any]] = []
+    tool_rows: list[list[Any]] = []
+    for path in sorted(directory.glob("usage-*.json")):
+        day = path.stem.removeprefix("usage-")
+        report = json.loads(path.read_text())
+        summary_rows.append([day, *("" if report["summary"][k] is None else report["summary"][k] for k in SUMMARY_LABELS)])
+        for t in report["tools"]:
+            tool_rows.append([day, t["tool"], t["calls"], t["not_ok"], "" if t["p95_seconds"] is None else t["p95_seconds"]])
+    _write_atomic(directory / "daily-summary.csv", _csv_text(["date", *SUMMARY_LABELS], summary_rows))
+    _write_atomic(directory / "daily-tools.csv", _csv_text(["date", "tool", "calls", "not_ok", "p95_seconds"], tool_rows))
+
+
+def archive(
+    client: httpx.Client, base_url: str, directory: Path, days: int, now: datetime, *, force: bool = False
+) -> tuple[list[str], bool]:
+    """Archive each of the previous ``days`` finished UTC days that is not archived yet.
+
+    Returns the status lines and whether yesterday (the day a daily job exists to capture) is archived.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    lines: list[str] = []
+    yesterday_ok = False
+    for back in range(days, 0, -1):
+        start = today - timedelta(days=back)
+        end = start + timedelta(days=1)
+        label = f"{start:%Y-%m-%d}"
+        path = directory / f"usage-{label}.json"
+        if path.exists() and not force:
+            lines.append(f"{label}: already archived")
+            yesterday_ok = yesterday_ok or back == 1
+        elif not has_data(client, base_url, start, end):
+            lines.append(f"{label}: no data in Prometheus (outside its retention, or not scraped); not written")
+        else:
+            _write_atomic(path, json.dumps(fetch_report(client, base_url, start, end), indent=2))
+            lines.append(f"{label}: archived")
+            yesterday_ok = yesterday_ok or back == 1
+    rebuild_csvs(directory)
+    return lines, yesterday_ok
+
+
 # --- output -------------------------------------------------------------------------------------------------
 SUMMARY_LABELS = {
     "tool_calls": "Tool calls",
@@ -211,14 +291,37 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--to", dest="end", type=parse_when, default=None, help="end (default: now)")
     p.add_argument("--format", choices=["table", "csv", "json"], default="table")
     p.add_argument("--section", choices=["summary", "tools", "all"], default="all")
+    p.add_argument("--archive-dir", type=Path, default=None,
+                   help="archive finished UTC days as usage-YYYY-MM-DD.json (plus daily CSVs) in this directory")
+    p.add_argument("--days", type=int, default=1, help="with --archive-dir: how many previous days to check (default 1)")
+    p.add_argument("--force", action="store_true", help="with --archive-dir: rewrite days that are already archived")
     args = p.parse_args(argv)
+
+    headers = {"Authorization": f"Bearer {os.environ['PROMETHEUS_TOKEN']}"} if os.environ.get("PROMETHEUS_TOKEN") else {}
+
+    if args.archive_dir is not None:
+        if args.start or args.end:
+            p.error("--archive-dir archives whole past days; do not combine it with --from/--to")
+        if args.days < 1:
+            p.error("--days must be at least 1")
+        try:
+            with httpx.Client(timeout=30, headers=headers) as client:
+                lines, yesterday_ok = archive(
+                    client, args.prometheus_url, args.archive_dir, args.days, datetime.now(UTC), force=args.force
+                )
+        except PrometheusError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print("\n".join(lines))
+        if not yesterday_ok:
+            print("error: yesterday is not archived", file=sys.stderr)
+        return 0 if yesterday_ok else 1
 
     end = args.end or datetime.now(UTC)
     start = args.start or end - timedelta(days=30)
     if start >= end:
         p.error("--from must be earlier than --to")
 
-    headers = {"Authorization": f"Bearer {os.environ['PROMETHEUS_TOKEN']}"} if os.environ.get("PROMETHEUS_TOKEN") else {}
     try:
         with httpx.Client(timeout=30, headers=headers) as client:
             report = fetch_report(client, args.prometheus_url, start, end)

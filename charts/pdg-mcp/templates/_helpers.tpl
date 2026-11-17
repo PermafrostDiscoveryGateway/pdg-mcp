@@ -12,3 +12,7 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/name: pdg-mcp
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+
+{{- define "pdg-mcp.usageClaimName" -}}
+{{- default (printf "%s-usage" (include "pdg-mcp.fullname" .)) .Values.report.persistence.existingClaim -}}
+{{- end -}}

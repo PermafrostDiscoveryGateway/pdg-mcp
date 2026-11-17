@@ -209,8 +209,8 @@ Things that affect the numbers:
 
 - Prometheus only holds data for its retention period, so a report cannot reach further back than that.
 - `increase()` extrapolates at the edges of the period, by up to about one scrape interval's worth of calls at
-  each end. On a short period that is a few percent (a test showed 70 calls against a true 68); over days or weeks
-  it is negligible. The script rounds to whole calls.
+  each end. On a short period that can be several percent, up to about 10% (tests showed 70 calls against a true 68,
+  and 54 against 49); over days or weeks it is negligible. The script rounds to whole calls.
 - Counters live in each pod and reset when a pod restarts. `increase()` handles resets, and the queries sum
   across pods. Every tool's series is created at zero on startup, so tool-call counts are not affected by
   restarts. The ADC request counters are created on first use, so after a restart the requests made before

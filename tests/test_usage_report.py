@@ -243,6 +243,16 @@ def test_a_day_without_data_is_not_archived_as_zeros(tmp_path):
     assert (tmp_path / "usage-2026-11-08.json").exists()
 
 
+def test_nothing_at_all_is_created_when_no_day_has_data(tmp_path):
+    target = tmp_path / "fresh"
+    with respx.mock() as router:
+        router.get(f"{PROM}/api/v1/query").mock(return_value=httpx.Response(200, json=EMPTY))
+        with httpx.Client() as c:
+            lines, ok = usage_report.archive(c, PROM, target, 3, NOW)
+    assert ok is False and all("no data" in line for line in lines)
+    assert not target.exists()  # no directory, no day files, no empty CSVs
+
+
 def test_missing_yesterday_is_reported_as_failure(tmp_path):
     with respx.mock() as router:
         archive_router(router, nodata_days=[9])

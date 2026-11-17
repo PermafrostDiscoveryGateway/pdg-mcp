@@ -184,7 +184,6 @@ def archive(
 
     Returns the status lines and whether yesterday (the day a daily job exists to capture) is archived.
     """
-    directory.mkdir(parents=True, exist_ok=True)
     today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     lines: list[str] = []
     yesterday_ok = False
@@ -199,10 +198,12 @@ def archive(
         elif not has_data(client, base_url, start, end):
             lines.append(f"{label}: no data in Prometheus (outside its retention, or not scraped); not written")
         else:
+            directory.mkdir(parents=True, exist_ok=True)  # only create anything once there is a day to save
             _write_atomic(path, json.dumps(fetch_report(client, base_url, start, end), indent=2))
             lines.append(f"{label}: archived")
             yesterday_ok = yesterday_ok or back == 1
-    rebuild_csvs(directory)
+    if any(directory.glob("usage-*.json")):  # no daily files yet: leave no empty CSVs behind
+        rebuild_csvs(directory)
     return lines, yesterday_ok
 
 

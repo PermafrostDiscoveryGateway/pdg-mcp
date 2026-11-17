@@ -109,3 +109,57 @@ def test_image_contains_the_report_script():
     dockerfile = (CHART.parent.parent / "Dockerfile").read_text()
     assert "COPY scripts/usage_report.py ./scripts/usage_report.py" in dockerfile
     assert (CHART.parent.parent / "scripts" / "usage_report.py").is_file()
+
+
+# --- Grafana dashboard ConfigMap -----------------------------------------------------------------------------
+DASHBOARD_JSON = CHART / "dashboards" / "pdg-mcp.json"
+
+
+def test_dashboard_configmap_is_off_by_default():
+    assert "kind: ConfigMap" not in render()
+
+
+def test_dashboard_configmap_goes_to_the_sidecar_namespace_with_its_label():
+    cm = render("grafana.dashboard.enabled=true").split("kind: ConfigMap")[1].split("\n---")[0]
+    assert "namespace: cattle-dashboards" in cm  # not the release namespace
+    assert 'grafana_dashboard: "1"' in cm
+    assert "name: pdg-dashboard" in cm and "pdg-mcp.json: |-" in cm
+
+
+def test_dashboard_namespace_falls_back_to_the_release_namespace():
+    cm = render("grafana.dashboard.enabled=true", "grafana.dashboard.namespace=").split("kind: ConfigMap")[1]
+    assert "namespace: pdg\n" in cm
+
+
+def test_dashboard_labels_and_annotations_are_configurable():
+    cm = render(
+        "grafana.dashboard.enabled=true",
+        "grafana.dashboard.labels.team=pdg",
+        "grafana.dashboard.annotations.grafana_folder=PDG",
+    ).split("kind: ConfigMap")[1].split("\n---")[0]
+    assert 'grafana_dashboard: "1"' in cm and "team: pdg" in cm  # extra labels are added to the default
+    assert "grafana_folder: PDG" in cm
+
+
+def test_dashboard_json_survives_the_configmap_unchanged():
+    """Guards against YAML escaping or indentation mangling the JSON Grafana will load."""
+    import json
+
+    yaml = pytest.importorskip("yaml")
+    docs = list(yaml.safe_load_all(render("grafana.dashboard.enabled=true")))
+    cm = next(d for d in docs if d and d.get("kind") == "ConfigMap")
+    embedded = json.loads(cm["data"]["pdg-mcp.json"])
+    assert embedded == json.loads(DASHBOARD_JSON.read_text())
+    for token in ("$__range", "$__rate_interval", "${datasource}"):
+        assert token in cm["data"]["pdg-mcp.json"]  # Grafana variables, not Helm's to expand
+
+
+def test_dashboard_is_far_below_configmap_size_limits():
+    """ConfigMaps cap at 1 MiB, and a client-side apply copies the object into a 256 KiB annotation."""
+    assert DASHBOARD_JSON.stat().st_size < 200_000
+
+
+def test_local_stack_loads_the_same_dashboard_file_the_chart_ships():
+    compose = (CHART.parent.parent / "dev" / "observability" / "docker-compose.yml").read_text()
+    assert "../../charts/pdg-mcp/dashboards:/var/lib/grafana/dashboards" in compose
+    assert DASHBOARD_JSON.is_file() and not (CHART.parent.parent / "dashboards").exists()  # one copy only

@@ -132,7 +132,7 @@ ADC failures are `pdg_mcp_adc_requests_total{status=~"4..|5.."}`. Labels never c
 and an unknown tool name is counted as `tool="unknown"`. Counters are kept in memory per pod and reset on restart,
 so use `rate()` / `increase()` in queries and scrape every pod.
 
-A Grafana 12 dashboard is in `dashboards/pdg-mcp.json`, and `scripts/usage_report.py` prints the same numbers for
+A Grafana 12 dashboard is in `charts/pdg-mcp/dashboards/pdg-mcp.json`, and `scripts/usage_report.py` prints the same numbers for
 any period (table, CSV or JSON). See "Dashboard and reports" in `docs/admin-guide.md`. Because Prometheus keeps only a
 limited history, the chart can also run a daily job that archives each day's numbers to a persistent volume
 (`report.enabled`; see "Keeping numbers past Prometheus's retention" in the same guide).

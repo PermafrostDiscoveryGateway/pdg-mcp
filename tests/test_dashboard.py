@@ -7,7 +7,7 @@ import pytest
 
 from arcticdata_mcp.metrics import Metrics
 
-DASHBOARD = Path(__file__).resolve().parent.parent / "dashboards" / "pdg-mcp.json"
+DASHBOARD = Path(__file__).resolve().parent.parent / "charts" / "pdg-mcp" / "dashboards" / "pdg-mcp.json"
 
 
 @pytest.fixture(scope="module")

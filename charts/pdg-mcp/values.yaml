@@ -45,6 +45,20 @@ metrics:
     interval: 30s
     labels: {}
 
+# Grafana dashboard ("PDG MCP Usage") as a ConfigMap, for Grafana's dashboard sidecar to load. Off by default.
+# `namespace` is where the sidecar looks for dashboards, which is normally NOT this release's namespace. The default,
+# cattle-dashboards, is what the software-dev Grafana watches (verified 2026-11-17; on another cluster check the
+# sidecar's NAMESPACE and LABEL settings, see the admin guide). Empty = the release namespace. `labels` are merged
+# into the ConfigMap's labels. `annotations` only matter if the sidecar has a FOLDER_ANNOTATION setting (the
+# software-dev one does not, so the dashboard lands in the "General" folder there).
+grafana:
+  dashboard:
+    enabled: false
+    namespace: cattle-dashboards
+    labels:
+      grafana_dashboard: "1"
+    annotations: {}
+
 # Daily archive of usage numbers. Prometheus only keeps data for its retention period (10 days on software-dev),
 # so this CronJob saves each finished UTC day to a persistent volume as usage-YYYY-MM-DD.json plus daily-summary.csv
 # and daily-tools.csv (counts only; distinct users cannot be added up across days). Off by default: it needs the

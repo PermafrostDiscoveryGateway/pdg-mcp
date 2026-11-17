@@ -122,19 +122,56 @@ into that `Application`'s `helm.values`, not into this repository.
   `scripts/usage_report.py` can only look back that far, so numbers for a month or longer have to be recorded
   before they age out. The chart's daily archive job does this (see "Keeping numbers past Prometheus's
   retention" below); longer retention or remote storage would be the alternative.
+- Grafana's dashboard sidecar loads ConfigMaps and Secrets labelled `grafana_dashboard: "1"` from the
+  `cattle-dashboards` namespace only, and has no folder annotation configured. The chart's optional dashboard
+  ConfigMap (`grafana.dashboard.enabled`) is built for exactly this.
 - No log aggregation (no Loki, Elasticsearch or log collector) was found, so usage cannot be counted from the logs
   there; `kubectl logs` shows only recent output.
 
 ### Dashboard and reports
 
-**Dashboard.** `dashboards/pdg-mcp.json` is a Grafana 12 dashboard ("PDG MCP Usage") built on the metrics above:
+**Dashboard.** `charts/pdg-mcp/dashboards/pdg-mcp.json` is a Grafana 12 dashboard ("PDG MCP Usage") built on the metrics above:
 tool calls, success rate and calls per tool for any time range, latency, Arctic Data Center load (status codes,
 retries, queue wait, slots) and process memory. The time picker answers "how many calls, which tools" for any
 period, and the Tool variable filters to specific tools. It shows aggregates only. An Active users panel is
 reserved for a later change.
 
-To use it, in Grafana choose Dashboards, New, Import, upload the JSON, and pick the Prometheus data source. The
-chart does not deploy it automatically, because that depends on how your Grafana loads dashboards.
+There are two ways to get it into Grafana:
+
+- **By hand:** in Grafana choose Dashboards, New, Import, upload `pdg-mcp.json`, and pick the Prometheus data source.
+- **From the chart:** set `grafana.dashboard.enabled: true`. The chart then creates a ConfigMap
+  (`<release>-dashboard`) holding the dashboard, labelled `grafana_dashboard: "1"`. Grafana's dashboard sidecar, as
+  shipped with Rancher Monitoring and kube-prometheus-stack, loads every ConfigMap that carries its label, so the
+  dashboard appears within a minute or two and is updated whenever the chart changes. The dashboard is
+  provisioned, so edits made in the Grafana UI are not saved back; change `charts/pdg-mcp/dashboards/pdg-mcp.json`
+  instead. It uses a data source picker, so it works with whichever Prometheus data source Grafana has.
+
+The sidecar only looks in the namespaces it is configured for, and that is usually **not** the app's namespace, so
+the ConfigMap is created in `grafana.dashboard.namespace`. The default, `cattle-dashboards`, is what the software-dev
+Grafana's sidecar watches (verified on 2026-11-17: `LABEL=grafana_dashboard`, `LABEL_VALUE=1`,
+`NAMESPACE=cattle-dashboards`, `RESOURCE=both`, so it also loads Secrets). On another cluster, check what your
+Grafana's sidecar uses before relying on the default:
+
+```bash
+kubectl -n cattle-monitoring-system get deploy rancher-monitoring-grafana -o yaml | grep -B1 -A3 -E 'name: (LABEL|NAMESPACE|FOLDER)'
+```
+
+If `LABEL` is not `grafana_dashboard` or `NAMESPACE` does not include the namespace you chose, set
+`grafana.dashboard.labels` and `grafana.dashboard.namespace` to match, or the dashboard silently never shows up.
+
+Folders: a dashboard goes into a Grafana folder only if the sidecar has a `FOLDER_ANNOTATION` setting, and the
+ConfigMap then carries that annotation (`grafana.dashboard.annotations`). The software-dev sidecar has no such
+setting, so the dashboard appears in the default "General" folder there, and an annotation such as
+`grafana_folder: PDG` would have no effect.
+
+If Argo CD deploys the chart into `pdg`, its `AppProject` must allow `cattle-dashboards` as a destination namespace,
+or an administrator has to apply the ConfigMap. After syncing, confirm it exists and appears in Grafana:
+
+```bash
+kubectl -n cattle-dashboards get configmap pdg-mcp-dashboard
+```
+
+(`<release>-dashboard`, so `pdg-mcp-dashboard` for the release named `pdg-mcp`.)
 
 **Trying it locally.** With Docker running and the server started with
 `uv run arcticdata-mcp --insecure` (metrics on port 9100):

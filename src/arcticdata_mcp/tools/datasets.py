@@ -265,10 +265,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         and entity_groups, where data files with identical columns share one schema_id. Then request what you need:
         section='attributes' with schema_id (each column copied whole from the EML: definition, measurementScale with
         units and domains, missing-value codes, annotations), a free-text section as plain text ('abstract', 'methods',
-        'purpose', 'intellectual_rights', 'additional_info'; protocols, citations, data sources and other structured
-        parts are copied whole next to the text and marked in it as e.g. '[protocol 1]'; intellectual_rights also
-        returns EML 2.2 licenses), 'coverage', 'people', 'project', 'entities' (every file with its schema_id),
-        'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
+        'purpose', 'intellectual_rights', 'additional_info', and in EML 2.2 'introduction', 'getting_started',
+        'acknowledgements'; protocols, citations, data sources and other structured parts are copied whole next to
+        the text and marked in it as e.g. '[protocol 1]'; intellectual_rights also returns EML 2.2 licenses),
+        'coverage' (places, polygons, dates, taxa), 'people', 'project', 'literature' (reference publications, usage
+        citations, literature cited), 'maintenance' (update frequency and change history), 'entities' (every file
+        with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
         offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted; page all its
         codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not valid XML
         on its own. Documents that are not EML datasets are returned as raw XML.
@@ -285,7 +287,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if doc is None:
             if section == "outline":
                 out["format"] = kind
-                out["note"] = "Not an EML dataset, so no outline is available; returning the raw XML."
+                out["warning"] = (
+                    f"This document is not EML (its root element is <{kind}>), so only section='raw' is available; "
+                    "returning the raw XML."
+                    if not kind.startswith("eml")
+                    else f"This EML document describes {kind.removeprefix('eml/')}, not a dataset, so only "
+                    "section='raw' is available; returning the raw XML."
+                )
             page, nxt = eml.page_text(text, offset, max_chars)
             out.update({"offset": offset, "next_offset": nxt, "document": page})
             return out
@@ -302,6 +310,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             out.update(doc.people())
         elif section == "project":
             out["projects"] = doc.project()
+        elif section == "literature":
+            out.update(doc.literature())
+        elif section == "maintenance":
+            if (maintenance := doc.maintenance()) is None:
+                raise ToolError(f"'{pid}' has no maintenance section.")
+            out["maintenance"] = maintenance
         elif section == "annotations":
             out.update(doc.annotations())
         elif section == "entities":

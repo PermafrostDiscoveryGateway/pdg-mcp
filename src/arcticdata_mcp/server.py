@@ -12,7 +12,7 @@ from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
-from arcticdata_mcp.tools import apps, datasets, node, objects, portals, search, water
+from arcticdata_mcp.tools import apps, datasets, metadata_gaps, node, objects, portals, search, water
 from arcticdata_mcp.tools.common import ToolContext
 
 INSTRUCTIONS = """\
@@ -27,6 +27,8 @@ Typical workflow:
 Project portals (curated collections such as PerCS-Net or the Permafrost Discovery Gateway) add a project
 layer: search_portals finds them, get_portal describes one, search_portal_datasets searches exactly the
 datasets it collects, and find_portals_for_dataset lists the portals that include a dataset.
+To find datasets with gaps in their metadata (no attributes, keywords, coverage, funding, ...), use
+search_missing_metadata.
 Identifiers (PIDs) look like 'doi:10.18739/A2...' for datasets and 'urn:uuid:...' for files.
 
 Separately, show_lakes and get_lake_timeseries serve a small sample of Arctic lake water-area data
@@ -59,6 +61,6 @@ def create_server(
     )
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
-    for module in (search, datasets, objects, node, portals, apps, water):
+    for module in (search, metadata_gaps, datasets, objects, node, portals, apps, water):
         module.register(mcp, ctx)
     return mcp

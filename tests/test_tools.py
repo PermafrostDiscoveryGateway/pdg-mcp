@@ -22,10 +22,11 @@ def solr_json(docs, num=None, **extra):
 
 async def test_lists_all_tools(client):
     names = {t.name for t in await client.list_tools()}
-    assert len(names) == 56
+    assert len(names) == 57
     assert {
         "search_datasets",
         "download_file",
+        "profile_file",
         "list_dataset_files",
         "get_facet_counts",
         "search_portals",

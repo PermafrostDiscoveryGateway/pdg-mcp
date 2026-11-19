@@ -96,6 +96,14 @@ class WaterSettings:
 
 
 @dataclass
+class OntologySettings:
+    # Optional BioPortal API key (https://bioportal.bioontology.org/account). When set, variable-to-concept
+    # lookups also search ECSO on BioPortal; empty = bundled ECSO lookup table only.
+    bioportal_api_key: str = ""
+    bioportal_url: str = "https://data.bioontology.org"
+
+
+@dataclass
 class PortalSettings:
     # Public landing page of a portal is <portal_url>/<label>.
     portal_url: str = "https://arcticdata.io/catalog/portals"
@@ -122,6 +130,7 @@ class Settings:
     profile: ProfileSettings = field(default_factory=ProfileSettings)
     compare: CompareSettings = field(default_factory=CompareSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
+    ontology: OntologySettings = field(default_factory=OntologySettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
     metadata: MetadataSettings = field(default_factory=MetadataSettings)
 

@@ -290,6 +290,7 @@
 
   app.ontoolresult = ({ structuredContent: data }) => {
     const first = data?.geojson?.features ?? [];
+    loaded = true; // later pans and zooms reload through lakes_in_view, even after an empty first result
     if (!first.length) {
       status.textContent = "No lakes in the tool result.";
       return;
@@ -300,8 +301,9 @@
     map.fitBounds(L.geoJSON({ type: "FeatureCollection", features: first }).getBounds(),
       { padding: [10, 10], maxZoom: 12, animate: false }); // fires moveend synchronously
     fitting = false;
-    loaded = true;
     draw(data);
+    // The fit may have zoomed in past the point/polygon switch: load this view's polygons.
+    if (!hasPolygons && map.getZoom() >= POINT_POLY_SWITCH_ZOOM) reload();
   };
 
   await app.connect();

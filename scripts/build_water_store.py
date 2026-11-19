@@ -53,9 +53,10 @@ def _geojson(geoms: np.ndarray) -> list[str | None]:
     return [None if g is None else shapely.to_geojson(g) for g in geoms]
 
 
-def convert(batch: pa.RecordBatch, with_series: set[str]) -> pa.Table:
+def convert(batch: pa.RecordBatch, with_series: set[str], to_wgs84: Transformer) -> pa.Table:
     df = batch.to_pandas()
     geoms = shapely.from_wkb(df["geometry"].to_numpy())
+    geoms = shapely.transform(geoms, lambda xy: np.column_stack(to_wgs84.transform(xy[:, 0], xy[:, 1])))
     geoms = shapely.set_precision(shapely.simplify(geoms, SIMPLIFY_DEG, preserve_topology=True), PRECISION_DEG)
     west, south, east, north = shapely.bounds(geoms).T
     centers = shapely.centroid(geoms)

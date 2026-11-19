@@ -62,7 +62,7 @@
   // kind: "dw" or "jrc"; src: that source's entry of the tool result ({ data, normalization_factor? }).
   function buildFigure(kind, src, lakeId, breakDate) {
     const series = SERIES[kind];
-    const cols = series.map(([key]) => src.data[key]);
+    const cols = series.map(([key]) => src.data[key] ?? src.data.dates.map(() => null));
     // Relative area [%]: Dynamic World is normalized by the lake's largest area, JRC by the sum of the three
     // series at each date.
     const total = (i) => kind === "dw" ? src.normalization_factor : cols.reduce((a, c) => a + (c[i] ?? 0), 0);

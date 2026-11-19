@@ -290,6 +290,7 @@
 
   app.ontoolresult = ({ structuredContent: data }) => {
     const first = data?.geojson?.features ?? [];
+    loaded = true; // later pans and zooms reload through lakes_in_view, even after an empty first result
     if (!first.length) {
       status.textContent = "No lakes in the tool result.";
       return;

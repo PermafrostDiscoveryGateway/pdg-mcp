@@ -54,12 +54,13 @@ the data and charts come from the water_timeseries library itself.
 
 | Tool | View | Matches the dashboard's |
 |---|---|---|
-| `show_lakes(north?, south?, east?, west?, only_drained?, only_with_timeseries?)` | `ui://water/lake-map.html` | drainage-year coloring (`get_style_pmtiles_drainage_year`), stable lakes in grey, *Hide stable lakes* toggle, hover fields and labels (`map_utils.py`), *Drainage Year* legend, ESRI / Dark Matter / TCVIS base layers, points below zoom 8 and polygons above, click popup with *Select for time series* |
-| `get_lake_timeseries(lake_id)` | `ui://water/lake-timeseries.html` | *Time Series Plot of Lake* section: the Dynamic World figure (water, vegetation, bare, breakpoint line, relative-area axis) and the JRC figure, both built by `plot_timeseries_interactive`, plus *Save Interactive Plot (HTML)* buttons (via the host's download) |
+| `show_lakes(north?, south?, east?, west?, only_drained?, only_with_timeseries?, limit?, offset?)` | `ui://water/lake-map.html` | drainage-year coloring (`get_style_pmtiles_drainage_year`), stable lakes in grey, *Hide stable lakes* toggle, hover fields and labels (`map_utils.py`), *Drainage Year* legend, ESRI / Dark Matter / TCVIS base layers, points below zoom 8 and polygons above, click popup with *Select for time series* |
+| `get_lake_timeseries(lake_id)` | `ui://water/lake-timeseries.html` | *Time Series Plot of Lake* section: the Dynamic World chart (water, vegetation, bare, breakpoint line, relative-area axis) and the JRC chart, drawn from the raw series to match `plot_timeseries_interactive`, plus *Save Interactive Plot (HTML)* buttons (via the host's download) |
 
 *Select for time series* and *Ask Claude to explain this series* send a message into the chat instead of
-rerunning a Streamlit page. Polygons and Plotly figures go only in `structuredContent` (for the views); the text
-result the model reads holds the lake attributes, break statistics and the masked series.
+rerunning a Streamlit page. Lake geometry goes only in `structuredContent` (for the view); the text
+result the model reads holds the lake attributes. `get_lake_timeseries` returns the same data to both: break statistics
+and the masked series.
 
 Not mirrored: the Near Real-Time mode, the monthly drainage statistics heatmap, recent imagery, yearly
 thumbnails and timelapses (all Earth Engine), on-demand downloads, shareable links and the tutorial.
@@ -71,11 +72,12 @@ thumbnails and timelapses (all Earth Engine), on-demand downloads, shareable lin
 
 - `DWDataset` / `JRCDataset` masking (no-data and snow months dropped) and the dashboard's vegetation grouping;
 - `SimpleBreakpoint` breaks (the Historical mode's `break_method=simple`) with pre/post-break medians and change;
-- the dashboard's figures, `plot_timeseries_interactive(lake, breakpoints=break_date, plot_variables=["water",
-  "vegetation", "bare"])` for DW and the JRC equivalent, saved as Plotly JSON;
 - the dashboard's lake name (`geohash_to_human_readable_name`).
 
-The sample is 121 lakes on the Seward Peninsula, 5 with time series, 3 of them drained. The server only reads the
+The series are plain data: dates and one array per variable (6 decimals, since the chart's hover text divides them),
+plus the Dynamic World `normalization_factor`. The view draws the charts itself (below).
+
+The bundled sample is 121 lakes on the Seward Peninsula, 5 with time series, 3 of them drained. The server only reads the
 JSON, so it doesn't depend on the library. Point `[water] data_dir` at another export to swap the data. The
 library needs its full environment, and water-timeseries-v2's lockfile currently pins numpy<2 with a pyarrow that
 needs numpy 2, so run the export in an isolated env:
@@ -85,12 +87,105 @@ uv run --no-project --python 3.12 --with ../water-timeseries-v2 --with "pyarrow<
     python scripts/export_water_fixtures.py ../water-timeseries-v2/tests/data src/arcticdata_mcp/data/water
 ```
 
+### Time series charts
+
+`lake_timeseries.html` builds each chart from the raw series (`buildFigure`), as a port of
+`DWDataset` / `JRCDataset.plot_timeseries_interactive`: the same traces, colors, hover text (`value ha | share %`),
+axes, breakpoint line and `plotly_white` styling. Dynamic World shows each class as a share of the lake's
+`normalization_factor`. JRC shows it as a share of the three series at that date. A lake with no break has no
+breakpoint line. Traces are SVG `scatter`, so a chart takes no WebGL context (#17).
+
+This replaced precomputed Plotly figures, which were about 26 KB per lake against 1 KB of data. Changing the chart
+style means editing the view, not re-running the library. `buildFigure` was checked against the library's figures
+for all 5 lakes (traces, values, hover shares to 0.01 point, breakpoint lines, axes and template).
+
+### Lakes at scale: the GeoParquet store
+
+`[water] data_dir` (or `ARCTICDATA_MCP_WATER_DATA_DIR`) picks the backend from what the directory holds
+(`arcticdata_mcp/waterdata.py`):
+
+- `lakes.parquet`: lakes are queried with [DuckDB](https://duckdb.org), a Python package that runs inside the server
+  (nothing to install or run besides `uv sync`). A bounding box reads only the row groups that overlap it, so the
+  full layer is never loaded into memory.
+- `lakes.geojson`, or an empty `data_dir` (the bundled fixture): the whole file is held in memory and filtered in
+  Python. Same results, for tests and small exports.
+
+`scripts/build_water_store.py` writes `lakes.parquet` from the water-timeseries-v2 lake layer, or from the sample cut
+by `scripts/make_water_sample.py`. It keeps the columns `show_lakes` returns, adds `west/south/east/north` and
+`lon/lat` (so the server needs no DuckDB spatial extension, which downloads at runtime), stores simplified
+GeoJSON geometry, and sorts by `id_geohash` (a geohash prefix is a map tile) in 20k-row groups:
+
+```bash
+uv run --group ingest python scripts/build_water_store.py \
+    ../water-timeseries-v2/data/DW_historicalbp_simple_merged_breaks_with_allgeoms_v4.parquet data/water-store
+ARCTICDATA_MCP_WATER_DATA_DIR=data/water-store uv run arcticdata-mcp --transport http --insecure
+```
+
+`timeseries.json` is copied next to it and still holds only the 5 test lakes.
+
+What `show_lakes` returns:
+
+- **Ranking.** Drained lakes first, largest water change first, then stable lakes by area. A capped result keeps
+  the lakes that matter.
+- **Model text.** Counts (`numFound`, `drained` over every match), a `limit`/`offset` page of lake attributes
+  (default 50) and `next_offset`.
+- **Map geometry follows the zoom the box implies.** With no box, or one wider than about 4 degrees (zoom below 8),
+  the view gets one centroid per lake, up to 2000. Zoomed in, it gets simplified polygons, up to 300. Both stay
+  around 1 MB. `map_note` says when the map shows fewer lakes than match, and the status line under the title
+  shows it.
+
+### Panning and zooming
+
+The map reloads when the view changes. On `moveend` (300 ms debounce) `lake_map.html` calls the app-only
+`lakes_in_view(north, south, east, west, zoom, only_drained?, only_with_timeseries?)` through
+`app.callServerTool`, then redraws. The tool has `AppConfig(visibility=["app"])`, so a host hides it from the model
+(a plain MCP client still lists it, with `_meta.ui.visibility = ["app"]`). It returns only the map payload (features,
+counts, `map_note`) and uses the map's real zoom instead of one derived from the box. *Hide stable lakes* is sent as
+`only_drained`, so the feature cap is spent on drained lakes. A response that arrives after a newer move is dropped.
+The first draw (`show_lakes`) fits the map to its result and does not trigger a reload.
+
+Longitudes: Leaflet repeats the base map across world copies but draws vector layers only at their own
+coordinates. The map therefore sends wrapped longitudes (`west > east` when the view crosses 180 degrees, which the
+server treats as `[west, 180]` plus `[-180, east]`) and draws each lake once per world copy the view overlaps, with
+`worldCopyJump` on. Without that, lakes near the antimeridian (Alaska, Canada, far-eastern Siberia) vanish when the
+view sits in another copy.
+
 ### Try it
 
 > Show me the drained lakes in the water timeseries sample, then the time series of the biggest one.
 
+### Map rendering decision
+
+The map stays Leaflet with capped GeoJSON from `lakes_in_view` (#16, item 4 deferred), not vector tiles on MapLibre:
+
+- Leaflet draws SVG and image tiles, so a map view takes no WebGL context. MapLibre GL is WebGL: each `show_lakes`
+  result is its own iframe, so a long conversation would hold one context per map, from the same per-browser pool
+  of about 16 that the time series charts used to exhaust (#17). Whether MCP App iframes share that pool is not
+  verified for Claude or ChatGPT.
+- Vector tiles need a public HTTPS tile endpoint (the iframe can't use the server's Keycloak auth), a tile build
+  for the 3 GB layer (tippecanoe) and CSP changes. That is a hosting and data-exposure decision.
+- The cost is coverage: at most 2000 dots or 300 polygons per view, and every move replaces the whole payload.
+
 ### Limitations
 
-- Sample data only. Pan-Arctic scale needs PMTiles (as the dashboard uses) rather than GeoJSON in the tool
-  result, and a hosted data source instead of bundled files.
+- The map shows the top 2000 dots or 300 polygons of a view (ranked drained-first, largest water change first),
+  so wide views of dense areas show a sample until you zoom in. The status line says when that happens.
+- Only 5 lakes have a time series: the local data has no per-lake series for the full layer, so a source for them
+  is still needed before `get_lake_timeseries` can cover more lakes (#16).
 - Lakes without a time series in the sample show as stable; in the dashboard every lake has been analysed.
+
+### Future work
+
+- **Full layer:** run `scripts/build_water_store.py` on the full 4M-lake file and measure build time, memory and
+  `show_lakes` / `lakes_in_view` query speed. Only the 34k-lake sample has been tried.
+- **Deployment:** the image and chart don't ship water data. A deployed server needs `lakes.parquet` on a volume or
+  in the image and `[water] data_dir` (`ARCTICDATA_MCP_WATER_DATA_DIR`) set through `extraEnv`.
+- **Per-lake series source:** find where the full layer's monthly series come from, then add a per-lake store (for
+  example `timeseries.parquet`, queried by `id_geohash`) behind `WaterData`.
+- **Real hosts:** try the views in claude.ai and the desktop app (so far only the ext-apps basic-host), and check
+  that the SVG charts take no WebGL context after many time series in one conversation (#17).
+- **Tiles, if the cap is too tight:** weigh vector tiles on MapLibre (needs a public tile endpoint and one WebGL
+  context per map; release it with `map.remove()` when the view is hidden) against Leaflet vector-tile or
+  server-rendered raster tiles. Settle the tile hosting question first.
+- **Map payloads:** every move replaces the whole payload; a bbox cache or loading state would cut flicker on slow
+  hosts. The top-N ranking favours Eurasia over Canada in whole-Arctic views; balancing by region is open.

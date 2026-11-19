@@ -9,7 +9,7 @@ from fastmcp.apps import AppConfig
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from arcticdata_mcp import solr
+from arcticdata_mcp import ontology, solr
 from arcticdata_mcp.client import as_list
 from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
 from arcticdata_mcp.tools.common import (
@@ -280,12 +280,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         sort: Sort = "relevance",
         latest_only: LatestOnly = True,
     ) -> dict[str, Any]:
-        """Find datasets containing a measured variable (EML data-table attribute) by name, label, description or unit.
+        """Free-text search of EML data-table attributes by name, label, description or unit.
 
-        Example: search_by_measured_variable(variable="snow water equivalent")
+        For "datasets that measure X" questions prefer search_by_variable, which also finds datasets whose
+        attributes are annotated with the matching ontology concept but described in other words.
+        Use this tool for units, column names, or exact attribute wording.
+        Example: search_by_measured_variable(variable="celsius", field="unit")
         """
         fields = {
-            "any": ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"],
+            "any": solr.ATTRIBUTE_FIELDS,
             "name": ["attributeName"],
             "label": ["attributeLabel"],
             "description": ["attributeDescription"],
@@ -323,7 +326,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         concept_uri: Annotated[
             str,
             Field(
-                description="Ontology concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001197' (ECSO), or a wildcard."
+                description="Ontology concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001207' (ECSO 'Soil Depth'), a bare ECSO id such as 'ECSO_00001207', or a wildcard."
             ),
         ],
         rows: Rows = 10,
@@ -333,11 +336,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     ) -> dict[str, Any]:
         """Find datasets semantically annotated with an ontology concept (e.g. ECSO measurement types).
 
-        Tip: get_facet_counts(field="sem_annotation") lists concept URIs in use.
+        DataONE PURLs are matched in both their http:// and https:// forms.
+        Don't know the URI? find_variable_concepts maps a term like "soil depth" to ECSO PURLs, and
+        search_by_variable does the lookup and search in one call.
         """
-        return await run(
-            f"sem_annotation:{solr.term(concept_uri)}", rows=rows, start=start, sort=sort, latest_only=latest_only
+        out = await run(
+            ontology.annotation_clause([concept_uri]), rows=rows, start=start, sort=sort, latest_only=latest_only
         )
+        if concept := ontology.concept_by_uri(concept_uri):
+            out = {"concept": {"uri": concept.uri, "label": concept.label}, **out}
+        return out
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "spatial"})
     async def search_by_location_name(
@@ -585,7 +593,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 f"beginDate:[* TO {solr.solr_date(end_date, True)}] AND endDate:[{solr.solr_date(start_date)} TO *]"
             )
         res = await run(q, rows=0, latest_only=latest_only, format_type=None if format_type == "any" else format_type)
-        return {"count": res["numFound"], "query": res["query"]}
+        return {"count": res["numFound"], "latest_only": latest_only, "query": res["query"]}
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "facets"})
     async def get_facet_counts(

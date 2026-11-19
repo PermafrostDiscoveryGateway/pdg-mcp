@@ -47,6 +47,9 @@ DATA_FIELDS = [
     "obsoletedBy",
 ]
 
+# EML data-table attribute fields, for free-text variable searches.
+ATTRIBUTE_FIELDS = ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"]
+
 SORT_OPTIONS = {
     "relevance": "score desc",
     "newest": "dateUploaded desc",
@@ -216,8 +219,9 @@ async def search(
     facet_queries: dict[str, str] | None = None,
     raw: bool = False,
 ) -> dict[str, Any]:
-    """Run a search and return ``{numFound, start, rows, query, results}``.
+    """Run a search and return ``{numFound, latest_only, start, rows, query, results}``.
 
+    ``latest_only`` is echoed so callers can tell whether ``numFound`` counts only current versions.
     ``facet_queries`` maps a key to a Solr query; the same request then also returns ``facet_queries``, how many of
     the matching documents each query matches.
     """
@@ -247,6 +251,7 @@ async def search(
     docs = resp.get("docs", [])
     out: dict[str, Any] = {
         "numFound": resp.get("numFound", 0),
+        "latest_only": latest_only,
         "start": resp.get("start", 0),
         "rows": len(docs),
         "query": {"q": query, "fq": fq},

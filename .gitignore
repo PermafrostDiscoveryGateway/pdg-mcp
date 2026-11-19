@@ -6,5 +6,10 @@ config.toml
 downloads/
 dist/
 .idea/
-# Local sample data at the repository root only (src/arcticdata_mcp/data/ is tracked).
+.DS_Store
+.env
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
 /data/

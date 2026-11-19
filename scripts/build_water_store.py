@@ -31,6 +31,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
+from pyproj import CRS, Transformer
 
 BUNDLED = Path(__file__).resolve().parent.parent / "src" / "arcticdata_mcp" / "data" / "water"
 SOURCE_COLUMNS = [
@@ -77,12 +78,15 @@ def main(src: str, dest: str) -> None:
     out.mkdir(parents=True, exist_ok=True)
     with_series = set(json.loads((BUNDLED / "timeseries.json").read_text())["lakes"])
     pf = pq.ParquetFile(src)
+    geo = json.loads(pf.schema_arrow.metadata[b"geo"])
+    crs = geo["columns"][geo["primary_column"]].get("crs")
+    to_wgs84 = Transformer.from_crs(CRS.from_json_dict(crs) if crs else "OGC:CRS84", "EPSG:4326", always_xy=True)
     with tempfile.TemporaryDirectory(dir=out) as tmp:
         unsorted = Path(tmp) / "unsorted.parquet"
         writer = None
         n = 0
         for batch in pf.iter_batches(batch_size=BATCH_ROWS, columns=SOURCE_COLUMNS):
-            table = convert(batch, with_series)
+            table = convert(batch, with_series, to_wgs84)
             writer = writer or pq.ParquetWriter(unsorted, table.schema, compression="zstd")
             writer.write_table(table)
             n += table.num_rows

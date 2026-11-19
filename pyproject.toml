@@ -40,6 +40,7 @@ dev = [
 ingest = [
     "pandas>=3.1.0",
     "pyarrow>=26.0.0",
+    "pyproj>=3.7.0",
     "shapely>=2.2.0",
 ]
 

@@ -129,11 +129,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             free_text = "attribute:(" + " AND ".join(solr.term(w) for w in variable.split()) + ")"
         clauses = [c for c in (annotation, free_text) if c]
         q = clauses[0] if len(clauses) == 1 else " OR ".join(f"({c})" for c in clauses)
-        facets: list[tuple[str, Any]] = [("facet", "true")]
-        if annotation:
-            facets.append(("facet.query", f"{{!key=annotation}}{annotation}"))
-        if free_text:
-            facets.append(("facet.query", f"{{!key=free_text}}{free_text}"))
+        facets = {key: clause for key, clause in (("annotation", annotation), ("free_text", free_text)) if clause}
         res = await solr.search(
             client,
             q,
@@ -142,7 +138,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             sort=sort,
             latest_only=latest_only,
             fl=[*solr.METADATA_FIELDS, "sem_annotation"],
-            extra_params=facets,
+            facet_queries=facets,
             raw=True,
         )
 

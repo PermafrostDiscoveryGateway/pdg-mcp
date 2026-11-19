@@ -90,3 +90,15 @@ async def test_bundled_ecso_table_covers_indexed_annotations():
             uncovered[uri] = uncovered.get(uri, 0) + n
     worst = sorted(uncovered.items(), key=lambda kv: -kv[1])
     assert sum(uncovered.values()) <= MAX_UNCOVERED_DATASETS, f"ECSO concepts annotated but not bundled: {worst}"
+
+
+async def test_search_missing_metadata(live):
+    async def found(**args):
+        return (await live.call_tool("search_missing_metadata", {"rows": 0, **args})).structured_content["numFound"]
+
+    r = (await live.call_tool("search_missing_metadata", {"missing": ["keywords"], "rows": 2})).structured_content
+    assert r["numFound"] > 0 and r["also_missing"]["keywords"] == r["numFound"]
+    assert all("keywords" not in d for d in r["results"])
+    both = ["keywords", "spatial_coverage"]
+    assert await found(missing=both, match="any") >= await found(missing=both)  # "any" can't match fewer than "all"
+    assert await found(missing=["attributes"], eml_only=False) >= await found(missing=["attributes"])

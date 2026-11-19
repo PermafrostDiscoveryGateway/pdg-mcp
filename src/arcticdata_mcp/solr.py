@@ -131,6 +131,43 @@ def bbox_clause(north: float, south: float, east: float, west: float, mode: str 
     )
 
 
+# Metadata a record can lack, as the Solr clause that matches records that HAVE it. Checked against the live index:
+# The place and GCMD keyword fields (empty for every record) are left out because "missing" would be misleading.
+# license is tested on licenseName, which only about 1% of records have, so most records show as lacking it.
+PRESENT_CLAUSES = {
+    "attributes": "attributeName:*",
+    "units": "attributeUnit:*",
+    "keywords": "keywords:*",
+    "abstract": "abstract:*",
+    "spatial_coverage": "northBoundCoord:*",
+    "temporal_coverage": "beginDate:*",
+    "funding": "(awardNumber:* OR funderName:* OR fundingText:*)",
+    "semantic_annotations": "sem_annotation:*",
+    "license": "licenseName:*",
+}
+# EML records only: portals, ISO 19115, Dublin Core and FGDC records have no EML attributes, funding or annotations.
+EML_FORMAT_FQ = "formatId:(" + " OR ".join(term(p) for p in ("eml://*", "https://eml.ecoinformatics.org/*")) + ")"
+
+
+def missing_clause(name: str) -> str:
+    """Clause matching records that lack ``name`` (a key of PRESENT_CLAUSES)."""
+    try:
+        return f"-{PRESENT_CLAUSES[name]}"
+    except KeyError:
+        raise ToolError(f"Unknown metadata field {name!r}. Choose from: {', '.join(PRESENT_CLAUSES)}.") from None
+
+
+def missing_filters(names: list[str], match: str = "all") -> list[str]:
+    """Filter queries for records lacking all (one fq each) or any (one OR'd fq) of ``names``.
+
+    Solr matches nothing for a negative clause inside an OR, so each is anchored on ``*:*`` there.
+    """
+    clauses = [missing_clause(n) for n in names]
+    if match == "any" and len(clauses) > 1:
+        return [" OR ".join(f"(*:* AND {c})" for c in clauses)]
+    return clauses
+
+
 def _first(v: Any) -> Any:
     return v[0] if isinstance(v, list) and v else v
 
@@ -179,13 +216,14 @@ async def search(
     latest_only: bool = True,
     fl: list[str] | None = None,
     extra_fq: list[str] | None = None,
-    extra_params: list[tuple[str, Any]] | None = None,
+    facet_queries: dict[str, str] | None = None,
     raw: bool = False,
 ) -> dict[str, Any]:
     """Run a search and return ``{numFound, latest_only, start, rows, query, results}``.
 
     ``latest_only`` is echoed so callers can tell whether ``numFound`` counts only current versions.
-    Facet query counts from ``extra_params`` are returned under ``facet_queries``.
+    ``facet_queries`` maps a key to a Solr query; the same request then also returns ``facet_queries``, how many of
+    the matching documents each query matches.
     """
     clauses = [q] if isinstance(q, str) else [c for c in q if c]
     query = " AND ".join(f"({c})" for c in clauses) if clauses else "*:*"
@@ -205,11 +243,13 @@ async def search(
         ("sort", SORT_OPTIONS.get(sort, sort)),
     ]
     params += [("fq", f) for f in fq]
-    params += extra_params or []
+    if facet_queries:
+        params.append(("facet", "true"))
+        params += [("facet.query", f"{{!key={key}}}{clause}") for key, clause in facet_queries.items()]
     data = await client.solr(params)
     resp = data.get("response", {})
     docs = resp.get("docs", [])
-    out = {
+    out: dict[str, Any] = {
         "numFound": resp.get("numFound", 0),
         "latest_only": latest_only,
         "start": resp.get("start", 0),
@@ -217,6 +257,6 @@ async def search(
         "query": {"q": query, "fq": fq},
         "results": docs if raw else [summarize(d, client) for d in docs],
     }
-    if "facet_queries" in data.get("facet_counts", {}):
-        out["facet_queries"] = data["facet_counts"]["facet_queries"]
+    if facet_queries:
+        out["facet_queries"] = data.get("facet_counts", {}).get("facet_queries", {})
     return out

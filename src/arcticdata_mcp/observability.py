@@ -209,8 +209,7 @@ class TextFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         fields = " ".join(
-            f"{k}={v if isinstance(v, str) else json.dumps(v, default=str)}"
-            for k, v in _record_fields(record).items()
+            f"{k}={v if isinstance(v, str) else json.dumps(v, default=str)}" for k, v in _record_fields(record).items()
         )
         line = f"{self.formatTime(record)} {record.levelname} {record.name} {record.getMessage()} {fields}"
         if record.exc_info:

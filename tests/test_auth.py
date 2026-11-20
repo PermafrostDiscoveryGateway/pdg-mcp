@@ -61,7 +61,9 @@ async def test_rejection_logs_hashed_user_not_raw_sub(monkeypatch, caplog):
     raw_sub = "raw-sub-9876-abcd"
 
     async def fake(self, token):
-        return AccessToken(token=token, client_id="c", scopes=[], claims={"sub": raw_sub, "realm_access": {"roles": []}})
+        return AccessToken(
+            token=token, client_id="c", scopes=[], claims={"sub": raw_sub, "realm_access": {"roles": []}}
+        )
 
     monkeypatch.setattr(JWTVerifier, "verify_token", fake)
     v = RoleJWTVerifier(

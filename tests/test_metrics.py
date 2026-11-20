@@ -45,13 +45,9 @@ async def test_tool_series_exist_at_zero_before_any_call(settings, metrics):
         tools = [t.name for t in await c.list_tools()]
         for tool in tools:
             for status in ("ok", "error", "rate_limited"):
-                value = metrics.registry.get_sample_value(
-                    "pdg_mcp_tool_calls_total", {"tool": tool, "status": status}
-                )
+                value = metrics.registry.get_sample_value("pdg_mcp_tool_calls_total", {"tool": tool, "status": status})
                 assert value == 0.0, (tool, status)
-            assert metrics.registry.get_sample_value(
-                "pdg_mcp_tool_call_duration_seconds_count", {"tool": tool}
-            ) == 0.0
+            assert metrics.registry.get_sample_value("pdg_mcp_tool_call_duration_seconds_count", {"tool": tool}) == 0.0
     assert len(tools) > 10
     assert sample(metrics, "pdg_mcp_tool_calls_total", tool="unknown", status="not_found") == 0
     # Only the declared tools plus "unknown" exist: no series for anything a client invents.

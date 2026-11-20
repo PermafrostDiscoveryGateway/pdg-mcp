@@ -165,7 +165,20 @@ def test_report_contains_no_user_data(prom):
 
 
 def test_cli(prom, capsys):
-    rc = usage_report.main(["--prometheus-url", PROM, "--from", "2026-10-01", "--to", "2026-11-01", "--format", "csv", "--section", "summary"])
+    rc = usage_report.main(
+        [
+            "--prometheus-url",
+            PROM,
+            "--from",
+            "2026-10-01",
+            "--to",
+            "2026-11-01",
+            "--format",
+            "csv",
+            "--section",
+            "summary",
+        ]
+    )
     assert rc == 0
     assert "tool_calls,100" in capsys.readouterr().out
 
@@ -219,7 +232,10 @@ def test_archive_writes_one_file_per_finished_day(tmp_path):
     assert ok is True
     assert lines == ["2026-11-07: archived", "2026-11-08: archived", "2026-11-09: archived"]
     assert sorted(p.name for p in tmp_path.glob("usage-*.json")) == [
-        "usage-2026-11-07.json", "usage-2026-11-08.json", "usage-2026-11-09.json"]
+        "usage-2026-11-07.json",
+        "usage-2026-11-08.json",
+        "usage-2026-11-09.json",
+    ]
     day = json.loads((tmp_path / "usage-2026-11-09.json").read_text())
     assert day["period"] == {"from": "2026-11-09T00:00:00+00:00", "to": "2026-11-10T00:00:00+00:00"}
     assert day["summary"]["tool_calls"] == 100 and day["tools"][0]["tool"] == "search_datasets"

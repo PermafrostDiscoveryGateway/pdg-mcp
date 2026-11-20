@@ -205,7 +205,9 @@ def rebuild_csvs(directory: Path) -> None:
             tool_rows.append([day, t["tool"], t["calls"], t["not_ok"], _blank(t["p95_seconds"])])
         month_last[day[:7]] = (day, summary.get("active_users_peak_month"))  # sorted, so the last day wins
     _write_atomic(directory / "daily-summary.csv", _csv_text(["date", *SUMMARY_LABELS], summary_rows))
-    _write_atomic(directory / "daily-tools.csv", _csv_text(["date", "tool", "calls", "not_ok", "p95_seconds"], tool_rows))
+    _write_atomic(
+        directory / "daily-tools.csv", _csv_text(["date", "tool", "calls", "not_ok", "p95_seconds"], tool_rows)
+    )
     month_rows = []
     for month, (day, users) in sorted(month_last.items()):
         last_of_month = (datetime.fromisoformat(f"{month}-01") + timedelta(days=32)).replace(day=1) - timedelta(days=1)
@@ -307,7 +309,9 @@ def render_csv(report: dict[str, Any], section: str) -> str:
             value = report["summary"][key]
             w.writerow(["summary", key, "" if value is None else value, "", ""])
         for t in report["tools"]:
-            w.writerow(["tool", t["tool"], t["calls"], t["not_ok"], "" if t["p95_seconds"] is None else t["p95_seconds"]])
+            w.writerow(
+                ["tool", t["tool"], t["calls"], t["not_ok"], "" if t["p95_seconds"] is None else t["p95_seconds"]]
+            )
     return buf.getvalue()
 
 
@@ -327,19 +331,30 @@ def render(report: dict[str, Any], fmt: str, section: str) -> str:
 # --- CLI ----------------------------------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Usage numbers for a time period, from Prometheus.")
-    p.add_argument("--prometheus-url", default=os.environ.get("PROMETHEUS_URL", DEFAULT_URL),
-                   help=f"Prometheus base URL (default: $PROMETHEUS_URL or {DEFAULT_URL})")
+    p.add_argument(
+        "--prometheus-url",
+        default=os.environ.get("PROMETHEUS_URL", DEFAULT_URL),
+        help=f"Prometheus base URL (default: $PROMETHEUS_URL or {DEFAULT_URL})",
+    )
     p.add_argument("--from", dest="start", type=parse_when, default=None, help="start (default: 30 days before --to)")
     p.add_argument("--to", dest="end", type=parse_when, default=None, help="end (default: now)")
     p.add_argument("--format", choices=["table", "csv", "json"], default="table")
     p.add_argument("--section", choices=["summary", "tools", "all"], default="all")
-    p.add_argument("--archive-dir", type=Path, default=None,
-                   help="archive finished UTC days as usage-YYYY-MM-DD.json (plus daily CSVs) in this directory")
-    p.add_argument("--days", type=int, default=1, help="with --archive-dir: how many previous days to check (default 1)")
+    p.add_argument(
+        "--archive-dir",
+        type=Path,
+        default=None,
+        help="archive finished UTC days as usage-YYYY-MM-DD.json (plus daily CSVs) in this directory",
+    )
+    p.add_argument(
+        "--days", type=int, default=1, help="with --archive-dir: how many previous days to check (default 1)"
+    )
     p.add_argument("--force", action="store_true", help="with --archive-dir: rewrite days that are already archived")
     args = p.parse_args(argv)
 
-    headers = {"Authorization": f"Bearer {os.environ['PROMETHEUS_TOKEN']}"} if os.environ.get("PROMETHEUS_TOKEN") else {}
+    headers = (
+        {"Authorization": f"Bearer {os.environ['PROMETHEUS_TOKEN']}"} if os.environ.get("PROMETHEUS_TOKEN") else {}
+    )
 
     if args.archive_dir is not None:
         if args.start or args.end:

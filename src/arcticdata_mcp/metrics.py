@@ -119,7 +119,7 @@ class Metrics:
         self.adc_requests = Counter(
             f"{PREFIX}_adc_requests_total",
             "HTTP requests to the Arctic Data Center / DataONE, one per attempt. status is the HTTP status "
-            "code, or 'error' when no response arrived. Use status=~\"4..\" or \"5..\" for failures.",
+            'code, or \'error\' when no response arrived. Use status=~"4.." or "5.." for failures.',
             ["endpoint", "method", "status"],
             registry=r,
         )
@@ -219,10 +219,7 @@ def start_metrics_server(settings: ObservabilitySettings, metrics: Metrics) -> H
             settings.metrics_port, addr=settings.metrics_host, registry=metrics.registry
         )
     except OSError as exc:
-        log.error(
-            "Metrics disabled: cannot listen on %s:%s (%s)", settings.metrics_host, settings.metrics_port, exc
-        )
+        log.error("Metrics disabled: cannot listen on %s:%s (%s)", settings.metrics_host, settings.metrics_port, exc)
         return None
     log.info("Serving Prometheus metrics on %s:%s/metrics", settings.metrics_host, server.server_port)
     return server
-

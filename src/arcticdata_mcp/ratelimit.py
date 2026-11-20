@@ -125,9 +125,7 @@ class UpstreamLimiter:
         except TimeoutError as exc:
             m.adc_queue_wait.observe(time.perf_counter() - queued)
             m.adc_queue_timeouts.inc()
-            raise UpstreamBusy(
-                "The Arctic Data Center is busy serving other requests; please retry shortly."
-            ) from exc
+            raise UpstreamBusy("The Arctic Data Center is busy serving other requests; please retry shortly.") from exc
         finally:
             m.adc_waiting.dec()
         m.adc_queue_wait.observe(time.perf_counter() - queued)

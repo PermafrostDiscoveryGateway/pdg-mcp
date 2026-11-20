@@ -73,7 +73,9 @@ def test_claim_survives_release_removal_and_pruning():
 
 
 def test_named_storage_class_is_used():
-    claim = render("report.enabled=true", "report.persistence.storageClassName=fast").split("kind: PersistentVolumeClaim")[1]
+    claim = render("report.enabled=true", "report.persistence.storageClassName=fast").split(
+        "kind: PersistentVolumeClaim"
+    )[1]
     assert "storageClassName: fast" in claim
 
 
@@ -99,8 +101,18 @@ def test_static_pv_is_retained_reserved_and_bound_by_name():
 
 def test_static_pv_without_a_source_is_refused():
     result = subprocess.run(
-        ["helm", "template", "pdg", str(CHART), "--set", "report.enabled=true", "--set", "report.persistence.pv.enabled=true"],
-        capture_output=True, text=True,
+        [
+            "helm",
+            "template",
+            "pdg",
+            str(CHART),
+            "--set",
+            "report.enabled=true",
+            "--set",
+            "report.persistence.pv.enabled=true",
+        ],
+        capture_output=True,
+        text=True,
     )
     assert result.returncode != 0 and "report.persistence.pv.source is required" in result.stderr
 
@@ -132,11 +144,15 @@ def test_dashboard_namespace_falls_back_to_the_release_namespace():
 
 
 def test_dashboard_labels_and_annotations_are_configurable():
-    cm = render(
-        "grafana.dashboard.enabled=true",
-        "grafana.dashboard.labels.team=pdg",
-        "grafana.dashboard.annotations.grafana_folder=PDG",
-    ).split("kind: ConfigMap")[1].split("\n---")[0]
+    cm = (
+        render(
+            "grafana.dashboard.enabled=true",
+            "grafana.dashboard.labels.team=pdg",
+            "grafana.dashboard.annotations.grafana_folder=PDG",
+        )
+        .split("kind: ConfigMap")[1]
+        .split("\n---")[0]
+    )
     assert 'grafana_dashboard: "1"' in cm and "team: pdg" in cm  # extra labels are added to the default
     assert "grafana_folder: PDG" in cm
 

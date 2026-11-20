@@ -661,19 +661,23 @@ class EMLDocument:
         methods = self.free_text("methods")
         return methods.text if methods and methods.text else None
 
-    def literature(self) -> dict[str, Any]:
-        """Citations about the dataset, each copied whole with prose inside rendered as text."""
-        builder = _FreeTextBuilder(self)
-        out = {}
-        for key, tag in LITERATURE.items():
-            if found := [builder.tree(el) for el in self.dataset.findall(tag)]:
-                out[key] = found
-        return out
+    def literature(self) -> list[dict[str, Any]]:
+        """Citations about the dataset, one item each, with structured parts inside copied next to it."""
+        items = []
+        for kind, tag in LITERATURE.items():
+            for el in self.dataset.findall(tag):
+                builder = _FreeTextBuilder(self)
+                tree = builder.tree(el)
+                items.append(_compact({"type": kind, "citation": tree, "elements": builder.elements}))
+        return items
 
-    def maintenance(self) -> Any:
+    def maintenance(self) -> dict[str, Any] | None:
         """The <maintenance> block (update frequency, change history), copied whole; None if there is none."""
         found = self.dataset.find("maintenance")
-        return _FreeTextBuilder(self).tree(found) if found is not None else None
+        if found is None:
+            return None
+        builder = _FreeTextBuilder(self)
+        return _compact({"maintenance": builder.tree(found), "elements": builder.elements})
 
     def _resolved(self, el: Any, tag: str) -> list[Any]:
         """The ``tag`` children of ``el``, each in place of the element it references, if it does."""

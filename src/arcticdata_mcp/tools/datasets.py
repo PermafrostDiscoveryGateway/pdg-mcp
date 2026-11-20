@@ -255,7 +255,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             Field(
                 ge=1000,
                 le=2_000_000,
-                description="Approximate size limit per response for raw, free-text sections, entities, attributes and codes.",
+                description="Approximate size limit per response for raw, free-text sections, coverage places, "
+                "entities, attributes and codes.",
             ),
         ] = 50_000,
     ) -> dict[str, Any]:
@@ -272,7 +273,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         citations, literature cited), 'maintenance' (update frequency and change history), 'entities' (every file
         with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
         offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted; page all its
-        codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not valid XML
+        codes with section='codes' and attribute=<name>. Coverage pages its geographic places; a place whose polygons
+        do not fit shows polygons_omitted, and the full polygons are in section='raw'. Raw XML is paged by character, so a page is not valid XML
         on its own. Documents that are not EML datasets are returned as raw XML.
         Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
@@ -305,7 +307,12 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 raise ToolError(f"'{pid}' has no {section} section.")
             out.update(free.page(offset, max_chars))
         elif section == "coverage":
-            out.update(doc.coverage())
+            cov = doc.coverage()
+            geo = [eml.fit_polygons(g, max_chars) for g in cov.pop("geographic", [])]
+            page, nxt = eml.page_items(geo, offset, max_chars)
+            if any("polygons_omitted" in g for g in page):
+                out["note"] = "Some polygons were cut to fit max_chars; read them in full with section='raw'."
+            out.update({**cov, "n_geographic": len(geo), "offset": offset, "next_offset": nxt, "geographic": page})
         elif section == "people":
             out.update(doc.people())
         elif section == "project":

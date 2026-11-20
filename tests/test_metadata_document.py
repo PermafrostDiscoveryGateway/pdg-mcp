@@ -570,6 +570,56 @@ def test_coverage_keeps_polygons_taxon_ids_and_references():
     assert not d.unresolved
 
 
+def polygon(n_points, base=0):
+    points = "".join(
+        f"<gRingPoint><gRingLatitude>{70 + i / 1000}</gRingLatitude><gRingLongitude>{-150 + base}</gRingLongitude>"
+        "</gRingPoint>"
+        for i in range(n_points)
+    )
+    return f"<datasetGPolygon><datasetGPolygonOuterGRing>{points}</datasetGPolygonOuterGRing></datasetGPolygon>"
+
+
+def test_fit_polygons_cuts_oversized_polygons():
+    geo = f"<coverage><geographicCoverage><geographicDescription>Big</geographicDescription>{polygon(5)}{polygon(2000)}{polygon(5)}</geographicCoverage></coverage>"
+    [place] = load(one_table(extra=geo)).coverage()["geographic"]
+    fitted = eml.fit_polygons(place, 2000)
+    assert len(json.dumps(fitted)) <= 2000
+    assert fitted["polygons"] == place["polygons"][:1] and fitted["polygons_omitted"] == 2
+    assert fitted["description"] == "Big" and "polygons_omitted" not in place
+    assert eml.fit_polygons(place, 10**7) is place
+
+
+async def test_tool_pages_coverage(client, mock_api):
+    places = "".join(
+        f"<geographicCoverage><geographicDescription>Site {i}</geographicDescription>{polygon(20, i)}</geographicCoverage>"
+        for i in range(30)
+    )
+    huge = (
+        f"<geographicCoverage><geographicDescription>Huge</geographicDescription>{polygon(3000)}</geographicCoverage>"
+    )
+    temporal = (
+        "<temporalCoverage><singleDateTime><calendarDate>2020-01-01</calendarDate></singleDateTime></temporalCoverage>"
+    )
+    xml = one_table(extra=f"<coverage>{places}{huge}{temporal}</coverage>")
+    mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=xml))
+    seen, offset, pages = [], 0, []
+    while offset is not None:
+        r = (
+            await client.call_tool(
+                "get_metadata_document", {"pid": PID, "section": "coverage", "offset": offset, "max_chars": 5000}
+            )
+        ).structured_content
+        assert r["n_geographic"] == 31 and r["temporal"] == [{"date": "2020-01-01"}]
+        assert len(json.dumps(r["geographic"])) <= 5000
+        seen += r["geographic"]
+        pages.append(r)
+        offset = r["next_offset"]
+    assert len(pages) > 1
+    assert [g["description"] for g in seen] == [f"Site {i}" for i in range(30)] + ["Huge"]
+    assert seen[-1]["polygons_omitted"] == 1 and seen[-1]["polygons"] == []
+    assert "section='raw'" in pages[-1]["note"] and "note" not in pages[0]
+
+
 def test_literature_and_maintenance():
     extra = """<maintenance><description><para>Updated yearly.</para></description>
         <maintenanceUpdateFrequency>annually</maintenanceUpdateFrequency></maintenance>

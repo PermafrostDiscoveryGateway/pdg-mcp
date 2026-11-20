@@ -446,6 +446,23 @@ def fit_codes(attr: dict[str, Any], max_chars: int) -> dict[str, Any]:
     return attr
 
 
+def fit_polygons(place: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    """Return a geographic coverage ``place`` unchanged if it fits in ``max_chars``; otherwise a copy that keeps
+    only the leading polygons that fit, with ``polygons_omitted`` counting the rest (read them with section='raw')."""
+    polygons = place.get("polygons")
+    if not polygons or _size(place) <= max_chars:
+        return place
+    place = {**place, "polygons": []}
+    budget = max_chars - _size(place) - len('"polygons_omitted": 1000000, ')
+    for p in polygons:
+        budget -= _size(p) + 2
+        if budget < 0:
+            break
+        place["polygons"].append(p)
+    place["polygons_omitted"] = len(polygons) - len(place["polygons"])
+    return place
+
+
 def _display_name(el: Any) -> str | None:
     """A person's name, else their organization or position, for the outline."""
     given = " ".join(_texts(el, "individualName/givenName"))

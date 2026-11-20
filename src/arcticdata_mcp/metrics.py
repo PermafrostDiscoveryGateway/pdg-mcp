@@ -12,8 +12,9 @@ coexist in one process (the tests do this).
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from http.server import HTTPServer
+from typing import TYPE_CHECKING
 
 from prometheus_client import (
     CollectorRegistry,
@@ -24,6 +25,10 @@ from prometheus_client import (
     generate_latest,
     start_http_server,
 )
+from prometheus_client.core import GaugeMetricFamily
+
+if TYPE_CHECKING:
+    from arcticdata_mcp.activeusers import ActiveUsers
 
 from arcticdata_mcp.config import ObservabilitySettings
 
@@ -47,6 +52,40 @@ TOOL_STATUSES = (
 TOOL_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
 UPSTREAM_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
 QUEUE_BUCKETS = (0.001, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30)
+ACTIVE_USERS = f"{PREFIX}_active_users"
+
+
+class ActiveUsersCollector:
+    """Exports ``pdg_mcp_active_users{period}``: distinct signed-in users, counted from the active-user store at
+    scrape time. ``period`` is ``day`` (this UTC day so far), ``month`` (this UTC month so far), ``7d`` or ``30d``
+    (rolling, in whole UTC days including today). Only counts leave the store, never hashes.
+
+    With no store attached (not yet, or tracking is off) the metric is described but has no samples.
+    """
+
+    def __init__(self) -> None:
+        self.store: ActiveUsers | None = None
+
+    def _family(self) -> GaugeMetricFamily:
+        return GaugeMetricFamily(
+            ACTIVE_USERS,
+            "Distinct signed-in users who made a tool call, by period: day and month are the current UTC day or "
+            "month so far; 7d and 30d are rolling whole UTC days including today. Anonymous calls are not counted.",
+            labels=["period"],
+        )
+
+    def describe(self) -> Iterator[GaugeMetricFamily]:
+        yield self._family()
+
+    def collect(self) -> Iterator[GaugeMetricFamily]:
+        family = self._family()
+        if self.store is not None:
+            try:
+                for period, n in self.store.counts().items():
+                    family.add_metric([period], n)
+            except Exception:  # a broken store must not break the whole scrape
+                log.warning("Could not count active users for /metrics", exc_info=True)
+        yield family
 
 
 class Metrics:
@@ -115,6 +154,12 @@ class Metrics:
         self.adc_waiting = Gauge(
             f"{PREFIX}_adc_requests_waiting", "Requests currently waiting for an ADC slot.", registry=r
         )
+        self.active_users = ActiveUsersCollector()
+        r.register(self.active_users)
+
+    def attach_active_users(self, store: ActiveUsers | None) -> None:
+        """Export counts from ``store`` as ``pdg_mcp_active_users`` (``None`` stops exporting them)."""
+        self.active_users.store = store
 
     def init_tools(self, tools: Iterable[str]) -> None:
         """Register the server's tool names and create every tool's series at zero.

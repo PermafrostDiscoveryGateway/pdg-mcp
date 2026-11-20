@@ -28,6 +28,22 @@ auth:
 observability:
   userHashKeySecret: {}   # e.g. {name: pdg-mcp-observability, key: user-hash-key}
 
+# Active users (pdg_mcp_active_users: today, this month, rolling 7 and 30 days). The server keeps one row per
+# hashed user per UTC day in a small SQLite file and exports only the counts. Without persistence the file is not
+# used and counts restart at zero whenever the pod does. persistence.enabled mounts a volume for it; that needs
+# observability.userHashKeySecret (hashes from a random key cannot be matched after a restart), allows one replica
+# only, and switches the Deployment to the Recreate strategy so the old pod lets go of the volume first.
+# retentionDays (minimum 31) is how long the hashed rows are kept; long-term numbers live in the report archive.
+activeUsers:
+  enabled: true
+  retentionDays: 35
+  persistence:
+    enabled: false
+    existingClaim: ""    # use a claim you created yourself instead of the chart's
+    size: 100Mi          # a row is ~30 bytes; this holds far more users than the service will have
+    accessMode: ReadWriteOnce
+    storageClassName: "" # empty = the cluster's default storage class. Prefer block storage: SQLite on NFS is unsafe
+
 # Prometheus metrics (/metrics). Served on their own pod port, which the Service and Ingress do not expose, so
 # they are reachable only from inside the cluster by scraping the pod. scrapeAnnotations adds the conventional
 # prometheus.io/* pod annotations; drop them if your Prometheus discovers targets another way.

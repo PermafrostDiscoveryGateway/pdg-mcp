@@ -163,3 +163,58 @@ def test_local_stack_loads_the_same_dashboard_file_the_chart_ships():
     compose = (CHART.parent.parent / "dev" / "observability" / "docker-compose.yml").read_text()
     assert "../../charts/pdg-mcp/dashboards:/var/lib/grafana/dashboards" in compose
     assert DASHBOARD_JSON.is_file() and not (CHART.parent.parent / "dashboards").exists()  # one copy only
+
+
+# --- active-user database volume ------------------------------------------------------------------------------
+HASH_KEY = ("observability.userHashKeySecret.name=obs", "observability.userHashKeySecret.key=user-hash-key")
+
+
+def render_fails(*sets: str) -> str:
+    args = ["helm", "template", "pdg", str(CHART)]
+    for s in sets:
+        args += ["--set", s]
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    return result.stderr
+
+
+def deployment(out: str) -> str:
+    return out.split("kind: Deployment")[1].split("\n---")[0]
+
+
+def test_active_users_are_counted_in_memory_by_default():
+    out = render()
+    dep = deployment(out)
+    assert 'ARCTICDATA_MCP_OBSERVABILITY_ACTIVE_USERS_ENABLED\n              value: "true"' in dep
+    assert "ACTIVE_USERS_DB" not in dep and "volumeMounts" not in dep and "Recreate" not in dep
+    assert "active-users" not in out
+
+
+def test_active_user_volume_is_mounted_and_the_database_put_on_it():
+    out = render("activeUsers.persistence.enabled=true", *HASH_KEY)
+    dep = deployment(out)
+    assert "value: /data/active-users/active-users.sqlite" in dep
+    assert "mountPath: /data/active-users" in dep and "claimName: pdg-active-users" in dep
+    assert "type: Recreate" in dep and "fsGroup: 10001" in dep
+    pvc = out.split("name: pdg-active-users")[1].split("\n---")[0]
+    assert "helm.sh/resource-policy: keep" in pvc and "storage: 100Mi" in pvc
+
+
+def test_active_user_volume_uses_an_existing_claim():
+    out = render("activeUsers.persistence.enabled=true", "activeUsers.persistence.existingClaim=mine", *HASH_KEY)
+    assert "claimName: mine" in deployment(out)
+    assert "kind: PersistentVolumeClaim" not in out
+
+
+def test_active_user_volume_needs_the_hash_key_secret():
+    assert "needs observability.userHashKeySecret" in render_fails("activeUsers.persistence.enabled=true")
+
+
+def test_active_user_volume_allows_one_replica_only():
+    err = render_fails("activeUsers.persistence.enabled=true", "replicaCount=2", *HASH_KEY)
+    assert "replicaCount: 1 only" in err
+
+
+def test_no_active_user_volume_when_tracking_is_off():
+    out = render("activeUsers.enabled=false", "activeUsers.persistence.enabled=true")
+    assert "pdg-active-users" not in out and "ACTIVE_USERS_DB" not in out

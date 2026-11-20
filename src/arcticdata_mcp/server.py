@@ -10,9 +10,10 @@ from contextlib import asynccontextmanager
 import httpx
 from fastmcp import FastMCP
 
+from arcticdata_mcp.activeusers import ActiveUsers
 from arcticdata_mcp.auth import build_auth
 from arcticdata_mcp.client import DataONEClient
-from arcticdata_mcp.config import Settings
+from arcticdata_mcp.config import ObservabilitySettings, Settings
 from arcticdata_mcp.metrics import Metrics
 from arcticdata_mcp.observability import ToolCallLogMiddleware
 from arcticdata_mcp.ratelimit import UserRateLimitMiddleware
@@ -40,19 +41,45 @@ Separately, show_lakes and get_lake_timeseries serve a small sample of Arctic la
 """
 
 
+def build_active_users(obs: ObservabilitySettings, *, require_auth: bool) -> ActiveUsers | None:
+    """The active-user store the settings ask for, or ``None`` when there is nothing to count.
+
+    Without authentication every caller is anonymous, so there are no users to count. A database file is only
+    used with a configured ``user_hash_key``: hashes from a random per-process key change on restart, so the same
+    person would be counted again after every restart.
+    """
+    if not obs.active_users_enabled or not require_auth:
+        return None
+    path = obs.active_users_db
+    if path and not obs.user_hash_key:
+        log.warning(
+            "observability.active_users_db is set but observability.user_hash_key is not: keeping active users in "
+            "memory only, because hashes from a random key cannot be matched after a restart"
+        )
+        path = ""
+    elif not path:
+        log.warning("observability.active_users_db is not set: active-user counts restart at zero with the process")
+    return ActiveUsers(path, obs.active_users_retention_days)
+
+
 def create_server(
     settings: Settings,
     *,
     require_auth: bool = True,
     transport: httpx.AsyncBaseTransport | None = None,
     metrics: Metrics | None = None,
+    active_users: ActiveUsers | None = None,
 ) -> FastMCP:
     """Build the MCP server. ``transport`` lets tests inject a mock HTTP transport.
 
     ``metrics`` is the collector set to update; the caller serves it (see ``start_metrics_server``).
+    ``active_users`` overrides the store built from the settings (tests use it).
     """
     metrics = metrics or Metrics()
     client = DataONEClient(settings, transport=transport, metrics=metrics)
+    if active_users is None:
+        active_users = build_active_users(settings.observability, require_auth=require_auth)
+    metrics.attach_active_users(active_users)
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[None]:
@@ -80,7 +107,7 @@ def create_server(
             "values in logs change on restart and differ between pods"
         )
     # Logging goes first (outermost) so it also records calls the rate limiter rejects.
-    mcp.add_middleware(ToolCallLogMiddleware(settings.observability, metrics, user_hash_key))
+    mcp.add_middleware(ToolCallLogMiddleware(settings.observability, metrics, user_hash_key, active_users))
     mcp.add_middleware(UserRateLimitMiddleware(settings.ratelimit))
     ctx = ToolContext(settings=settings, client=client)
     for module in (search, datasets, objects, node, portals, apps, water):

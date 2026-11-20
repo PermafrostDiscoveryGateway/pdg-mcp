@@ -126,11 +126,17 @@ turn it off. stdio never opens a port.
 | `pdg_mcp_adc_queue_wait_seconds` | | Time spent waiting for a free ADC slot |
 | `pdg_mcp_adc_queue_timeouts_total` | | Requests that gave up waiting for a slot |
 | `pdg_mcp_adc_requests_in_flight`, `pdg_mcp_adc_requests_waiting` | | Requests holding / waiting for an ADC slot |
+| `pdg_mcp_active_users` | `period` | Distinct signed-in users: `day` and `month` (current UTC day / month so far), `7d` and `30d` (rolling) |
 | `pdg_mcp_process_*` | | Process memory, CPU and open files (Linux) |
 
 ADC failures are `pdg_mcp_adc_requests_total{status=~"4..|5.."}`. Labels never carry user IDs, PIDs or query text,
 and an unknown tool name is counted as `tool="unknown"`. Counters are kept in memory per pod and reset on restart,
 so use `rate()` / `increase()` in queries and scrape every pod.
+
+`pdg_mcp_active_users` is counted from a small SQLite table of `(UTC day, user_hash)` rows that the server keeps
+(`observability.active_users_db`; in memory when unset, so counts restart at zero with the process). Only the counts
+are exported. Rows are deleted after `active_users_retention_days` (default 35). Anonymous calls are not counted,
+so with `--insecure` the gauge stays at 0. See "Active users" in `docs/admin-guide.md`.
 
 A Grafana 12 dashboard is in `charts/pdg-mcp/dashboards/pdg-mcp.json`, and `scripts/usage_report.py` prints the same numbers for
 any period (table, CSV or JSON). See "Dashboard and reports" in `docs/admin-guide.md`. Because Prometheus keeps only a

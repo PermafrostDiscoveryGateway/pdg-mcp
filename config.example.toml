@@ -74,3 +74,10 @@ user_hash_key = ""
 metrics_enabled = true
 metrics_host = "127.0.0.1"
 metrics_port = 9100
+# Active users (pdg_mcp_active_users): the server keeps one row per hashed user per UTC day and exports only the
+# counts (today, this month, rolling 7 and 30 days). Put the database on a persistent volume; empty = in memory,
+# counts restart at zero with the process. It is only written to a file when user_hash_key is set. Rows older
+# than active_users_retention_days (minimum 31) are deleted.
+active_users_enabled = true
+active_users_db = ""        # e.g. "/data/active-users/active-users.sqlite"
+active_users_retention_days = 35

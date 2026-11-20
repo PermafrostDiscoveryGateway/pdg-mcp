@@ -38,6 +38,8 @@ def fake_prometheus(request: httpx.Request) -> httpx.Response:
         "pdg_mcp_adc_retries_total": 5,
         "pdg_mcp_adc_requests_total": 120,
     }
+    if q.startswith("max(max_over_time(pdg_mcp_active_users"):
+        return httpx.Response(200, json=vec(({}, 40 if 'period="month"' in q else 12)))
     if q.startswith("sum(increase("):
         for needle, value in scalars.items():
             if needle in q:
@@ -75,6 +77,14 @@ def test_summary_numbers(prom):
     assert s["upstream_busy_calls"] == 2
     assert (s["adc_4xx"], s["adc_5xx"], s["adc_no_response"], s["adc_retries"]) == (7, 3, 1, 5)
     assert s["adc_requests"] == 120
+    assert (s["active_users_peak_day"], s["active_users_peak_month"]) == (12, 40)
+
+
+def test_active_users_use_the_largest_gauge_value_in_the_period(prom):
+    report(prom)
+    queries = [c.request.url.params["query"] for c in prom.route_obj.calls]
+    assert f'max(max_over_time(pdg_mcp_active_users{{period="day"}}{WINDOW}))' in queries
+    assert f'max(max_over_time(pdg_mcp_active_users{{period="month"}}{WINDOW}))' in queries
 
 
 def test_per_tool_table_merges_and_sorts(prom):
@@ -100,6 +110,7 @@ def test_no_data_means_zero_not_an_error():
             r = usage_report.fetch_report(c, PROM, START, END)
     assert r["summary"]["tool_calls"] == 0
     assert r["summary"]["success_rate"] is None
+    assert r["summary"]["active_users_peak_day"] is None  # not tracked then, which is not the same as 0
     assert r["tools"] == []
 
 
@@ -129,7 +140,7 @@ def test_outputs(prom):
     r = report(prom)
     table = usage_report.render(r, "table", "all")
     assert "Tool calls" in table and "90.0%" in table and "search_datasets" in table
-    assert "Active users are not tracked yet" in table
+    assert "Most active users in one UTC day" in table and "python -m arcticdata_mcp.activeusers" in table
 
     csv_tools = usage_report.render(r, "csv", "tools").splitlines()
     assert csv_tools[0] == "tool,calls,not_ok,p95_seconds"
@@ -145,8 +156,12 @@ def test_outputs(prom):
 
 
 def test_report_contains_no_user_data(prom):
-    text = json.dumps(report(prom)).lower()
-    assert "user" not in text.replace("rate_limit", "")  # only the explanatory table footer mentions users
+    """User fields are counts only: no per-user rows or identifiers."""
+    r = report(prom)
+    user_fields = {k: v for k, v in r["summary"].items() if "user" in k}
+    assert set(user_fields) == {"active_users_peak_day", "active_users_peak_month"}
+    assert all(isinstance(v, int) for v in user_fields.values())
+    assert "user" not in json.dumps(r["tools"]).lower() and "user_hash" not in json.dumps(r)
 
 
 def test_cli(prom, capsys):
@@ -317,3 +332,38 @@ def test_cli_archive_rejects_from_and_to_and_bad_days(tmp_path):
         usage_report.main(["--archive-dir", str(tmp_path), "--from", "2026-10-01"])
     with pytest.raises(SystemExit):
         usage_report.main(["--archive-dir", str(tmp_path), "--days", "0"])
+
+
+def test_monthly_users_take_the_last_archived_day_of_each_month(tmp_path):
+    def day_file(day, month_users):
+        summary = {k: 0 for k in usage_report.SUMMARY_LABELS} | {"active_users_peak_month": month_users}
+        (tmp_path / f"usage-{day}.json").write_text(json.dumps({"summary": summary, "tools": []}))
+
+    day_file("2026-10-30", 31)
+    day_file("2026-10-31", 33)
+    day_file("2026-11-01", 4)
+    day_file("2026-11-02", 6)
+    usage_report.rebuild_csvs(tmp_path)
+    assert (tmp_path / "monthly-users.csv").read_text().splitlines() == [
+        "month,active_users,through_date,complete",
+        "2026-10,33,2026-10-31,yes",
+        "2026-11,6,2026-11-02,no",
+    ]
+
+
+def test_days_archived_before_active_users_existed_get_empty_cells(tmp_path):
+    old = {k: 1 for k in usage_report.SUMMARY_LABELS if not k.startswith("active_users")}
+    (tmp_path / "usage-2026-11-01.json").write_text(json.dumps({"summary": old, "tools": []}))
+    usage_report.rebuild_csvs(tmp_path)
+    header, row = (tmp_path / "daily-summary.csv").read_text().splitlines()
+    assert header.endswith("active_users_peak_day,active_users_peak_month") and row.endswith(",,")
+    assert (tmp_path / "monthly-users.csv").read_text().splitlines()[1] == "2026-11,,2026-11-01,no"
+
+
+def test_archived_day_holds_that_days_active_users(tmp_path):
+    with respx.mock() as router:
+        archive_router(router)
+        run_archive(tmp_path, days=1)
+    summary = json.loads((tmp_path / "usage-2026-11-09.json").read_text())["summary"]
+    assert (summary["active_users_peak_day"], summary["active_users_peak_month"]) == (12, 40)
+    assert (tmp_path / "monthly-users.csv").read_text().splitlines()[1] == "2026-11,40,2026-11-09,no"

@@ -224,7 +224,7 @@ def test_zero_ms_upstream_call_keeps_ms_field(monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger=observability.toolcall_log.name)
     mw = ToolCallLogMiddleware(ObservabilitySettings(), Metrics())
     rec = CallRecorder(calls=[UpstreamCall("query", "GET", 200, 0), UpstreamCall("query", "GET", 503, 7, retried=True)])
-    mw._log("t", "ok", None, observability.time.perf_counter(), rec)
+    mw._log("t", "ok", None, observability.time.perf_counter(), rec, "anonymous")
     first, second = caplog.records[-1].fields["adc_calls"]
     assert first == {"endpoint": "query", "method": "GET", "status": 200, "ms": 0}
     assert second == {"endpoint": "query", "method": "GET", "status": 503, "ms": 7, "retried": True}

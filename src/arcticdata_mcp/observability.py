@@ -28,6 +28,7 @@ from fastmcp.exceptions import NotFoundError, ToolError, ValidationError
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import ToolResult
 
+from arcticdata_mcp.activeusers import ActiveUsers
 from arcticdata_mcp.config import ObservabilitySettings
 from arcticdata_mcp.metrics import Metrics
 from arcticdata_mcp.ratelimit import ANONYMOUS, RateLimitExceeded, UpstreamBusy, UserRateLimitMiddleware
@@ -93,9 +94,14 @@ class ToolCallLogMiddleware(Middleware):
     """
 
     def __init__(
-        self, settings: ObservabilitySettings, metrics: Metrics | None = None, user_hash_key: str = ""
+        self,
+        settings: ObservabilitySettings,
+        metrics: Metrics | None = None,
+        user_hash_key: str = "",
+        active_users: ActiveUsers | None = None,
     ):
         self.metrics = metrics or Metrics()
+        self.active_users = active_users  # records each signed-in user once per UTC day
         # With no configured key, use a random one for this process so hashes are always keyed. They then
         # differ across restarts and pods (see observability.user_hash_key in config.example.toml).
         self.key = user_hash_key or settings.user_hash_key or secrets.token_hex(32)
@@ -139,18 +145,28 @@ class ToolCallLogMiddleware(Middleware):
         finally:
             _recorder.reset(reset)
             self.metrics.observe_tool_call(tool, status, time.perf_counter() - started)
+            user_hash = hash_user(UserRateLimitMiddleware.user_key(), self.key)
+            # Every call counts, including rejected or failed ones: the user still tried to use the service.
+            if self.active_users is not None:
+                self.active_users.record(user_hash)
             if self.log_enabled:
-                self._log(tool, status, error_type, started, recorder)
+                self._log(tool, status, error_type, started, recorder, user_hash)
 
     def _log(
-        self, tool: str, status: str, error_type: str | None, started: float, recorder: CallRecorder
+        self,
+        tool: str,
+        status: str,
+        error_type: str | None,
+        started: float,
+        recorder: CallRecorder,
+        user_hash: str,
     ) -> None:
         calls = recorder.calls
         fields: dict[str, Any] = {
             "tool": tool,
             "status": status,
             "duration_ms": round((time.perf_counter() - started) * 1000),
-            "user_hash": hash_user(UserRateLimitMiddleware.user_key(), self.key),
+            "user_hash": user_hash,
             "adc_call_count": len(calls),
             "adc_retries": sum(c.retried for c in calls),
             "adc_calls": [

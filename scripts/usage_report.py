@@ -17,10 +17,16 @@ to keep numbers for months, archive each finished UTC day to a directory:
     uv run python scripts/usage_report.py --archive-dir /data --days 3
 
 This writes ``usage-YYYY-MM-DD.json`` for each of the previous 3 UTC days that is not archived yet (re-running is
-safe, and a missed run is caught up), then rebuilds ``daily-summary.csv`` and ``daily-tools.csv`` from all the
-daily files. A day Prometheus has no data for is not written (it would look like a quiet day) and the command
-exits 1 if yesterday could not be archived, so a failing job signals that scraping or retention is broken.
-Distinct users cannot be added up across days; these files hold counts only.
+safe, and a missed run is caught up), then rebuilds ``daily-summary.csv``, ``daily-tools.csv`` and
+``monthly-users.csv`` from all the daily files. A day Prometheus has no data for is not written (it would look like
+a quiet day) and the command exits 1 if yesterday could not be archived, so a failing job signals that scraping or
+retention is broken. These files hold counts only, never per-user data.
+
+Active users: distinct users cannot be added up across days, so they come from the server's
+``pdg_mcp_active_users`` gauge, which counts them per UTC day and per UTC month. Each daily file records that
+day's active users and the month's so far; ``monthly-users.csv`` takes the month's value from its last archived
+day. For a report over any other period the script gives the busiest day's count; an exact distinct count for an
+arbitrary range comes from ``python -m arcticdata_mcp.activeusers`` in the server pod (within its retention).
 
 Caveats: numbers come from Prometheus, so they only reach back as far as its retention. ``increase()``
 extrapolates slightly at the edges of the period, so counts can be off by a small fraction of a call.
@@ -43,6 +49,7 @@ import httpx
 
 DEFAULT_URL = "http://localhost:9090"
 CALLS = "pdg_mcp_tool_calls_total"
+ACTIVE = "pdg_mcp_active_users"
 
 
 # --- time handling ------------------------------------------------------------------------------------------
@@ -87,6 +94,13 @@ def scalar(client: httpx.Client, base_url: str, expr: str, at: datetime) -> floa
     return 0.0 if value is None else value
 
 
+def optional(client: httpx.Client, base_url: str, expr: str, at: datetime) -> int | None:
+    """First value of a query rounded to an int, or None when there is no data (e.g. not tracked then)."""
+    result = query(client, base_url, expr, at)
+    value = _number(result[0]["value"][1]) if result else None
+    return None if value is None else round(value)
+
+
 def by_tool(client: httpx.Client, base_url: str, expr: str, at: datetime) -> dict[str, float | None]:
     return {r["metric"].get("tool", ""): _number(r["value"][1]) for r in query(client, base_url, expr, at)}
 
@@ -111,6 +125,15 @@ def fetch_report(client: httpx.Client, base_url: str, start: datetime, end: date
         "adc_5xx": total('pdg_mcp_adc_requests_total{status=~"5.."}'),
         "adc_no_response": total('pdg_mcp_adc_requests_total{status="error"}'),
         "adc_retries": total("pdg_mcp_adc_retries_total"),
+        # The gauges reset at the start of each UTC day / month and only grow within it, so the largest value in
+        # the period is that day's (or month's) count. max() over series guards against counting a user twice
+        # if two pods ever report at once.
+        "active_users_peak_day": optional(
+            client, base_url, f'max(max_over_time({ACTIVE}{{period="day"}}{window}))', end
+        ),
+        "active_users_peak_month": optional(
+            client, base_url, f'max(max_over_time({ACTIVE}{{period="month"}}{window}))', end
+        ),
     }
 
     per_calls = by_tool(client, base_url, f"sum by (tool) (increase({CALLS}{window}))", end)
@@ -163,18 +186,33 @@ def _csv_text(header: list[str], rows: list[list[Any]]) -> str:
     return buf.getvalue()
 
 
+def _blank(value: Any) -> Any:
+    return "" if value is None else value
+
+
 def rebuild_csvs(directory: Path) -> None:
-    """Rewrite daily-summary.csv and daily-tools.csv from every usage-*.json (so re-runs never duplicate rows)."""
+    """Rewrite daily-summary.csv, daily-tools.csv and monthly-users.csv from every usage-*.json (so re-runs never
+    duplicate rows). Files archived before a field existed get an empty cell for it."""
     summary_rows: list[list[Any]] = []
     tool_rows: list[list[Any]] = []
+    month_last: dict[str, tuple[str, int | None]] = {}  # month -> (latest archived day, month's users so far)
     for path in sorted(directory.glob("usage-*.json")):
         day = path.stem.removeprefix("usage-")
         report = json.loads(path.read_text())
-        summary_rows.append([day, *("" if report["summary"][k] is None else report["summary"][k] for k in SUMMARY_LABELS)])
+        summary = report["summary"]
+        summary_rows.append([day, *(_blank(summary.get(k)) for k in SUMMARY_LABELS)])
         for t in report["tools"]:
-            tool_rows.append([day, t["tool"], t["calls"], t["not_ok"], "" if t["p95_seconds"] is None else t["p95_seconds"]])
+            tool_rows.append([day, t["tool"], t["calls"], t["not_ok"], _blank(t["p95_seconds"])])
+        month_last[day[:7]] = (day, summary.get("active_users_peak_month"))  # sorted, so the last day wins
     _write_atomic(directory / "daily-summary.csv", _csv_text(["date", *SUMMARY_LABELS], summary_rows))
     _write_atomic(directory / "daily-tools.csv", _csv_text(["date", "tool", "calls", "not_ok", "p95_seconds"], tool_rows))
+    month_rows = []
+    for month, (day, users) in sorted(month_last.items()):
+        last_of_month = (datetime.fromisoformat(f"{month}-01") + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        month_rows.append([month, _blank(users), day, "yes" if day == f"{last_of_month:%Y-%m-%d}" else "no"])
+    _write_atomic(
+        directory / "monthly-users.csv", _csv_text(["month", "active_users", "through_date", "complete"], month_rows)
+    )
 
 
 def archive(
@@ -219,6 +257,8 @@ SUMMARY_LABELS = {
     "adc_5xx": "ADC 5xx responses",
     "adc_no_response": "ADC requests with no response",
     "adc_retries": "ADC requests retried",
+    "active_users_peak_day": "Most active users in one UTC day",
+    "active_users_peak_month": "Most active users in one UTC month (so far)",
 }
 
 
@@ -243,7 +283,8 @@ def render_table(report: dict[str, Any], section: str) -> str:
             p95 = "-" if t["p95_seconds"] is None else f"{t['p95_seconds']:.2f}"
             out.append(f"  {t['tool']:<{name_w}}  {t['calls']:>9,}  {t['not_ok']:>7,}  {p95:>8}")
         out.append("")
-    out.append("Active users are not tracked yet. Counts come from Prometheus and are limited to its retention.")
+    out.append("Counts come from Prometheus and are limited to its retention. Active users are signed-in users;")
+    out.append("for an exact distinct count over this period run `python -m arcticdata_mcp.activeusers` in the pod.")
     out.append("ADC request counts can run slightly low after a server restart; tool-call counts are not affected.")
     return "\n".join(out)
 
@@ -259,7 +300,7 @@ def render_csv(report: dict[str, Any], section: str) -> str:
         w.writerow(["metric", "value"])
         for key in SUMMARY_LABELS:
             value = report["summary"][key]
-            w.writerow([key, "" if value is None else value])
+            w.writerow([key, _blank(value)])
     else:  # all: one long table so the file stays a single CSV
         w.writerow(["section", "name", "value", "not_ok", "p95_seconds"])
         for key in SUMMARY_LABELS:

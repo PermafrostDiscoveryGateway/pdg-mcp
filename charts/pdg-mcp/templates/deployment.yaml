@@ -4,8 +4,22 @@ metadata:
   name: {{ include "pdg-mcp.fullname" . }}
   labels:
     {{- include "pdg-mcp.labels" . | nindent 4 }}
+{{- $activeUsersPersistent := include "pdg-mcp.activeUsersPersistent" . }}
+{{- if $activeUsersPersistent }}
+{{- if not .Values.observability.userHashKeySecret }}
+{{- fail "activeUsers.persistence.enabled needs observability.userHashKeySecret: without a stable key the server does not use the file" }}
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "activeUsers.persistence.enabled supports replicaCount: 1 only (one SQLite file, one writer)" }}
+{{- end }}
+{{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- if $activeUsersPersistent }}
+  # The active-user volume is ReadWriteOnce: the old pod must let go of it before the new one starts.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "pdg-mcp.selector" . | nindent 6 }}
@@ -29,6 +43,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        {{- if $activeUsersPersistent }}
+        fsGroup: 10001  # lets the server write to the volume where the storage honors fsGroup
+        {{- end }}
       containers:
         - name: pdg-mcp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -67,6 +84,14 @@ spec:
                   name: {{ .name }}
                   key: {{ .key }}
             {{- end }}
+            - name: ARCTICDATA_MCP_OBSERVABILITY_ACTIVE_USERS_ENABLED
+              value: {{ .Values.activeUsers.enabled | quote }}
+            - name: ARCTICDATA_MCP_OBSERVABILITY_ACTIVE_USERS_RETENTION_DAYS
+              value: {{ .Values.activeUsers.retentionDays | quote }}
+            {{- if $activeUsersPersistent }}
+            - name: ARCTICDATA_MCP_OBSERVABILITY_ACTIVE_USERS_DB
+              value: /data/active-users/active-users.sqlite
+            {{- end }}
             {{- range $k, $v := .Values.extraEnv }}
             - name: {{ $k }}
               value: {{ $v | quote }}
@@ -84,5 +109,16 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          {{- if $activeUsersPersistent }}
+          volumeMounts:
+            - name: active-users
+              mountPath: /data/active-users
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if $activeUsersPersistent }}
+      volumes:
+        - name: active-users
+          persistentVolumeClaim:
+            claimName: {{ include "pdg-mcp.activeUsersClaimName" . }}
+      {{- end }}

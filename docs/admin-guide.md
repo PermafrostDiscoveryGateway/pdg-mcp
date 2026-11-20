@@ -133,8 +133,9 @@ into that `Application`'s `helm.values`, not into this repository.
 **Dashboard.** `charts/pdg-mcp/dashboards/pdg-mcp.json` is a Grafana 12 dashboard ("PDG MCP Usage") built on the metrics above:
 tool calls, success rate and calls per tool for any time range, latency, Arctic Data Center load (status codes,
 retries, queue wait, slots) and process memory. The time picker answers "how many calls, which tools" for any
-period, and the Tool variable filters to specific tools. It shows aggregates only. An Active users panel is
-reserved for a later change.
+period, and the Tool variable filters to specific tools. The Active users row shows users today and over the
+last 7 and 30 days, the busiest day in the selected range, and those counts over time (see "Active users" below).
+It shows aggregates only.
 
 There are two ways to get it into Grafana:
 
@@ -204,6 +205,8 @@ aggregate counts only. The same numbers in PromQL, for a range of `$range`:
 | Calls per tool | `sum by (tool) (increase(pdg_mcp_tool_calls_total[$range]))` |
 | Success rate | `sum(increase(pdg_mcp_tool_calls_total{status="ok"}[$range])) / sum(increase(pdg_mcp_tool_calls_total[$range]))` |
 | ADC 5xx | `sum(increase(pdg_mcp_adc_requests_total{status=~"5.."}[$range]))` |
+| Users in the busiest UTC day | `max(max_over_time(pdg_mcp_active_users{period="day"}[$range]))` |
+| Users in a UTC month (period = that month) | `max(max_over_time(pdg_mcp_active_users{period="month"}[$range]))` |
 
 Things that affect the numbers:
 
@@ -216,6 +219,49 @@ Things that affect the numbers:
   restarts. The ADC request counters are created on first use, so after a restart the requests made before
   Prometheus first scrapes a new series are not counted: ADC totals can run a few requests low per restart.
 
+### Active users
+
+Distinct users cannot be counted from Prometheus counters, and a user label on a metric is ruled out by the privacy
+policy below. So the server keeps a small SQLite table with one row per hashed user (`user_hash`) per UTC day, and
+exports only counts, as the gauge `pdg_mcp_active_users{period}`:
+
+| `period` | Distinct users who made at least one tool call |
+| --- | --- |
+| `day` | this UTC day so far (back to 0 at midnight UTC) |
+| `month` | this UTC month so far |
+| `7d`, `30d` | the last 7 or 30 UTC days, today included |
+
+- A user is a signed-in Keycloak user. Every call counts, including ones that were rate limited or failed. Anonymous
+  calls (stdio, or `--insecure` with no realm) are not counted, so local testing shows 0.
+- Rows older than `activeUsers.retentionDays` (default 35, minimum 31 so month and 30-day counts stay complete) are
+  deleted. Longer-term numbers are kept as counts by the daily archive: each day's file records that day's users
+  and the month's users so far, and `monthly-users.csv` holds one row per month (see the next section).
+- Prometheus can only give exact distinct counts for those fixed periods. For any other range still inside the
+  retention, ask the database directly; it prints a count, never hashes:
+
+  ```bash
+  kubectl -n pdg exec deploy/pdg-mcp -- python -m arcticdata_mcp.activeusers --from 2026-11-01 --to 2026-11-15
+  ```
+
+**Keeping counts across restarts.** Without a volume the table lives in memory, so a pod restart starts the day and
+month over from zero. To keep it, enable the volume (this needs the hash key Secret, because hashes from a random
+per-process key cannot be matched after a restart, and the server ignores the database file without it):
+
+```yaml
+observability:
+  userHashKeySecret: {name: pdg-mcp-observability, key: user-hash-key}
+activeUsers:
+  persistence:
+    enabled: true
+```
+
+The chart then creates a 100Mi `ReadWriteOnce` claim (`<release>-active-users`, kept on release removal and Argo
+CD prune like the archive claim), mounts it at `/data/active-users`, sets `fsGroup: 10001`, and switches the
+Deployment to the `Recreate` strategy so the old pod lets go of the volume before the new one starts (a few seconds
+of downtime per rollout). It refuses `replicaCount` above 1: one SQLite file has one writer. Use block storage (the
+default storage class is normally fine); SQLite on NFS is not safe. Set `activeUsers.enabled: false` to turn the
+counting off entirely.
+
 ### Keeping numbers past Prometheus's retention
 
 Prometheus on software-dev keeps 10 days of data. The chart can run a daily CronJob that archives each finished UTC
@@ -223,8 +269,11 @@ day to a persistent volume, so monthly and longer totals stay possible. It is of
 
 **What it writes.** In the volume (mounted at `/data`): one `usage-YYYY-MM-DD.json` per day (the same totals and
 per-tool table that `scripts/usage_report.py` prints), plus `daily-summary.csv` and `daily-tools.csv`, which are
-rebuilt from all the daily files on every run, so re-running never duplicates rows. These are counts only. Distinct
-users cannot be added up across days, so monthly active users need a different source.
+rebuilt from all the daily files on every run, so re-running never duplicates rows. Each day also records
+`active_users_peak_day` (that day's distinct users) and `active_users_peak_month` (the month's distinct users up to
+the end of that day), and `monthly-users.csv` takes each month's value from its last archived day, with a
+`complete` column that is `yes` once the month's last day is archived. Distinct users cannot be added up across
+days, which is why the month's count comes from the server rather than from the daily rows. These are counts only.
 
 **How it behaves.**
 - It runs at 01:15 (`report.schedule`, in the cluster controller's timezone, normally UTC) and archives each of the
@@ -339,6 +388,7 @@ from NCSA.
 | Which tool was called, when, how long, success or failure | Logged and counted. |
 | Which ADC endpoint a call used, with status and timing | Logged and counted. Only the endpoint name (`query`, `object`, ...), never the URL or a PID. |
 | User identity | Only `user_hash`, a keyed HMAC of the Keycloak `sub`. The raw `sub` is never logged, including in the "Rejected user" warning for people who lack the `mcp-user` role. |
+| Which users were active on each UTC day | Stored in the server's active-user database as `(day, user_hash)` rows, deleted after `activeUsers.retentionDays` (default 35). Only counts leave it: the `pdg_mcp_active_users` gauge, the archive and the `activeusers` command never output hashes. |
 
 How "never log query text" is enforced:
 

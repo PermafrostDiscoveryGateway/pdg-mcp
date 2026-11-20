@@ -88,6 +88,8 @@ To report on and improve the service, the server records which tools you call, w
 and whether it worked, along with a pseudonymous ID derived from your account. It does **not** record your search
 terms or other tool inputs. Your searches still go to arcticdata.io as usual, and it keeps its own logs. These
 usage records are currently kept without a set deletion date, and reports use totals only, not individual users.
+To count active users, the server also notes which pseudonymous IDs made a call on each day; that list is deleted
+after about five weeks, and only the number of users is kept.
 
 ## Troubleshooting
 

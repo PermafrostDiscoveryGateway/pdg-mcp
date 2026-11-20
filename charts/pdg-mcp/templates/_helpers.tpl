@@ -16,3 +16,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "pdg-mcp.usageClaimName" -}}
 {{- default (printf "%s-usage" (include "pdg-mcp.fullname" .)) .Values.report.persistence.existingClaim -}}
 {{- end -}}
+
+{{- define "pdg-mcp.activeUsersClaimName" -}}
+{{- default (printf "%s-active-users" (include "pdg-mcp.fullname" .)) .Values.activeUsers.persistence.existingClaim -}}
+{{- end -}}
+
+{{- define "pdg-mcp.activeUsersPersistent" -}}
+{{- if and .Values.activeUsers.enabled .Values.activeUsers.persistence.enabled -}}true{{- end -}}
+{{- end -}}

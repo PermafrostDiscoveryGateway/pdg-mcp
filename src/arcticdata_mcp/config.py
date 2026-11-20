@@ -86,6 +86,13 @@ class ObservabilitySettings:
     metrics_enabled: bool = True  # http transport only; stdio never opens a port
     metrics_host: str = "127.0.0.1"
     metrics_port: int = 9100
+    # Active users: one row per hashed user per UTC day, exported only as counts (pdg_mcp_active_users). The
+    # database path should be on a persistent volume; empty = in memory, so counts restart at zero with the
+    # process. Rows older than the retention (at least 31 days) are deleted. A file is only used when
+    # user_hash_key is set, since hashes from a random per-process key cannot be matched across restarts.
+    active_users_enabled: bool = True
+    active_users_db: str = ""
+    active_users_retention_days: int = 35
 
 
 @dataclass

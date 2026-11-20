@@ -311,11 +311,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         elif section == "project":
             out["projects"] = doc.project()
         elif section == "literature":
-            out.update(doc.literature())
+            items = doc.literature()
+            page, nxt = eml.page_items(items, offset, max_chars)
+            out.update({"n_items": len(items), "offset": offset, "next_offset": nxt, "literature": page})
         elif section == "maintenance":
             if (maintenance := doc.maintenance()) is None:
                 raise ToolError(f"'{pid}' has no maintenance section.")
-            out["maintenance"] = maintenance
+            out.update(maintenance)
         elif section == "annotations":
             out.update(doc.annotations())
         elif section == "entities":

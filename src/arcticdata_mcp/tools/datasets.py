@@ -255,7 +255,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             Field(
                 ge=1000,
                 le=2_000_000,
-                description="Approximate size limit per response for raw, free-text sections, entities, attributes and codes.",
+                description="Approximate size limit per response for raw, free-text sections, coverage places, "
+                "entities, attributes and codes.",
             ),
         ] = 50_000,
     ) -> dict[str, Any]:
@@ -265,12 +266,15 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         and entity_groups, where data files with identical columns share one schema_id. Then request what you need:
         section='attributes' with schema_id (each column copied whole from the EML: definition, measurementScale with
         units and domains, missing-value codes, annotations), a free-text section as plain text ('abstract', 'methods',
-        'purpose', 'intellectual_rights', 'additional_info'; protocols, citations, data sources and other structured
-        parts are copied whole next to the text and marked in it as e.g. '[protocol 1]'; intellectual_rights also
-        returns EML 2.2 licenses), 'coverage', 'people', 'project', 'entities' (every file with its schema_id),
-        'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
+        'purpose', 'intellectual_rights', 'additional_info', and in EML 2.2 'introduction', 'getting_started',
+        'acknowledgements'; protocols, citations, data sources and other structured parts are copied whole next to
+        the text and marked in it as e.g. '[protocol 1]'; intellectual_rights also returns EML 2.2 licenses),
+        'coverage' (places, polygons, dates, taxa), 'people', 'project', 'literature' (reference publications, usage
+        citations, literature cited), 'maintenance' (update frequency and change history), 'entities' (every file
+        with its schema_id), 'annotations' (all semantic annotations), or 'raw' (the XML). Long responses are paged: call again with
         offset=next_offset. An attribute whose code list does not fit shows codeDefinition_omitted; page all its
-        codes with section='codes' and attribute=<name>. Raw XML is paged by character, so a page is not valid XML
+        codes with section='codes' and attribute=<name>. Coverage pages its geographic places; a place whose polygons
+        do not fit shows polygons_omitted, and the full polygons are in section='raw'. Raw XML is paged by character, so a page is not valid XML
         on its own. Documents that are not EML datasets are returned as raw XML.
         Example: get_metadata_document(pid="doi:10.18739/A25M62851", section="attributes", schema_id="S1")
         """
@@ -285,7 +289,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if doc is None:
             if section == "outline":
                 out["format"] = kind
-                out["note"] = "Not an EML dataset, so no outline is available; returning the raw XML."
+                out["warning"] = (
+                    f"This document is not EML (its root element is <{kind}>), so only section='raw' is available; "
+                    "returning the raw XML."
+                    if not kind.startswith("eml")
+                    else f"This EML document describes {kind.removeprefix('eml/')}, not a dataset, so only "
+                    "section='raw' is available; returning the raw XML."
+                )
             page, nxt = eml.page_text(text, offset, max_chars)
             out.update({"offset": offset, "next_offset": nxt, "document": page})
             return out
@@ -297,11 +307,24 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 raise ToolError(f"'{pid}' has no {section} section.")
             out.update(free.page(offset, max_chars))
         elif section == "coverage":
-            out.update(doc.coverage())
+            cov = doc.coverage()
+            geo = [eml.fit_polygons(g, max_chars) for g in cov.pop("geographic", [])]
+            page, nxt = eml.page_items(geo, offset, max_chars)
+            if any("polygons_omitted" in g for g in page):
+                out["note"] = "Some polygons were cut to fit max_chars; read them in full with section='raw'."
+            out.update({**cov, "n_geographic": len(geo), "offset": offset, "next_offset": nxt, "geographic": page})
         elif section == "people":
             out.update(doc.people())
         elif section == "project":
             out["projects"] = doc.project()
+        elif section == "literature":
+            items = doc.literature()
+            page, nxt = eml.page_items(items, offset, max_chars)
+            out.update({"n_items": len(items), "offset": offset, "next_offset": nxt, "literature": page})
+        elif section == "maintenance":
+            if (maintenance := doc.maintenance()) is None:
+                raise ToolError(f"'{pid}' has no maintenance section.")
+            out.update(maintenance)
         elif section == "annotations":
             out.update(doc.annotations())
         elif section == "entities":

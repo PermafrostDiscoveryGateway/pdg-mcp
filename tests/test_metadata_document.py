@@ -349,6 +349,7 @@ async def test_tool_non_eml_falls_back_to_raw(client, mock_api):
     mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=ISO))
     r = (await client.call_tool("get_metadata_document", {"pid": PID})).structured_content
     assert r["format"] == "MI_Metadata" and r["document"] == ISO and r["next_offset"] is None
+    assert "not EML" in r["warning"] and "section='raw'" in r["warning"] and "entity_groups" not in r
     with pytest.raises(ToolError, match="only available for EML"):
         await client.call_tool("get_metadata_document", {"pid": PID, "section": "coverage"})
 
@@ -358,6 +359,7 @@ async def test_tool_eml_without_dataset_falls_back_to_raw(client, mock_api):
     mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=software))
     r = (await client.call_tool("get_metadata_document", {"pid": PID})).structured_content
     assert r["format"] == "eml/software" and r["document"] == software
+    assert "describes software, not a dataset" in r["warning"]
     with pytest.raises(ToolError, match=r"<eml/software>"):
         await client.call_tool("get_metadata_document", {"pid": PID, "section": "people"})
 
@@ -535,3 +537,113 @@ async def test_dataset_details_falls_back_when_field_list_fails(client, mock_api
     r = (await client.call_tool("get_dataset_details", {"pid": PID})).structured_content
     assert route.calls.last.request.url.params["fl"] == "*"
     assert {k for k in r if k != "landing_url"} == {"id", "title"}
+
+
+def test_outline_names_and_places():
+    d = load(
+        one_table(
+            extra="<shortName>SR</shortName><series>Radar 3</series><language>english</language><pubPlace>ADC</pubPlace>"
+        )
+    )
+    o = d.outline()
+    assert (o["short_name"], o["series"], o["language"], o["pub_place"]) == ("SR", "Radar 3", "english", "ADC")
+
+
+def test_coverage_keeps_polygons_taxon_ids_and_references():
+    cov = """<coverage id="c1"><geographicCoverage><geographicDescription>Lake</geographicDescription>
+        <datasetGPolygon><datasetGPolygonOuterGRing><gRing>-150 70, -149 70, -149 71</gRing></datasetGPolygonOuterGRing>
+        </datasetGPolygon></geographicCoverage>
+      <taxonomicCoverage><taxonomicSystem><identifierName>Ada</identifierName></taxonomicSystem>
+        <generalTaxonomicCoverage>Mosses</generalTaxonomicCoverage>
+        <taxonomicClassification><taxonRankName>Genus</taxonRankName><taxonRankValue>Sphagnum</taxonRankValue>
+          <taxonId provider="https://www.itis.gov">14365</taxonId></taxonomicClassification></taxonomicCoverage>
+      </coverage>"""
+    # A second coverage that only points at the first is read as the first.
+    d = load(one_table(extra=cov + "<coverage><references>c1</references></coverage>"))
+    c = d.coverage()
+    assert len(c["geographic"]) == 2 and c["geographic"][0]["polygons"] == [
+        {"datasetGPolygonOuterGRing": {"gRing": "-150 70, -149 70, -149 71"}}
+    ]
+    assert c["taxonomic"][0]["taxon_ids"] == [{"provider": "https://www.itis.gov", "#text": "14365"}]
+    assert c["taxonomic_summary"] == ["Mosses", "Mosses"]
+    assert c["taxonomic_systems"][0] == {"identifierName": "Ada"}
+    assert not d.unresolved
+
+
+def polygon(n_points, base=0):
+    points = "".join(
+        f"<gRingPoint><gRingLatitude>{70 + i / 1000}</gRingLatitude><gRingLongitude>{-150 + base}</gRingLongitude>"
+        "</gRingPoint>"
+        for i in range(n_points)
+    )
+    return f"<datasetGPolygon><datasetGPolygonOuterGRing>{points}</datasetGPolygonOuterGRing></datasetGPolygon>"
+
+
+def test_fit_polygons_cuts_oversized_polygons():
+    geo = f"<coverage><geographicCoverage><geographicDescription>Big</geographicDescription>{polygon(5)}{polygon(2000)}{polygon(5)}</geographicCoverage></coverage>"
+    [place] = load(one_table(extra=geo)).coverage()["geographic"]
+    fitted = eml.fit_polygons(place, 2000)
+    assert len(json.dumps(fitted)) <= 2000
+    assert fitted["polygons"] == place["polygons"][:1] and fitted["polygons_omitted"] == 2
+    assert fitted["description"] == "Big" and "polygons_omitted" not in place
+    assert eml.fit_polygons(place, 10**7) is place
+
+
+async def test_tool_pages_coverage(client, mock_api):
+    places = "".join(
+        f"<geographicCoverage><geographicDescription>Site {i}</geographicDescription>{polygon(20, i)}</geographicCoverage>"
+        for i in range(30)
+    )
+    huge = (
+        f"<geographicCoverage><geographicDescription>Huge</geographicDescription>{polygon(3000)}</geographicCoverage>"
+    )
+    temporal = (
+        "<temporalCoverage><singleDateTime><calendarDate>2020-01-01</calendarDate></singleDateTime></temporalCoverage>"
+    )
+    xml = one_table(extra=f"<coverage>{places}{huge}{temporal}</coverage>")
+    mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=xml))
+    seen, offset, pages = [], 0, []
+    while offset is not None:
+        r = (
+            await client.call_tool(
+                "get_metadata_document", {"pid": PID, "section": "coverage", "offset": offset, "max_chars": 5000}
+            )
+        ).structured_content
+        assert r["n_geographic"] == 31 and r["temporal"] == [{"date": "2020-01-01"}]
+        assert len(json.dumps(r["geographic"])) <= 5000
+        seen += r["geographic"]
+        pages.append(r)
+        offset = r["next_offset"]
+    assert len(pages) > 1
+    assert [g["description"] for g in seen] == [f"Site {i}" for i in range(30)] + ["Huge"]
+    assert seen[-1]["polygons_omitted"] == 1 and seen[-1]["polygons"] == []
+    assert "section='raw'" in pages[-1]["note"] and "note" not in pages[0]
+
+
+def test_literature_and_maintenance():
+    extra = """<maintenance><description><para>Updated yearly.</para></description>
+        <maintenanceUpdateFrequency>annually</maintenanceUpdateFrequency></maintenance>
+      <referencePublication><title>Paper about it</title><bibtex>@article{x}</bibtex></referencePublication>
+      <usageCitation><title>Paper using it</title></usageCitation>
+      <literatureCited><citation><title>Older paper</title></citation><bibtex>@book{y}</bibtex></literatureCited>"""
+    d = load(one_table(extra=extra))
+    assert d.maintenance() == {"description": "Updated yearly.", "maintenanceUpdateFrequency": "annually"}
+    lit = d.literature()
+    assert lit["reference_publications"] == [{"title": "Paper about it", "bibtex": "@article{x}"}]
+    assert lit["usage_citations"] == [{"title": "Paper using it"}]
+    assert lit["literature_cited"] == [{"citation": {"title": "Older paper"}, "bibtex": "@book{y}"}]
+    bare = load(one_table())
+    assert bare.literature() == {} and bare.maintenance() is None
+
+
+async def test_tool_new_sections(client, mock_api):
+    xml = one_table(extra="<introduction><para>Start here.</para></introduction>")
+    mock_api.get(OBJECT).mock(return_value=httpx.Response(200, text=xml))
+    intro = (
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "introduction"})
+    ).structured_content
+    assert intro["text"] == "Start here."
+    lit = (await client.call_tool("get_metadata_document", {"pid": PID, "section": "literature"})).structured_content
+    assert "literature_cited" not in lit
+    with pytest.raises(ToolError, match="no maintenance section"):
+        await client.call_tool("get_metadata_document", {"pid": PID, "section": "maintenance"})

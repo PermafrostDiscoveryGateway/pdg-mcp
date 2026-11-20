@@ -66,11 +66,28 @@ class WaterSettings:
 
 
 @dataclass
+class OntologySettings:
+    # Optional BioPortal API key (https://bioportal.bioontology.org/account). When set, variable-to-concept
+    # lookups also search ECSO on BioPortal; empty = bundled ECSO lookup table only.
+    bioportal_api_key: str = ""
+    bioportal_url: str = "https://data.bioontology.org"
+
+
+@dataclass
 class PortalSettings:
     # Public landing page of a portal is <portal_url>/<label>.
     portal_url: str = "https://arcticdata.io/catalog/portals"
     cache_ttl: float = 3600.0  # seconds to keep the portal list and dataset counts; 0 = refetch every call
     exclude_labels: list[str] = field(default_factory=list)  # portal labels to hide (test or spam portals)
+
+
+@dataclass
+class MetadataSettings:
+    # get_metadata_document keeps recent documents so paging through one does not refetch and reparse it.
+    # The budget is the total length of the cached XML texts; a parsed EML document takes roughly 5-6x its text
+    # size in memory, so keep this well under the pod's memory limit. 0 disables the cache.
+    cache_max_chars: int = 20_000_000
+    cache_ttl: float = 600.0  # seconds to keep a cached document
 
 
 @dataclass
@@ -103,7 +120,9 @@ class Settings:
     downloads: DownloadSettings = field(default_factory=DownloadSettings)
     ratelimit: RateLimitSettings = field(default_factory=RateLimitSettings)
     water: WaterSettings = field(default_factory=WaterSettings)
+    ontology: OntologySettings = field(default_factory=OntologySettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
+    metadata: MetadataSettings = field(default_factory=MetadataSettings)
     observability: ObservabilitySettings = field(default_factory=ObservabilitySettings)
 
 

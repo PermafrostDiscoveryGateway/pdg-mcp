@@ -1,0 +1,11 @@
+# Ruff config. CI enforces it in the `lint` job of .github/workflows/ci.yml (`ruff check` and `ruff format --check`).
+line-length = 120
+target-version = "py312"
+
+[lint]
+# Ruff's default rules (pycodestyle errors, pyflakes) plus import sorting. Long lines (E501) are not checked.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[format]
+# Don't reformat code blocks inside Markdown (README.md is edited by most pull requests).
+exclude = ["*.md"]

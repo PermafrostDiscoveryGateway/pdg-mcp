@@ -66,9 +66,12 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `ratelimit.per_user_burst` | `20` | Back-to-back calls allowed before the per-user rate applies |
 | `ratelimit.max_retries` | `3` | Retries on 429/502/503/504 from ADC |
 | `ratelimit.retry_backoff` / `retry_max_delay` | `1.0` / `30` | Exponential backoff base and cap, in seconds |
+| `ontology.bioportal_api_key` | empty | Optional BioPortal key; adds BioPortal ECSO search to variable lookups |
 | `portals.portal_url` | `https://arcticdata.io/catalog/portals` | Base of portal web pages (`<portal_url>/<label>`) |
 | `portals.cache_ttl` | `3600` | Seconds to cache the portal list and dataset counts (0 = no cache) |
 | `portals.exclude_labels` | empty | Portal labels to hide, such as test or spam portals |
+| `metadata.cache_max_chars` | `20000000` | Total characters of metadata documents cached for paging (a parsed document uses about 5-6x its size in memory; 0 = no cache) |
+| `metadata.cache_ttl` | `600` | Seconds to keep a cached metadata document |
 
 ### Rate limiting
 
@@ -150,7 +153,7 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (53)
+## Tools (55)
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
@@ -164,9 +167,11 @@ the first bytes or lines of any file, however large.
 | `search_by_publication_date` | Uploaded, published, or modified in a range |
 | `search_by_funding` | Award number, funder, or award title |
 | `search_by_project` | Project name |
-| `search_by_measured_variable` | Attribute name, label, description, or unit |
+| `search_by_variable` | Datasets measuring a variable: ECSO concept annotations plus free text, each result labelled by match type |
+| `find_variable_concepts` | Map a term like "soil depth" to ECSO concept PURLs, with dataset counts |
+| `search_by_measured_variable` | Free text in attribute name, label, description, or unit |
 | `search_by_taxon` | Scientific name or taxonomic rank |
-| `search_by_semantic_annotation` | Ontology concept URI (for example ECSO) |
+| `search_by_semantic_annotation` | Ontology concept URI or bare ECSO id (http and https PURLs) |
 | `search_by_location_name` | Place keyword or site name |
 | `search_by_organization` | Contact or related organization |
 | `search_by_license` | Indexed license name |
@@ -175,11 +180,23 @@ the first bytes or lines of any file, however large.
 | `search_data_files` | Data files by name, format, size, or parent dataset |
 | `search_by_format` | Any object by formatId |
 | `find_dataset_by_identifier` | Resolve a DOI, PID, series ID, or file PID to its dataset |
+| `search_missing_metadata` | Datasets lacking attributes, units, keywords, abstract, coverage, funding, annotations or license (EML only by default; most records lack a license), with counts of what else they lack |
 | `count_datasets` | Number of matches only |
 | `get_facet_counts` | Top values and counts of any field |
 | `list_search_fields` | All index fields and their types |
 | `advanced_solr_query` | Raw q/fq/fl/sort/facets |
 
+Search results include `latest_only`: when true (the default), `numFound` counts only the current version of
+each dataset, so it is lower than a raw Solr count that includes obsoleted versions.
+
+#### Variable search and ECSO concepts
+Variable names in metadata vary, so `search_by_variable` first maps the term to
+[ECSO](https://bioportal.bioontology.org/ontologies/ECSO) measurement concepts and searches the `sem_annotation`
+index field. For "soil depth" that finds 123 annotated datasets where a free-text attribute search finds 25. The
+term-to-concept table is bundled in `src/arcticdata_mcp/data/ecso/concepts.json`; regenerate it from a new
+ECSO release with `scripts/export_ecso_terms.py`. Set `ontology.bioportal_api_key` to also search ECSO on
+BioPortal. `scripts/benchmark_variable_search.py` compares free-text and concept search for a set of terms
+against the live index.
 ### Project portals
 Portals are curated project collections on arcticdata.io (for example
 [PerCS-Net](https://arcticdata.io/catalog/portals/PerCS-Net)). The indexer turns each portal's dataset rules into a
@@ -197,9 +214,26 @@ total). The portal list and counts are cached for `portals.cache_ttl`. A count o
 `null` count (or an entry in `unchecked_portals`) means Solr rejected that portal's query.
 
 ### Datasets and packages
-`get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML XML), `get_metadata_html`
-(MNView), `get_resource_map` (OAI-ORE), `get_package_download_info` (BagIt zip), `get_dataset_citation`,
-`get_version_history`.
+`get_dataset_details`, `list_dataset_files`, `get_metadata_document` (EML outline and sections; see below),
+`get_metadata_html` (MNView), `get_resource_map` (OAI-ORE), `get_package_download_info` (BagIt zip),
+`get_dataset_citation`, `get_version_history`.
+
+EML documents can be far larger than a model's context, mostly because packages repeat the same attribute list once
+per data file. `get_metadata_document(pid)` therefore returns an **outline**: title, creators, abstract, coverage, a
+methods preview, dataset annotations and `entity_groups`, where entities with identical attribute lists share one
+`schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `codes` (one attribute's code
+list), `coverage`, `people`, `project`, `entities`, `annotations`, a free-text section, or `raw` for the XML. Attributes,
+entities (all but their attribute list), people and projects are copied whole, shaped like the EML. Long responses are
+paged with `offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents (for example ISO 19115)
+come back as paged raw XML. Recent documents are cached (`metadata.cache_max_chars`) and parsed off the event loop.
+`get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
+
+Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text
+with headings, numbered and bulleted lists, links and `markdown` / `literalLayout` spacing kept, for example
+`get_metadata_document(pid, section="methods")`. Structured elements inside them (protocols, software,
+instrumentation, citations, data sources, sampling coverage) are copied whole next to the text, under `protocols`,
+`citations`, `data_sources` and so on, and marked in the text by a placeholder such as `[protocol 1]`.
+`intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
 `download_file`, `preview_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
@@ -223,7 +257,12 @@ They modify the repository or need a DataONE admin token.
 ```bash
 uv run pytest            # unit and mocked tests
 uv run pytest -m live    # smoke tests against arcticdata.io
+uv run ruff check .      # lint
+uv run ruff format .     # format
 ```
+
+CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the optional
+pre-commit hook.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`
@@ -284,3 +323,7 @@ kubectl create secret docker-registry ncsa-hub -n pdg-mcp --dry-run=client -o ya
 ```
 
 Commit the sealed file to software-dev's `kubernetes/` folder (never the plain Secret).
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

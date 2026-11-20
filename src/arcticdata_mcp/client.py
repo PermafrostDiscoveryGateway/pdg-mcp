@@ -35,11 +35,7 @@ def _strip_ns(key: str) -> str:
 def clean_xml(obj: Any) -> Any:
     """Remove namespace prefixes and xmlns attributes from an xmltodict structure."""
     if isinstance(obj, dict):
-        return {
-            _strip_ns(k): clean_xml(v)
-            for k, v in obj.items()
-            if not (k.startswith("@xmlns") or k == "@xmlns")
-        }
+        return {_strip_ns(k): clean_xml(v) for k, v in obj.items() if not (k.startswith("@xmlns") or k == "@xmlns")}
     if isinstance(obj, list):
         return [clean_xml(v) for v in obj]
     return obj
@@ -137,9 +133,7 @@ class DataONEClient:
         self.metrics.observe_adc_request(endpoint, method, status, time.perf_counter() - started, retried=retried)
 
     # Requests -------------------------------------------------------------
-    async def request(
-        self, method: str, url: str, *, raise_errors: bool = True, **kwargs: Any
-    ) -> httpx.Response:
+    async def request(self, method: str, url: str, *, raise_errors: bool = True, **kwargs: Any) -> httpx.Response:
         attempt = 0
         endpoint = self.endpoint_label(url)
         while True:

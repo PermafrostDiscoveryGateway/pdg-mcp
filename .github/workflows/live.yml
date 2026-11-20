@@ -1,0 +1,20 @@
+name: live
+# Runs the tests marked `live`, which call the real arcticdata.io API. Manual only (Actions tab > live > Run workflow),
+# so we don't add load to ADC.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -m live

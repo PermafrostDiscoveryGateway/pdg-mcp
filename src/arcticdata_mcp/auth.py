@@ -18,7 +18,6 @@ from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 from arcticdata_mcp.config import AuthSettings
 from arcticdata_mcp.observability import hash_user
 
-
 log = logging.getLogger(__name__)
 
 

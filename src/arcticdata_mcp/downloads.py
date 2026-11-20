@@ -76,13 +76,11 @@ def inline_result(url: str, data: bytes, mime: str, info: dict[str, Any]) -> Too
             text = data.decode("utf-8")
         except UnicodeDecodeError:
             text = data.decode("latin-1")
-        resource: mcp_types.TextResourceContents | mcp_types.BlobResourceContents = (
-            mcp_types.TextResourceContents(uri=url, mime_type=mime, text=text)
+        resource: mcp_types.TextResourceContents | mcp_types.BlobResourceContents = mcp_types.TextResourceContents(
+            uri=url, mime_type=mime, text=text
         )
     else:
-        resource = mcp_types.BlobResourceContents(
-            uri=url, mime_type=mime, blob=base64.b64encode(data).decode()
-        )
+        resource = mcp_types.BlobResourceContents(uri=url, mime_type=mime, blob=base64.b64encode(data).decode())
     summary = (
         f"Downloaded '{info.get('fileName') or info.get('pid')}' ({len(data)} bytes, {mime}). "
         "File contents are attached as an embedded resource."

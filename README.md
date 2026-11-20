@@ -94,7 +94,7 @@ Loki. Set `[observability] log_format = "text"` for a readable form during devel
 
 ```json
 {"ts": "2026-11-06T20:54:28.500+00:00", "level": "INFO", "logger": "arcticdata_mcp.toolcalls", "event": "tool_call",
- "tool": "count_datasets", "status": "ok", "duration_ms": 312, "user_hash": "9f2c0a4be1d37a55",
+ "tool": "search_datasets", "status": "ok", "duration_ms": 312, "user_hash": "9f2c0a4be1d37a55",
  "adc_call_count": 1, "adc_retries": 0, "adc_calls": [{"endpoint": "query", "method": "GET", "status": 200, "ms": 298}]}
 ```
 

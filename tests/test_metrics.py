@@ -29,9 +29,9 @@ def sample(metrics: Metrics, name: str, **labels) -> float:
 async def test_successful_call_is_counted(settings, mock_api, metrics):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="ok") == 1
-    assert sample(metrics, "pdg_mcp_tool_call_duration_seconds_count", tool="count_datasets") == 1
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="ok") == 1
+    assert sample(metrics, "pdg_mcp_tool_call_duration_seconds_count", tool="search_datasets") == 1
     assert sample(metrics, "pdg_mcp_adc_requests_total", endpoint="query", method="GET", status="200") == 1
     assert sample(metrics, "pdg_mcp_adc_request_duration_seconds_count", endpoint="query") == 1
     assert sample(metrics, "pdg_mcp_adc_queue_wait_seconds_count") == 1
@@ -60,7 +60,7 @@ async def test_adc_errors_and_retries(settings, mock_api, metrics):
         side_effect=[httpx.Response(503), httpx.Response(429), httpx.Response(200, json=SOLR_OK)]
     )
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     for status in ("503", "429", "200"):
         assert sample(metrics, "pdg_mcp_adc_requests_total", endpoint="query", method="GET", status=status) == 1
     assert sample(metrics, "pdg_mcp_adc_retries_total", endpoint="query") == 2
@@ -70,8 +70,8 @@ async def test_failed_call_and_4xx(settings, mock_api, metrics):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(400, text="bad"))
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
         with pytest.raises(ToolError):
-            await c.call_tool("count_datasets", {"text": "x"})
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="error") == 1
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="error") == 1
     assert sample(metrics, "pdg_mcp_adc_requests_total", endpoint="query", method="GET", status="400") == 1
     assert sample(metrics, "pdg_mcp_adc_retries_total", endpoint="query") == 0
 
@@ -80,7 +80,7 @@ async def test_transport_failure_uses_error_status(settings, mock_api, metrics):
     mock_api.get(f"{MN}/query/solr/").mock(side_effect=httpx.ConnectError("boom"))
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
         with pytest.raises(ToolError):
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     assert sample(metrics, "pdg_mcp_adc_requests_total", endpoint="query", method="GET", status="error") == 1
 
 
@@ -89,13 +89,13 @@ async def test_rate_limit_rejections(settings, mock_api, metrics):
     settings.ratelimit.per_user_burst = 1
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
         for _ in range(2):
             with pytest.raises(ToolError, match="Rate limit exceeded"):
-                await c.call_tool("count_datasets", {"text": "x"})
+                await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     assert sample(metrics, "pdg_mcp_rate_limit_rejections_total") == 2
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="rate_limited") == 2
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="ok") == 1
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="rate_limited") == 2
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="ok") == 1
 
 
 async def test_queue_wait_and_timeouts(settings, mock_api, metrics):
@@ -109,14 +109,14 @@ async def test_queue_wait_and_timeouts(settings, mock_api, metrics):
     mock_api.get(f"{MN}/query/solr/").mock(side_effect=slow)
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
         await asyncio.gather(
-            c.call_tool("count_datasets", {"text": "x"}),
-            c.call_tool("count_datasets", {"text": "y"}),
+            c.call_tool("search_datasets", {"query": "x", "rows": 0}),
+            c.call_tool("search_datasets", {"query": "y", "rows": 0}),
             return_exceptions=True,
         )
     assert sample(metrics, "pdg_mcp_adc_queue_timeouts_total") == 1
     assert sample(metrics, "pdg_mcp_adc_queue_wait_seconds_count") == 2  # the winner and the timeout
     assert sample(metrics, "pdg_mcp_adc_queue_wait_seconds_sum") >= 0.01
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="upstream_busy") == 1
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="upstream_busy") == 1
     assert sample(metrics, "pdg_mcp_adc_requests_in_flight") == 0
     assert sample(metrics, "pdg_mcp_adc_requests_waiting") == 0
 
@@ -136,7 +136,7 @@ async def test_invented_tool_names_never_become_labels_even_when_rate_limited(se
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     invented = ["attacker_tool_1", "attacker_tool_2", "A" * 200]
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})  # uses up the only burst token
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})  # uses up the only burst token
         for name in invented:
             with pytest.raises(ToolError, match="Rate limit exceeded"):
                 await c.call_tool(name, {})
@@ -148,11 +148,11 @@ async def test_invented_tool_names_never_become_labels_even_when_rate_limited(se
 
 def test_tool_names_are_unknown_until_registered_and_bounded_after():
     m = Metrics()
-    assert m.tool_label("count_datasets") == "unknown"  # nothing registered yet: nothing is trusted
-    m.observe_tool_call("count_datasets", "ok", 0.1)
+    assert m.tool_label("search_datasets") == "unknown"  # nothing registered yet: nothing is trusted
+    m.observe_tool_call("search_datasets", "ok", 0.1)
     assert sample(m, "pdg_mcp_tool_calls_total", tool="unknown", status="ok") == 1
-    m.init_tools(["count_datasets"])
-    assert m.tool_label("count_datasets") == "count_datasets"
+    m.init_tools(["search_datasets"])
+    assert m.tool_label("search_datasets") == "search_datasets"
     assert m.tool_label("anything_else") == "unknown"
     assert m.tool_label("unknown") == "unknown"
     # every status of the unknown bucket exists at zero too, so increase() sees its first event
@@ -163,22 +163,22 @@ def test_tool_names_are_unknown_until_registered_and_bounded_after():
 async def test_invalid_arguments_are_their_own_status(settings, metrics):
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
         with pytest.raises(ToolError):
-            await c.call_tool("count_datasets", {"bogus": 1})
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="invalid_arguments") == 1
+            await c.call_tool("search_datasets", {"query": "x", "rows": -1})
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="invalid_arguments") == 1
 
 
 async def test_metrics_recorded_when_logging_disabled(settings, mock_api, metrics):
     settings.observability.log_tool_calls = False
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
-    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="count_datasets", status="ok") == 1
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
+    assert sample(metrics, "pdg_mcp_tool_calls_total", tool="search_datasets", status="ok") == 1
 
 
 async def test_exposition_has_no_query_text(settings, mock_api, metrics):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False, metrics=metrics)) as c:
-        await c.call_tool("count_datasets", {"text": SECRET_QUERY})
+        await c.call_tool("search_datasets", {"query": SECRET_QUERY, "rows": 0})
     text = metrics.render().decode()
     assert "pdg_mcp_tool_calls_total" in text
     assert SECRET_QUERY not in text

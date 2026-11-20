@@ -39,9 +39,9 @@ def toolcalls(caplog):
 async def test_successful_call_is_logged(settings, mock_api, toolcalls):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": SECRET_QUERY})
+        await c.call_tool("search_datasets", {"query": SECRET_QUERY, "rows": 0})
     (rec,) = toolcalls()
-    assert rec["tool"] == "count_datasets"
+    assert rec["tool"] == "search_datasets"
     assert rec["status"] == "ok"
     assert rec["user_hash"] == "anonymous"
     assert rec["duration_ms"] >= 0
@@ -54,7 +54,7 @@ async def test_successful_call_is_logged(settings, mock_api, toolcalls):
 async def test_query_text_and_urls_are_never_logged(settings, mock_api, toolcalls, caplog):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": SECRET_QUERY})
+        await c.call_tool("search_datasets", {"query": SECRET_QUERY, "rows": 0})
     for record in caplog.records:
         assert SECRET_QUERY not in JsonFormatter().format(record)
 
@@ -63,7 +63,7 @@ async def test_tool_error_is_logged_without_message(settings, mock_api, toolcall
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(400, text=f"bad {SECRET_QUERY}"))
     async with Client(create_server(settings, require_auth=False)) as c:
         with pytest.raises(ToolError):
-            await c.call_tool("count_datasets", {"text": SECRET_QUERY})
+            await c.call_tool("search_datasets", {"query": SECRET_QUERY, "rows": 0})
     (rec,) = toolcalls()
     assert rec["status"] == "error"
     assert rec["error_type"] == "ToolError"
@@ -76,9 +76,9 @@ async def test_rate_limited_call_is_logged(settings, mock_api, toolcalls):
     settings.ratelimit.per_user_burst = 1
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
         with pytest.raises(ToolError, match="Rate limit exceeded"):
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     ok, limited = toolcalls()
     assert ok["status"] == "ok"
     assert limited["status"] == "rate_limited"
@@ -96,8 +96,8 @@ async def test_upstream_busy_is_logged(settings, mock_api, toolcalls):
     mock_api.get(f"{MN}/query/solr/").mock(side_effect=slow)
     async with Client(create_server(settings, require_auth=False)) as c:
         results = await asyncio.gather(
-            c.call_tool("count_datasets", {"text": "x"}),
-            c.call_tool("count_datasets", {"text": "y"}),
+            c.call_tool("search_datasets", {"query": "x", "rows": 0}),
+            c.call_tool("search_datasets", {"query": "y", "rows": 0}),
             return_exceptions=True,
         )
     assert sum(isinstance(r, ToolError) for r in results) == 1
@@ -109,10 +109,10 @@ async def test_unknown_tool_and_bad_arguments_are_logged(settings, toolcalls):
         with pytest.raises(ToolError):
             await c.call_tool("made_up_tool_name", {})
         with pytest.raises(ToolError):
-            await c.call_tool("count_datasets", {"bogus": 1})
+            await c.call_tool("search_datasets", {"query": "x", "rows": -1})
     unknown, invalid = toolcalls()
     assert (unknown["tool"], unknown["status"]) == ("unknown", "not_found")  # client-chosen name not logged
-    assert (invalid["tool"], invalid["status"]) == ("count_datasets", "invalid_arguments")
+    assert (invalid["tool"], invalid["status"]) == ("search_datasets", "invalid_arguments")
 
 
 async def test_rate_limited_invented_tool_name_is_not_logged(settings, mock_api, toolcalls):
@@ -121,12 +121,12 @@ async def test_rate_limited_invented_tool_name_is_not_logged(settings, mock_api,
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     long_name = "B" * 200
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
         for name in ("attacker_tool_1", long_name):
             with pytest.raises(ToolError, match="Rate limit exceeded"):
                 await c.call_tool(name, {})
     ok, first, second = toolcalls()
-    assert ok["tool"] == "count_datasets"
+    assert ok["tool"] == "search_datasets"
     assert (first["tool"], first["status"]) == ("unknown", "rate_limited")
     assert (second["tool"], second["status"]) == ("unknown", "rate_limited")
     assert "attacker_tool" not in json.dumps([first, second]) and long_name not in json.dumps(second)
@@ -138,7 +138,7 @@ async def test_retries_are_recorded(settings, mock_api, toolcalls):
         side_effect=[httpx.Response(503), httpx.Response(429), httpx.Response(200, json=SOLR_OK)]
     )
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     (rec,) = toolcalls()
     assert rec["adc_call_count"] == 3
     assert rec["adc_retries"] == 2
@@ -150,7 +150,7 @@ async def test_transport_failure_is_recorded(settings, mock_api, toolcalls):
     mock_api.get(f"{MN}/query/solr/").mock(side_effect=httpx.ConnectError("boom"))
     async with Client(create_server(settings, require_auth=False)) as c:
         with pytest.raises(ToolError):
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     (rec,) = toolcalls()
     assert rec["status"] == "error"
     assert rec["adc_calls"][0]["error"] == "ConnectError"
@@ -188,7 +188,7 @@ async def test_can_be_disabled(settings, mock_api, toolcalls):
     settings.observability.log_tool_calls = False
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     assert toolcalls() == []
 
 
@@ -197,8 +197,8 @@ async def test_user_is_hashed(settings, mock_api, toolcalls, monkeypatch):
     monkeypatch.setattr(UserRateLimitMiddleware, "user_key", staticmethod(lambda: "sub-1234"))
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     async with Client(create_server(settings, require_auth=False)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
-        await c.call_tool("count_datasets", {"text": "y"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
+        await c.call_tool("search_datasets", {"query": "y", "rows": 0})
     a, b = toolcalls()
     assert a["user_hash"] == b["user_hash"] == hash_user("sub-1234", "k1")
     assert "sub-1234" not in json.dumps(a)
@@ -210,7 +210,7 @@ async def test_unset_key_still_hashes_with_a_random_per_process_key(settings, mo
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     for _ in range(2):  # two "processes"
         async with Client(create_server(settings, require_auth=False)) as c:
-            await c.call_tool("count_datasets", {"text": "x"})
+            await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     a, b = (r["user_hash"] for r in toolcalls())
     assert a != b  # different random keys
     assert a != hash_user("sub-1234", "") and b != hash_user("sub-1234", "")  # never the unkeyed hash
@@ -308,7 +308,7 @@ async def test_query_text_never_reaches_any_log_even_at_debug(settings, mock_api
         ours.addHandler(capture)
         mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
         async with Client(create_server(settings, require_auth=False)) as c:
-            await c.call_tool("count_datasets", {"text": SECRET_QUERY})
+            await c.call_tool("search_datasets", {"query": SECRET_QUERY, "rows": 0})
     finally:
         root.removeHandler(capture)
         ours.handlers[:] = saved_handlers

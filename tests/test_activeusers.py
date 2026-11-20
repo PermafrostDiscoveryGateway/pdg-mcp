@@ -146,8 +146,8 @@ async def test_tool_calls_record_the_hashed_user(settings, mock_api, monkeypatch
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     store, metrics = ActiveUsers(), Metrics()
     async with Client(create_server(settings, require_auth=False, metrics=metrics, active_users=store)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
-        await c.call_tool("count_datasets", {"text": "y"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
+        await c.call_tool("search_datasets", {"query": "y", "rows": 0})
         with pytest.raises(ToolError):
             await c.call_tool("made_up_tool", {})  # a failed call still means the user was active
     with store._lock:
@@ -160,7 +160,7 @@ async def test_anonymous_server_counts_no_users(settings, mock_api):
     mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=SOLR_OK))
     store, metrics = ActiveUsers(), Metrics()
     async with Client(create_server(settings, require_auth=False, metrics=metrics, active_users=store)) as c:
-        await c.call_tool("count_datasets", {"text": "x"})
+        await c.call_tool("search_datasets", {"query": "x", "rows": 0})
     assert gauge(metrics)["day"] == 0
 
 

@@ -74,3 +74,25 @@ exclude_labels = []
 cache_max_chars = 20000000
 # Seconds to keep a cached document.
 cache_ttl = 600.0
+
+[observability]
+# One structured record per tool call (tool, latency, status, hashed user, ADC requests), written to stderr.
+log_tool_calls = true
+log_level = "INFO"
+log_format = "json"     # "json" (log shippers) or "text" (readable, for development)
+# Secret key for hashing the Keycloak "sub" into the logged user_hash. Use one value on every pod and keep it
+# stable so a user keeps the same hash. Empty = a random key per process (a warning is logged): hashes still
+# hide the user, but change on restart and differ between pods.
+user_hash_key = ""
+# Prometheus metrics on a separate port (never on the MCP port); http transport only. Use host 0.0.0.0 in a
+# container so a scraper can reach the pod, and do not publish this port through a Service or Ingress.
+metrics_enabled = true
+metrics_host = "127.0.0.1"
+metrics_port = 9100
+# Active users (pdg_mcp_active_users): the server keeps one row per hashed user per UTC day and exports only the
+# counts (today, this month, rolling 7 and 30 days). Put the database on a persistent volume; empty = in memory,
+# counts restart at zero with the process. It is only written to a file when user_hash_key is set. Rows older
+# than active_users_retention_days (minimum 31) are deleted.
+active_users_enabled = true
+active_users_db = ""        # e.g. "/data/active-users/active-users.sqlite"
+active_users_retention_days = 35

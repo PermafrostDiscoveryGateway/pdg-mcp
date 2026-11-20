@@ -1,0 +1,23 @@
+{{- if .Values.grafana.dashboard.enabled }}
+# The "PDG MCP Usage" dashboard as a ConfigMap. Grafana's dashboard sidecar (as shipped with Rancher Monitoring and
+# kube-prometheus-stack) loads any ConfigMap that carries its label, from the namespace(s) it is told to watch,
+# which is usually not this release's namespace: set grafana.dashboard.namespace to match. See "Dashboard and
+# reports" in docs/admin-guide.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pdg-mcp.fullname" . }}-dashboard
+  namespace: {{ .Values.grafana.dashboard.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "pdg-mcp.labels" . | nindent 4 }}
+    {{- with .Values.grafana.dashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.grafana.dashboard.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  pdg-mcp.json: |-
+    {{- .Files.Get "dashboards/pdg-mcp.json" | nindent 4 }}
+{{- end }}

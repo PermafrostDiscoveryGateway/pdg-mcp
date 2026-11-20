@@ -1,0 +1,22 @@
+{{- if and (include "pdg-mcp.activeUsersPersistent" .) (not .Values.activeUsers.persistence.existingClaim) }}
+# Volume claim for the active-user database (hashed users per UTC day, kept activeUsers.retentionDays). Not deleted
+# when the release is removed or Argo CD prunes, so a redeploy keeps the current month's counts.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "pdg-mcp.activeUsersClaimName" . }}
+  labels:
+    {{- include "pdg-mcp.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - {{ .Values.activeUsers.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.activeUsers.persistence.size }}
+  {{- with .Values.activeUsers.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

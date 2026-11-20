@@ -1,0 +1,26 @@
+{{- if and .Values.report.enabled (not .Values.report.persistence.existingClaim) }}
+# Volume claim for the archived usage files. Not deleted when the release is removed or Argo CD prunes, so the
+# archive survives (delete it by hand if you really want it gone).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "pdg-mcp.usageClaimName" . }}
+  labels:
+    {{- include "pdg-mcp.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - {{ .Values.report.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.report.persistence.size }}
+  {{- if .Values.report.persistence.pv.enabled }}
+  # Static binding to the PersistentVolume in usage-report-pv.yaml: no storage class, bound by name.
+  storageClassName: ""
+  volumeName: {{ include "pdg-mcp.usageClaimName" . }}
+  {{- else if .Values.report.persistence.storageClassName }}
+  storageClassName: {{ .Values.report.persistence.storageClassName }}
+  {{- end }}
+{{- end }}

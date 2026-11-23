@@ -47,7 +47,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     ) -> dict[str, Any]:
         """Map a natural-language variable name to ECSO ontology concepts (PURLs), ranked by match score.
 
-        Use the returned uri with search_by_semantic_annotation, or pass several to search_by_variable
+        Use the returned uri with search_datasets(concept_uri=...), or pass several to search_by_variable
         (concept_uris=[...]). Scores: 1.0 = exact label or synonym, >=0.72 = all words match;
         a match on a related/broad/narrow synonym scores at most 0.7 and is never used automatically.
         matched_as says whether the label, an exact synonym or a related synonym matched.
@@ -68,7 +68,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "concepts": concepts,
         }
         if not concepts:
-            out["hint"] = "No ECSO concept matches; use search_by_measured_variable for a free-text attribute search."
+            out["hint"] = "No ECSO concept matches; use search_datasets(variable=...) for a free-text attribute search."
         if warning:
             out["warning"] = warning
         return out

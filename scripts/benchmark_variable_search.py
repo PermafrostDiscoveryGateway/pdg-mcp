@@ -1,8 +1,8 @@
 """Compare free-text and ontology (PURL) variable search against the live Arctic Data Center index.
 
 For each benchmark term this checks that search_by_variable resolves it to the expected ECSO concept and
-prints the dataset counts from free text (search_by_measured_variable), the PURL alone
-(search_by_semantic_annotation) and the combined search. Counts are latest versions only.
+prints the dataset counts from free text (search_datasets variable=), the PURL alone
+(search_datasets concept_uri=) and the combined search. Counts are latest versions only.
 
     uv run python scripts/benchmark_variable_search.py
 """
@@ -39,7 +39,7 @@ async def run() -> int:
     async with Client(create_server(Settings(), require_auth=False)) as c:
         for term, expected in BENCHMARK:
             combined = (await c.call_tool("search_by_variable", {"variable": term, "rows": 0})).structured_content
-            free = (await c.call_tool("search_by_measured_variable", {"variable": term, "rows": 0})).structured_content
+            free = (await c.call_tool("search_datasets", {"variable": term, "rows": 0})).structured_content
             used = [u["uri"] for u in combined["concepts_used"]]
             ok = (expected in used) if expected else not used
             failures += not ok

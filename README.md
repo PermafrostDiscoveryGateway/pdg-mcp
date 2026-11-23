@@ -142,38 +142,25 @@ archives) return `supported: false` for now.
 
 Raster, NetCDF and Parquet profiles hold one upstream slot while they run and give up after `profile.timeout` seconds.
 
-## Tools (57)
+## Tools (30 by default, 40 with `tools.exclude_tags = []`)
+
+Every tool's schema is sent to the model on each turn, so the surface is kept small: one `search_datasets` with
+combinable filters instead of a tool per field, and low-level DataONE tools (tagged `low_level`) hidden unless
+`tools.exclude_tags` is changed.
 
 ### Search (Solr `/query/solr`)
 | Tool | Purpose |
 |------|---------|
-| `search_datasets` | Free-text search over all metadata |
-| `search_by_title` | Title phrase or wildcard |
-| `search_by_author` | Creator, last name, or investigator |
-| `search_by_keyword` | Author keywords, GCMD keywords, topics |
-| `search_by_bounding_box` | Spatial overlap or containment |
-| `search_by_temporal_coverage` | Data collection period overlaps a range |
-| `search_by_publication_date` | Uploaded, published, or modified in a range |
-| `search_by_funding` | Award number, funder, or award title |
-| `search_by_project` | Project name |
+| `search_datasets` | Datasets by any mix of free text, title, author, keyword, place, organization, project, funding, measured variable, taxon, semantic annotation, license, owner ORCID, bounding box (map view), collection period and upload/publication/modification date; each text filter can be narrowed to one field (e.g. `author_role`, `taxon_rank`). `rows=0` counts only |
 | `search_by_variable` | Datasets measuring a variable: ECSO concept annotations plus free text, each result labelled by match type |
 | `find_variable_concepts` | Map a term like "soil depth" to ECSO concept PURLs, with dataset counts |
-| `search_by_measured_variable` | Free text in attribute name, label, description, or unit |
-| `search_by_taxon` | Scientific name or taxonomic rank |
-| `search_by_semantic_annotation` | Ontology concept URI or bare ECSO id (http and https PURLs) |
-| `search_by_location_name` | Place keyword or site name |
-| `search_by_organization` | Contact or related organization |
-| `search_by_license` | Indexed license name |
-| `search_by_rights_holder` | Owner or submitter ORCID |
+| `search_data_files` | Data files (or metadata records / resource maps via `format_type`) by name, format, size, owner, or parent dataset |
 | `search_by_provenance` | PROV relations to a PID |
-| `search_data_files` | Data files by name, format, size, or parent dataset |
-| `search_by_format` | Any object by formatId |
 | `find_dataset_by_identifier` | Resolve a DOI, PID, series ID, or file PID to its dataset |
 | `search_missing_metadata` | Datasets lacking attributes, units, keywords, abstract, coverage, funding, annotations or license (EML only by default; most records lack a license), with counts of what else they lack |
-| `count_datasets` | Number of matches only |
 | `get_facet_counts` | Top values and counts of any field |
 | `list_search_fields` | All index fields and their types |
-| `advanced_solr_query` | Raw q/fq/fl/sort/facets |
+| `advanced_solr_query` | Raw q/fq/fl/sort/facets, for single-field matches such as `gcmdKeyword` or `genus` |
 
 Search results include `latest_only`: when true (the default), `numFound` counts only the current version of
 each dataset, so it is lower than a raw Solr count that includes obsoleted versions.
@@ -186,6 +173,7 @@ term-to-concept table is bundled in `src/arcticdata_mcp/data/ecso/concepts.json`
 ECSO release with `scripts/export_ecso_terms.py`. Set `ontology.bioportal_api_key` to also search ECSO on
 BioPortal. `scripts/benchmark_variable_search.py` compares free-text and concept search for a set of terms
 against the live index.
+
 ### Project portals
 Portals are curated project collections on arcticdata.io (for example
 [PerCS-Net](https://arcticdata.io/catalog/portals/PerCS-Net)). The indexer turns each portal's dataset rules into a
@@ -225,12 +213,12 @@ instrumentation, citations, data sources, sampling coverage) are copied whole ne
 `intellectual_rights` also returns EML 2.2 `<licensed>` elements as `licenses`.
 
 ### Objects and files (MNRead / MNAuthorization)
-`download_file`, `preview_file`, `profile_file`, `get_download_url`, `describe_object` (HEAD), `get_system_metadata`,
-`get_checksum`, `list_objects`, `is_authorized`.
+`download_file`, `preview_file`, `profile_file`, `get_download_url`, `get_system_metadata`. Hidden by default
+(`low_level`): `describe_object` (HEAD), `get_checksum`, `list_objects`, `is_authorized`.
 
 ### Node and reference
-`get_node_info`, `ping`, `list_query_engines`, `list_views`, `list_object_formats` and `get_object_format`
-(from the DataONE CN), `get_server_config`.
+`get_server_config`. Hidden by default (`low_level`): `get_node_info`, `ping`, `list_query_engines`, `list_views`,
+`list_object_formats` and `get_object_format` (from the DataONE CN).
 
 ### Water timeseries (MCP Apps PoC)
 `show_lakes` (lake map) and `get_lake_timeseries` (water-area chart) serve a small sample of

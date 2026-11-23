@@ -9,7 +9,7 @@ from fastmcp.apps import AppConfig
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from arcticdata_mcp import solr
+from arcticdata_mcp import ontology, solr
 from arcticdata_mcp.client import as_list
 from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
 from arcticdata_mcp.tools.common import (
@@ -66,14 +66,13 @@ FIELD_FILTERS: dict[str, dict[str, list[str]]] = {
         "award_title": ["awardTitle"],
     },
     "variable": {
-        "any": ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"],
+        "any": solr.ATTRIBUTE_FIELDS,
         "name": ["attributeName"],
         "label": ["attributeLabel"],
         "description": ["attributeDescription"],
         "unit": ["attributeUnit"],
     },
     "taxon": {"any": TAXON_RANKS, **{r: [r] for r in TAXON_RANKS}},
-    "concept_uri": {"any": ["sem_annotation"]},
 }
 OWNER_FIELDS = {
     "either": ["rightsHolder", "submitter"],
@@ -144,7 +143,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ] = "any",
         concept_uri: Annotated[
             str | None,
-            Field(description="Semantic annotation concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001197'."),
+            Field(
+                description="Semantic annotation concept URI, e.g. 'http://purl.dataone.org/odo/ECSO_00001207' (ECSO 'Soil Depth'), a bare ECSO id such as 'ECSO_00001207', or a wildcard. http and https PURLs both match."
+            ),
         ] = None,
         license: Annotated[
             str | None, Field(description="License name fragment (case-sensitive), e.g. 'Creative Commons Zero'.")
@@ -184,6 +185,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         needs all of north/south/east/west in WGS84 degrees and cannot cross the antimeridian. sort defaults to
         'relevance' when a text filter is given and 'newest' otherwise. rows=0 returns only numFound.
         get_facet_counts shows valid filter values; advanced_solr_query targets a single Solr field.
+        For "datasets that measure X" prefer search_by_variable, which maps X to ECSO concepts; the variable
+        filter here is free text over attribute names, labels, descriptions and units.
         Example: search_datasets(keyword="permafrost", author="Schuur", start_date="2010")
         """
         q: list[str] = []
@@ -199,12 +202,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "funding": (funding, funding_field),
             "variable": (variable, variable_field),
             "taxon": (taxon, taxon_rank),
-            "concept_uri": (concept_uri, "any"),
         }
         q += [solr.any_field(FIELD_FILTERS[k][mode], v) for k, (v, mode) in given.items() if v]
         if license:
             value = license if ("*" in license or "?" in license) else f"*{license}*"
             q.append(solr.any_field(["licenseName", "licenseUrl"], value))
+        if concept_uri:
+            q.append(ontology.annotation_clause([concept_uri]))
         has_text = bool(q)
         if owner:
             q.append(solr.any_field(OWNER_FIELDS[owner_role], owner))
@@ -213,7 +217,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             q.append(solr.date_range(record_date_field, record_date_from, record_date_to))
         if sort is None:
             sort = "relevance" if has_text else "newest"
-        return await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only)
+        out = await run(q, rows=rows, start=start, sort=sort, latest_only=latest_only)
+        if concept_uri and (concept := ontology.concept_by_uri(concept_uri)):
+            out = {"concept": {"uri": concept.uri, "label": concept.label}, **out}
+        return out
 
     @mcp.tool(annotations=READ_ONLY, tags={"search", "provenance"})
     async def search_by_provenance(

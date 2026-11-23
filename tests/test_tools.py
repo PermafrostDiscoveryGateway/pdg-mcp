@@ -22,8 +22,15 @@ def solr_json(docs, num=None, **extra):
 
 async def test_lists_all_tools(client):
     names = {t.name for t in await client.list_tools()}
-    assert len(names) == 26
-    assert {"search_datasets", "download_file", "list_dataset_files", "get_facet_counts", "search_portals"} <= names
+    assert len(names) == 29
+    assert {
+        "search_datasets",
+        "download_file",
+        "list_dataset_files",
+        "get_facet_counts",
+        "search_portals",
+        "search_by_variable",
+    } <= names
     assert not names & {"ping", "list_objects", "get_checksum"}
 
 
@@ -34,7 +41,7 @@ async def test_low_level_tools_hidden_unless_enabled(settings, mock_api):
     settings.tools.exclude_tags = []
     async with Client(create_server(settings, require_auth=False)) as c:
         names = {t.name for t in await c.list_tools()}
-    assert len(names) == 36
+    assert len(names) == 39
     assert {"ping", "list_objects", "get_checksum"} <= names
 
 
@@ -99,7 +106,7 @@ async def test_search_datasets_combines_filters(client, mock_api):
         ({"variable": "celsius", "variable_field": "unit"}, ['attributeUnit:"celsius"'], ["attributeName"]),
         ({"taxon": "Salix"}, ['genus:"Salix"', 'family:"Salix"'], []),
         ({"taxon": "Salix", "taxon_rank": "genus"}, ['genus:"Salix"'], ["family"]),
-        ({"concept_uri": "http://x/1"}, ['sem_annotation:"http://x/1"'], []),
+        ({"concept_uri": "http://x/1"}, ['sem_annotation:("http://x/1")'], []),
         ({"owner": "o"}, ['rightsHolder:"o"', 'submitter:"o"'], []),
         ({"owner": "o", "owner_role": "submitter"}, ['submitter:"o"'], ["rightsHolder"]),
         (

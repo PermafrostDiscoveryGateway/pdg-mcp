@@ -66,6 +66,7 @@ See [config.example.toml](config.example.toml). Any key can be overridden with
 | `ratelimit.per_user_burst` | `20` | Back-to-back calls allowed before the per-user rate applies |
 | `ratelimit.max_retries` | `3` | Retries on 429/502/503/504 from ADC |
 | `ratelimit.retry_backoff` / `retry_max_delay` | `1.0` / `30` | Exponential backoff base and cap, in seconds |
+| `ontology.bioportal_api_key` | empty | Optional BioPortal key; adds BioPortal ECSO search to variable lookups |
 | `portals.portal_url` | `https://arcticdata.io/catalog/portals` | Base of portal web pages (`<portal_url>/<label>`) |
 | `portals.cache_ttl` | `3600` | Seconds to cache the portal list and dataset counts (0 = no cache) |
 | `portals.exclude_labels` | empty | Portal labels to hide, such as test or spam portals |
@@ -93,7 +94,7 @@ CSV/XML/JSON, a base64 blob for anything else. For larger files it returns the d
 `/object/{pid}` URL with its size and checksum, plus a ready-made `curl` command. `preview_file` reads just
 the first bytes or lines of any file, however large.
 
-## Tools (26 by default, 36 with `tools.exclude_tags = []`)
+## Tools (29 by default, 39 with `tools.exclude_tags = []`)
 
 Every tool's schema is sent to the model on each turn, so the surface is kept small: one `search_datasets` with
 combinable filters instead of a tool per field, and low-level DataONE tools (tagged `low_level`) hidden unless
@@ -103,12 +104,27 @@ combinable filters instead of a tool per field, and low-level DataONE tools (tag
 | Tool | Purpose |
 |------|---------|
 | `search_datasets` | Datasets by any mix of free text, title, author, keyword, place, organization, project, funding, measured variable, taxon, semantic annotation, license, owner ORCID, bounding box (map view), collection period and upload/publication/modification date; each text filter can be narrowed to one field (e.g. `author_role`, `taxon_rank`). `rows=0` counts only |
+| `search_by_variable` | Datasets measuring a variable: ECSO concept annotations plus free text, each result labelled by match type |
+| `find_variable_concepts` | Map a term like "soil depth" to ECSO concept PURLs, with dataset counts |
 | `search_data_files` | Data files (or metadata records / resource maps via `format_type`) by name, format, size, owner, or parent dataset |
 | `search_by_provenance` | PROV relations to a PID |
 | `find_dataset_by_identifier` | Resolve a DOI, PID, series ID, or file PID to its dataset |
+| `search_missing_metadata` | Datasets lacking attributes, units, keywords, abstract, coverage, funding, annotations or license (EML only by default; most records lack a license), with counts of what else they lack |
 | `get_facet_counts` | Top values and counts of any field |
 | `list_search_fields` | All index fields and their types |
 | `advanced_solr_query` | Raw q/fq/fl/sort/facets, for single-field matches such as `gcmdKeyword` or `genus` |
+
+Search results include `latest_only`: when true (the default), `numFound` counts only the current version of
+each dataset, so it is lower than a raw Solr count that includes obsoleted versions.
+
+#### Variable search and ECSO concepts
+Variable names in metadata vary, so `search_by_variable` first maps the term to
+[ECSO](https://bioportal.bioontology.org/ontologies/ECSO) measurement concepts and searches the `sem_annotation`
+index field. For "soil depth" that finds 123 annotated datasets where a free-text attribute search finds 25. The
+term-to-concept table is bundled in `src/arcticdata_mcp/data/ecso/concepts.json`; regenerate it from a new
+ECSO release with `scripts/export_ecso_terms.py`. Set `ontology.bioportal_api_key` to also search ECSO on
+BioPortal. `scripts/benchmark_variable_search.py` compares free-text and concept search for a set of terms
+against the live index.
 
 ### Project portals
 Portals are curated project collections on arcticdata.io (for example

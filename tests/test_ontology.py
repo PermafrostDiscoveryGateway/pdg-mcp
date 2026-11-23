@@ -274,7 +274,7 @@ async def test_bioportal_failure_degrades_to_local_table(settings, mock_api):
 
 async def test_semantic_annotation_tool_accepts_bare_id(client, mock_api):
     route = mock_api.get(f"{MN}/query/solr/").mock(return_value=httpx.Response(200, json=solr_json([], num=122)))
-    r = await client.call_tool("search_by_semantic_annotation", {"concept_uri": "ECSO_00001207", "rows": 0})
+    r = await client.call_tool("search_datasets", {"concept_uri": "ECSO_00001207", "rows": 0})
     assert r.structured_content["concept"]["label"] == "Soil Depth"
     assert r.structured_content["latest_only"] is True
     assert "https://purl.dataone.org/odo/ECSO_00001207" in route.calls.last.request.url.params["q"]

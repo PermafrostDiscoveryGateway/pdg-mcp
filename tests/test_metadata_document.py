@@ -627,13 +627,30 @@ def test_literature_and_maintenance():
       <usageCitation><title>Paper using it</title></usageCitation>
       <literatureCited><citation><title>Older paper</title></citation><bibtex>@book{y}</bibtex></literatureCited>"""
     d = load(one_table(extra=extra))
-    assert d.maintenance() == {"description": "Updated yearly.", "maintenanceUpdateFrequency": "annually"}
-    lit = d.literature()
-    assert lit["reference_publications"] == [{"title": "Paper about it", "bibtex": "@article{x}"}]
-    assert lit["usage_citations"] == [{"title": "Paper using it"}]
-    assert lit["literature_cited"] == [{"citation": {"title": "Older paper"}, "bibtex": "@book{y}"}]
+    assert d.maintenance() == {
+        "maintenance": {"description": "Updated yearly.", "maintenanceUpdateFrequency": "annually"}
+    }
+    assert d.literature() == [
+        {"type": "reference_publications", "citation": {"title": "Paper about it", "bibtex": "@article{x}"}},
+        {"type": "usage_citations", "citation": {"title": "Paper using it"}},
+        {"type": "literature_cited", "citation": {"citation": {"title": "Older paper"}, "bibtex": "@book{y}"}},
+    ]
     bare = load(one_table())
-    assert bare.literature() == {} and bare.maintenance() is None
+    assert bare.literature() == [] and bare.maintenance() is None
+
+
+def test_citations_mixed_into_literature_and_maintenance_text_are_kept():
+    """A citation inside prose becomes a placeholder in the text, with the citation itself returned beside it."""
+    extra = """<maintenance><description><para>Some <citation><title>Method paper</title></citation> text</para>
+        </description></maintenance>
+      <literatureCited>See <citation><title>X</title></citation> too</literatureCited>"""
+    d = load(one_table(extra=extra))
+    (item,) = d.literature()
+    assert item["type"] == "literature_cited" and "[citation 1]" in str(item["citation"])
+    assert item["elements"]["citations"][0]["title"] == "X"
+    maintenance = d.maintenance()
+    assert "[citation 1]" in str(maintenance["maintenance"])
+    assert maintenance["elements"]["citations"][0]["title"] == "Method paper"
 
 
 async def test_tool_new_sections(client, mock_api):

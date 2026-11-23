@@ -42,7 +42,7 @@ def test_fields_in_use_covers_the_known_lists():
     use = fields_in_use()
     assert {"id", "title", "checksum", "collectionQuery", "obsoletes"} <= use.returned
     assert {"keywordsText", "prov_wasDerivedFrom", "obsoletedBy", "funderIdentifier", "isDocumentedBy"} <= use.searched
-    assert use.sorted_by == {"dateUploaded", "datePublished", "titlestr", "size"}
+    assert use.sorted_by == {"dateUploaded", "titlestr", "size"}
     assert solr.check_fields(index_for(use), use) == []
 
 

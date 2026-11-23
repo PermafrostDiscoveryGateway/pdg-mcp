@@ -96,3 +96,10 @@ metrics_port = 9100
 active_users_enabled = true
 active_users_db = ""        # e.g. "/data/active-users/active-users.sqlite"
 active_users_retention_days = 35
+
+[tools]
+# Hide tools with any of these tags to keep the tool list (sent to the model every turn) short.
+# "low_level" = node diagnostics and object plumbing: ping, get_node_info, list_query_engines, list_views,
+# list_object_formats, get_object_format, describe_object, get_checksum, list_objects, is_authorized.
+# Set to [] to expose every tool.
+exclude_tags = ["low_level"]

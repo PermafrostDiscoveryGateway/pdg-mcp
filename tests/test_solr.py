@@ -105,7 +105,7 @@ def test_check_fields_names_each_problem_field():
 
 
 def test_sort_fields_skips_score():
-    assert solr.sort_fields(solr.SORT_OPTIONS.values()) == {"dateUploaded", "datePublished", "titlestr", "size"}
+    assert solr.sort_fields(solr.SORT_OPTIONS.values()) == {"dateUploaded", "titlestr", "size"}
 
 
 def test_missing_clause_negates_the_present_clause():

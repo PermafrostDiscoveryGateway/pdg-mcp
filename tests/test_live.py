@@ -178,15 +178,7 @@ async def test_query_tools_run(live_all_tools, tool, args):
     await live_all_tools.call_tool(tool, args)  # raises if the tool returns an error
 
 
-@pytest.mark.parametrize(
-    "sort",
-    [
-        pytest.param(s, marks=pytest.mark.xfail(strict=True, reason="index cannot sort on datePublished"))
-        if s in KNOWN_BROKEN_SORTS
-        else s
-        for s in SORTS
-    ],
-)
+@pytest.mark.parametrize("sort", SORTS)
 async def test_sort_options_run(live, sort):
     assert set(SORTS) == set(solr.SORT_OPTIONS)
     await live.call_tool("search_datasets", {"query": "permafrost", "rows": 1, "sort": sort})

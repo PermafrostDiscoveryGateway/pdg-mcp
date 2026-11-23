@@ -52,6 +52,13 @@ retry_max_delay = 30.0
 # lakes.geojson and timeseries.json written by scripts/export_water_fixtures.py. Empty = bundled fixtures.
 data_dir = ""
 
+[ontology]
+# Variable lookups (find_variable_concepts, search_by_variable) map terms like "soil depth" to ECSO concept
+# PURLs using a bundled table (scripts/export_ecso_terms.py). Set a BioPortal API key to also search ECSO
+# on BioPortal, which matches definitions and related terms. Empty = bundled table only.
+bioportal_api_key = ""
+bioportal_url = "https://data.bioontology.org"
+
 [portals]
 # Project portals (search_portals, get_portal, search_portal_datasets, find_portals_for_dataset).
 portal_url = "https://arcticdata.io/catalog/portals"
@@ -67,3 +74,10 @@ exclude_labels = []
 cache_max_chars = 20000000
 # Seconds to keep a cached document.
 cache_ttl = 600.0
+
+[tools]
+# Hide tools with any of these tags to keep the tool list (sent to the model every turn) short.
+# "low_level" = node diagnostics and object plumbing: ping, get_node_info, list_query_engines, list_views,
+# list_object_formats, get_object_format, describe_object, get_checksum, list_objects, is_authorized.
+# Set to [] to expose every tool.
+exclude_tags = ["low_level"]

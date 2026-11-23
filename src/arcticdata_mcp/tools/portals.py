@@ -23,7 +23,7 @@ from arcticdata_mcp import solr
 from arcticdata_mcp.client import DataONEClient, as_list
 from arcticdata_mcp.config import PortalSettings
 from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
-from arcticdata_mcp.tools.common import READ_ONLY, DateStr, Pid, Rows, Sort, Start, ToolContext
+from arcticdata_mcp.tools.common import READ_ONLY, DateStr, Lat, Lon, Pid, Rows, Sort, Start, ToolContext
 
 PORTAL_FORMATS = ["https://purl.dataone.org/portals-1.0.0", "https://purl.dataone.org/portals-1.1.0"]
 PORTAL_FORMAT_CLAUSE = "formatId:(" + " OR ".join(solr.phrase(f) for f in PORTAL_FORMATS) + ")"
@@ -50,8 +50,6 @@ FACET_BATCH_CHARS = 4000
 DESCRIPTION_CHARS = 300
 DEFINITION_VALUES = 50
 
-Lat = Annotated[float | None, Field(ge=-90, le=90)]
-Lon = Annotated[float | None, Field(ge=-180, le=180)]
 PortalKey = Annotated[
     str, Field(description="Portal label (e.g. 'PerCS-Net', as in the portal URL), series ID or PID.")
 ]
@@ -329,10 +327,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             str | None,
             Field(description="Optional free-text query within the portal. Solr syntax (AND/OR/quotes) is allowed."),
         ] = None,
-        north: Lat = None,
-        south: Lat = None,
-        east: Lon = None,
-        west: Lon = None,
+        north: Lat | None = None,
+        south: Lat | None = None,
+        east: Lon | None = None,
+        west: Lon | None = None,
         start_date: DateStr = None,
         end_date: DateStr = None,
         rows: Rows = 10,
@@ -352,13 +350,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         q: list[str] = []
         if text:
             q.append(text)
-        box = (north, south, east, west)
-        if any(v is not None for v in box):
-            if any(v is None for v in box):
-                raise ToolError("Give all four of north, south, east and west, or none of them.")
-            q.append(solr.bbox_clause(north, south, east, west))  # type: ignore[arg-type]
-        if start_date or end_date:
-            q += solr.coverage_clauses(start_date, end_date)
+        q += solr.coverage_clauses(north, south, east, west, start_date, end_date)
         res = await solr.search(client, q, rows=rows, start=start, sort=sort, extra_fq=[p["collectionQuery"]])
         return {"portal": {"label": p.get("label"), "title": p.get("title"), "portal_url": portal_url(p)}, **res}
 

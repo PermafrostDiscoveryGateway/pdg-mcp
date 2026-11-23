@@ -48,6 +48,9 @@ DATA_FIELDS = [
     "obsoletedBy",
 ]
 
+# EML data-table attribute fields, for free-text variable searches.
+ATTRIBUTE_FIELDS = ["attributeName", "attributeLabel", "attributeDescription", "attributeUnit", "attribute"]
+
 SORT_OPTIONS = {
     "relevance": "score desc",
     "newest": "dateUploaded desc",
@@ -67,6 +70,7 @@ QUERY_FIELDS = [
     "beginDate",
     "endDate",
     "formatType",
+    "formatId",
     "obsoletedBy",
 ]
 FIELD_FLAGS = ("searchable", "returnable", "sortable", "multivalued")
@@ -128,11 +132,6 @@ def date_range(field: str, start: str | None, end: str | None) -> str:
     return f"{field}:[{solr_date(start)} TO {solr_date(end, end_of_period=True)}]"
 
 
-def coverage_clauses(start: str | None, end: str | None) -> list[str]:
-    """Clauses matching datasets whose data collection period overlaps ``start``..``end``."""
-    return [f"beginDate:[* TO {solr_date(end, end_of_period=True)}]", f"endDate:[{solr_date(start)} TO *]"]
-
-
 def bbox_clause(north: float, south: float, east: float, west: float, mode: str = "intersects") -> str:
     if not (-90 <= south <= north <= 90):
         raise ToolError("Require -90 <= south <= north <= 90")
@@ -147,6 +146,68 @@ def bbox_clause(north: float, south: float, east: float, west: float, mode: str 
         f"southBoundCoord:[* TO {north}] AND northBoundCoord:[{south} TO *] AND "
         f"westBoundCoord:[* TO {east}] AND eastBoundCoord:[{west} TO *]"
     )
+
+
+def coverage_clauses(
+    north: float | None,
+    south: float | None,
+    east: float | None,
+    west: float | None,
+    start_date: str | None,
+    end_date: str | None,
+    mode: str = "intersects",
+) -> list[str]:
+    """Clauses for an optional bounding box (all four sides or none) and an optional data collection period
+    (datasets whose beginDate/endDate overlap it)."""
+    clauses: list[str] = []
+    box = (north, south, east, west)
+    if any(v is not None for v in box):
+        if any(v is None for v in box):
+            raise ToolError("Give all four of north, south, east and west, or none of them.")
+        clauses.append(bbox_clause(north, south, east, west, mode))  # type: ignore[arg-type]
+    if start_date or end_date:
+        clauses.append(f"beginDate:[* TO {solr_date(end_date, end_of_period=True)}]")
+        clauses.append(f"endDate:[{solr_date(start_date)} TO *]")
+    return clauses
+
+
+# Metadata a record can lack, as the Solr clause that matches records that HAVE it. Checked against the live index:
+# The place and GCMD keyword fields (empty for every record) are left out because "missing" would be misleading.
+# license is tested on licenseName, which only about 1% of records have, so most records show as lacking it.
+PRESENT_CLAUSES = {
+    "attributes": "attributeName:*",
+    "units": "attributeUnit:*",
+    "keywords": "keywords:*",
+    "abstract": "abstract:*",
+    "spatial_coverage": "northBoundCoord:*",
+    "temporal_coverage": "beginDate:*",
+    "funding": "(awardNumber:* OR funderName:* OR fundingText:*)",
+    "semantic_annotations": "sem_annotation:*",
+    "license": "licenseName:*",
+}
+# Index fields named in PRESENT_CLAUSES, for solr.check_fields (see tools.fields_in_use).
+PRESENT_FIELDS = sorted({f for c in PRESENT_CLAUSES.values() for f in re.findall(r"(\w+):\*", c)})
+# EML records only: portals, ISO 19115, Dublin Core and FGDC records have no EML attributes, funding or annotations.
+EML_FORMAT_FQ = "formatId:(" + " OR ".join(term(p) for p in ("eml://*", "https://eml.ecoinformatics.org/*")) + ")"
+
+
+def missing_clause(name: str) -> str:
+    """Clause matching records that lack ``name`` (a key of PRESENT_CLAUSES)."""
+    try:
+        return f"-{PRESENT_CLAUSES[name]}"
+    except KeyError:
+        raise ToolError(f"Unknown metadata field {name!r}. Choose from: {', '.join(PRESENT_CLAUSES)}.") from None
+
+
+def missing_filters(names: list[str], match: str = "all") -> list[str]:
+    """Filter queries for records lacking all (one fq each) or any (one OR'd fq) of ``names``.
+
+    Solr matches nothing for a negative clause inside an OR, so each is anchored on ``*:*`` there.
+    """
+    clauses = [missing_clause(n) for n in names]
+    if match == "any" and len(clauses) > 1:
+        return [" OR ".join(f"(*:* AND {c})" for c in clauses)]
+    return clauses
 
 
 def index_fields(description: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -251,9 +312,15 @@ async def search(
     latest_only: bool = True,
     fl: list[str] | None = None,
     extra_fq: list[str] | None = None,
+    facet_queries: dict[str, str] | None = None,
     raw: bool = False,
 ) -> dict[str, Any]:
-    """Run a search and return ``{numFound, start, rows, query, results}``."""
+    """Run a search and return ``{numFound, latest_only, start, rows, query, results}``.
+
+    ``latest_only`` is echoed so callers can tell whether ``numFound`` counts only current versions.
+    ``facet_queries`` maps a key to a Solr query; the same request then also returns ``facet_queries``, how many of
+    the matching documents each query matches.
+    """
     clauses = [q] if isinstance(q, str) else [c for c in q if c]
     query = " AND ".join(f"({c})" for c in clauses) if clauses else "*:*"
     fq = list(extra_fq or [])
@@ -272,13 +339,20 @@ async def search(
         ("sort", SORT_OPTIONS.get(sort, sort)),
     ]
     params += [("fq", f) for f in fq]
+    if facet_queries:
+        params.append(("facet", "true"))
+        params += [("facet.query", f"{{!key={key}}}{clause}") for key, clause in facet_queries.items()]
     data = await client.solr(params)
     resp = data.get("response", {})
     docs = resp.get("docs", [])
-    return {
+    out: dict[str, Any] = {
         "numFound": resp.get("numFound", 0),
+        "latest_only": latest_only,
         "start": resp.get("start", 0),
         "rows": len(docs),
         "query": {"q": query, "fq": fq},
         "results": docs if raw else [summarize(d, client) for d in docs],
     }
+    if facet_queries:
+        out["facet_queries"] = data.get("facet_counts", {}).get("facet_queries", {})
+    return out

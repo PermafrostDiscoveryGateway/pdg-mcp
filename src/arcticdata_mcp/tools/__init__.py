@@ -10,7 +10,8 @@ def fields_in_use() -> solr.FieldUse:
 
     get_dataset_details is not listed: it reads its field list from the index. Add new field constants here.
     """
-    from arcticdata_mcp.tools import datasets, portals, search
+    from arcticdata_mcp import ontology
+    from arcticdata_mcp.tools import datasets, portals, search, variables
 
     return solr.FieldUse(
         returned={
@@ -22,9 +23,14 @@ def fields_in_use() -> solr.FieldUse:
             *datasets.VERSION_FIELDS,
             *portals.PORTAL_FIELDS,
             *portals.DATASET_LOOKUP_FIELDS,
+            *variables.RETURN_FIELDS,
         },
         searched={
             *solr.QUERY_FIELDS,
+            *solr.ATTRIBUTE_FIELDS,
+            *solr.PRESENT_FIELDS,
+            *ontology.QUERY_FIELDS,
+            *variables.QUERY_FIELDS,
             *search.QUERY_FIELDS,
             *datasets.QUERY_FIELDS,
             *portals.QUERY_FIELDS,

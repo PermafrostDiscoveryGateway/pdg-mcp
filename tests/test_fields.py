@@ -57,7 +57,17 @@ def test_renaming_any_field_fails_the_check_with_its_name(group):
         assert f"{name}: not in the index (we need it {FLAGS[group]})" in problems
 
 
-@pytest.mark.parametrize("path", ["solr.py", "tools/search.py", "tools/datasets.py", "tools/portals.py"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "solr.py",
+        "ontology.py",
+        "tools/search.py",
+        "tools/datasets.py",
+        "tools/portals.py",
+        "tools/variables.py",
+    ],
+)
 def test_field_names_written_into_queries_are_listed(path):
     """Catches a field added to a query string but not to a QUERY_FIELDS list, which the check would then miss."""
     found = set(INLINE_FIELD.findall((SRC / path).read_text()))

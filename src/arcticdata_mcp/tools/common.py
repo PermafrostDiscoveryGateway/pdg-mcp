@@ -38,3 +38,5 @@ DateStr = Annotated[
     str | None,
     Field(description="Date as YYYY, YYYY-MM, YYYY-MM-DD, ISO-8601, or Solr date math like 'NOW-1YEAR'."),
 ]
+Lat = Annotated[float, Field(ge=-90, le=90, description="Latitude in WGS84 degrees.")]
+Lon = Annotated[float, Field(ge=-180, le=180, description="Longitude in WGS84 degrees.")]

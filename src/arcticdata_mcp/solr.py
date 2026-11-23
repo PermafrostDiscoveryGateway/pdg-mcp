@@ -131,6 +131,29 @@ def bbox_clause(north: float, south: float, east: float, west: float, mode: str 
     )
 
 
+def coverage_clauses(
+    north: float | None,
+    south: float | None,
+    east: float | None,
+    west: float | None,
+    start_date: str | None,
+    end_date: str | None,
+    mode: str = "intersects",
+) -> list[str]:
+    """Clauses for an optional bounding box (all four sides or none) and an optional data collection period
+    (datasets whose beginDate/endDate overlap it)."""
+    clauses: list[str] = []
+    box = (north, south, east, west)
+    if any(v is not None for v in box):
+        if any(v is None for v in box):
+            raise ToolError("Give all four of north, south, east and west, or none of them.")
+        clauses.append(bbox_clause(north, south, east, west, mode))  # type: ignore[arg-type]
+    if start_date or end_date:
+        clauses.append(f"beginDate:[* TO {solr_date(end_date, end_of_period=True)}]")
+        clauses.append(f"endDate:[{solr_date(start_date)} TO *]")
+    return clauses
+
+
 # Metadata a record can lack, as the Solr clause that matches records that HAVE it. Checked against the live index:
 # The place and GCMD keyword fields (empty for every record) are left out because "missing" would be misleading.
 # license is tested on licenseName, which only about 1% of records have, so most records show as lacking it.

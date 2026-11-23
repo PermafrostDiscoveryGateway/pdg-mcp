@@ -121,6 +121,13 @@ class MetadataSettings:
 
 
 @dataclass
+class ToolSettings:
+    # Tools carrying any of these tags are not listed or callable. "low_level" covers DataONE node diagnostics
+    # and object plumbing (ping, get_node_info, list_objects, get_checksum, ...); set [] to expose everything.
+    exclude_tags: list[str] = field(default_factory=lambda: ["low_level"])
+
+
+@dataclass
 class Settings:
     auth: AuthSettings = field(default_factory=AuthSettings)
     server: ServerSettings = field(default_factory=ServerSettings)
@@ -133,6 +140,7 @@ class Settings:
     ontology: OntologySettings = field(default_factory=OntologySettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
     metadata: MetadataSettings = field(default_factory=MetadataSettings)
+    tools: ToolSettings = field(default_factory=ToolSettings)
 
 
 def _coerce(value: str, target: type) -> Any:
@@ -163,7 +171,13 @@ def load_settings(path: str | Path | None = None) -> Settings:
         for f in fields(section_obj):
             ftype = type(getattr(section_obj, f.name))
             if f.name in section_data:
-                setattr(section_obj, f.name, ftype(section_data[f.name]))
+                value = section_data[f.name]
+                # A TOML string for a list setting means a comma-separated list, as in the env override.
+                setattr(
+                    section_obj,
+                    f.name,
+                    _coerce(value, list) if ftype is list and isinstance(value, str) else ftype(value),
+                )
             env_key = f"{ENV_PREFIX}{section.name}_{f.name}".upper()
             if env_key in os.environ:
                 setattr(section_obj, f.name, _coerce(os.environ[env_key], ftype))

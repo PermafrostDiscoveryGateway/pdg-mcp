@@ -11,14 +11,6 @@ from arcticdata_mcp.tools import fields_in_use
 
 pytestmark = pytest.mark.live
 DOI = "doi:10.18739/A29K4B"
-# Known problems, kept out of the weekly failure until they are decided separately: the published_newest sort uses
-# datePublished, which the index cannot sort on, so that sort option always returns an error; and the
-# search_datasets license filter also matches licenseUrl, which the index does not mark searchable.
-KNOWN_FIELD_PROBLEMS = {
-    "datePublished: type date_range cannot be sorted on",
-    "licenseUrl: in the index but not searchable",
-}
-KNOWN_BROKEN_SORTS = {"published_newest"}
 
 
 @pytest.fixture
@@ -136,9 +128,6 @@ async def test_field_names_match_the_index():
         await client.aclose()
     assert len(index) > 100, "the field description looks truncated"
     problems = solr.check_fields(index, fields_in_use())
-    fixed = KNOWN_FIELD_PROBLEMS - set(problems)
-    assert not fixed, f"no longer a problem, remove from KNOWN_FIELD_PROBLEMS: {sorted(fixed)}"
-    problems = [p for p in problems if p not in KNOWN_FIELD_PROBLEMS]
     assert not problems, "Solr field names out of sync with the index:\n" + "\n".join(problems)
 
 

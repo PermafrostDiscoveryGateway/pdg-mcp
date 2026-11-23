@@ -55,7 +55,6 @@ SORT_OPTIONS = {
     "relevance": "score desc",
     "newest": "dateUploaded desc",
     "oldest": "dateUploaded asc",
-    "published_newest": "datePublished desc",
     "title": "titlestr asc",
     "size_desc": "size desc",
     "size_asc": "size asc",

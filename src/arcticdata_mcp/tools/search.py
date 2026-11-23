@@ -10,7 +10,6 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from arcticdata_mcp import ontology, solr
-from arcticdata_mcp.client import as_list
 from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
 from arcticdata_mcp.tools.common import (
     READ_ONLY,
@@ -79,7 +78,8 @@ OWNER_FIELDS = {
     "rights_holder": ["rightsHolder"],
     "submitter": ["submitter"],
 }
-LICENSE_FIELDS = ["licenseName", "licenseUrl"]
+# licenseUrl is returnable but not searchable in the index, so only the name can be matched.
+LICENSE_FIELDS = ["licenseName"]
 RECORD_DATE_FIELDS = ("dateUploaded", "datePublished", "dateModified")
 # Fields written directly into query strings in this module.
 INLINE_QUERY_FIELDS = [
@@ -403,26 +403,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             str | None, Field(description="Optional case-insensitive filter on field name.")
         ] = None,
     ) -> dict[str, Any]:
-        """List every searchable Solr index field (name, type, description, multivalued) from GET /query/solr.
+        """List every Solr index field (name, type, description, searchable/returnable/sortable/multivalued) from GET /query/solr.
 
         Use this to build advanced_solr_query calls.
         """
         desc = await client.get_xml(client.mn("query/solr"))
-        fields = []
-        for f in as_list(desc.get("queryField")):
-            name = f.get("name")
-            if name_contains and name_contains.lower() not in (name or "").lower():
-                continue
-            fields.append(
-                {
-                    "name": name,
-                    "type": f.get("type"),
-                    "description": (f.get("description") or "").strip() or None,
-                    "searchable": f.get("searchable") == "true",
-                    "returnable": f.get("returnable") == "true",
-                    "multivalued": f.get("multivalued") == "true",
-                }
-            )
+        fields = [
+            f
+            for name, f in solr.index_fields(desc).items()
+            if not name_contains or name_contains.lower() in name.lower()
+        ]
         return {
             "engine": desc.get("name"),
             "version": desc.get("queryEngineVersion"),

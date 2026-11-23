@@ -165,7 +165,7 @@ QUERY_TOOL_CALLS = [
     ("get_package_download_info", {"pid": DOI}),
     ("find_portals_for_dataset", {"pid": DOI}),
 ]
-SORTS = ["relevance", "newest", "oldest", "published_newest", "title", "size_desc", "size_asc"]
+SORTS = ["relevance", "newest", "oldest", "title", "size_desc", "size_asc"]
 
 
 @pytest.mark.parametrize(

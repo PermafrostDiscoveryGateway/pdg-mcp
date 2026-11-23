@@ -87,11 +87,12 @@ def create_server(
         try:
             yield
         finally:
-            if check:
-                check.cancel()
-                with suppress(asyncio.CancelledError):
-                    await check
-            await client.aclose()
+            try:
+                if check:
+                    check.cancel()
+                    await asyncio.wait([check])
+            finally:
+                await client.aclose()
 
     auth = build_auth(settings.auth) if require_auth else None
     mcp = FastMCP(

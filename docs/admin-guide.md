@@ -64,3 +64,74 @@ Then set `imagePullSecrets: [ncsa-hub]` in the chart values. To rotate the crede
 ### Rate limits
 
 The per-user and global limits are set through `extraEnv` in the chart values, for example `ARCTICDATA_MCP_RATELIMIT_PER_USER_RATE: "2"`. Limits apply per pod, so with more than one replica the effective limits multiply.
+
+## Hosted chat (LibreChat)
+
+`https://pdg-chat.software-dev.ncsa.illinois.edu` is a LibreChat instance with `pdg-mcp` preinstalled. Users sign in once with the PDG realm and bring their own model. LibreChat forwards each user's Keycloak access token to `pdg-mcp`, so they don't sign in a second time. `pdg-mcp` checks the token exactly as it does for Claude, so the `mcp-user` role and per-user rate limits still apply.
+
+It runs in the `pdg` namespace from the upstream chart (`oci://ghcr.io/danny-avila/librechat-chart/librechat`, version 2.0.14) with the values in [`deploy/librechat/values.yaml`](../deploy/librechat/values.yaml):
+
+| Component | Storage |
+| --- | --- |
+| LibreChat v0.8.8 | uploads on `nfs-taiga`, 5Gi |
+| MongoDB (`bitnamilegacy/mongodb`, auth on) | `csi-cinder-sc-retain`, 2Gi. Cinder quota is shared across the cluster, so grow it only when needed (the storage class allows expansion). |
+| Meilisearch (conversation search) | none. The index is rebuilt from MongoDB on restart. |
+
+### Keycloak client (one time)
+
+This is a second client in the **PDG** realm, separate from the public `pdg-mcp` client.
+
+1. Create a client `librechat` with **Client authentication** On (confidential) and **Standard flow** On. Turn **Direct access grants** off.
+2. Set **Valid redirect URIs** to `https://pdg-chat.software-dev.ncsa.illinois.edu/oauth/openid/callback`, and **Web origins** to `+`.
+3. On **Client scopes**, make sure `roles`, `profile` and `email` are Default scopes. `roles` puts `mcp-user` in the access token, which both LibreChat and `pdg-mcp` check.
+4. Copy the client secret from the **Credentials** tab for the next step.
+
+### Secret (one time)
+
+All secrets go in one Secret, `librechat-credentials-env`, which LibreChat, MongoDB and Meilisearch all read. Generate the values locally and never commit them:
+
+```bash
+MONGO_PW=$(openssl rand -hex 24)
+kubectl --context software-dev -n pdg create secret generic librechat-credentials-env \
+  --from-literal=CREDS_KEY=$(openssl rand -hex 32) \
+  --from-literal=CREDS_IV=$(openssl rand -hex 16) \
+  --from-literal=JWT_SECRET=$(openssl rand -hex 32) \
+  --from-literal=JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  --from-literal=MEILI_MASTER_KEY=$(openssl rand -hex 32) \
+  --from-literal=OPENID_SESSION_SECRET=$(openssl rand -hex 32) \
+  --from-literal=OPENID_CLIENT_SECRET='<librechat client secret from Keycloak>' \
+  --from-literal=mongodb-root-password=$(openssl rand -hex 24) \
+  --from-literal=mongodb-passwords=$MONGO_PW \
+  --from-literal=MONGO_URI="mongodb://librechat:$MONGO_PW@librechat-mongodb.pdg.svc.cluster.local:27017/LibreChat"
+```
+
+`CREDS_KEY` and `CREDS_IV` encrypt the model keys users save in LibreChat. If they change, every user has to re-enter their keys. MongoDB only reads its passwords when the volume is first created, so to rotate them, change them inside MongoDB as well as in the Secret.
+
+### Install and upgrade
+
+```bash
+helm --kube-context software-dev -n pdg upgrade --install librechat \
+  oci://ghcr.io/danny-avila/librechat-chart/librechat --version 2.0.14 \
+  -f deploy/librechat/values.yaml
+```
+
+To upgrade LibreChat, bump `image.tag` and the chart `--version` together, and check the release notes for `librechat.yaml` changes (`version:` in `configYamlContent`).
+
+### Models
+
+There are no server-side model keys. Every provider asks the user for their own key:
+
+- **Lumen**: the base URL is fixed (`LUMEN_BASE_URL`). We give Lumen keys only to selected users, outside LibreChat.
+- **Your own (OpenAI-compatible)**: the user enters both the base URL and the key, for example OpenRouter, vLLM or Ollama. LibreChat calls the model from the cluster, so the URL must be reachable from there and must be a public address, because LibreChat blocks private IPs. `http://localhost:11434` won't work.
+- **OpenAI, Anthropic, Google**: the user enters their own key.
+
+Tools only work with models that support tool calling.
+
+### Chat troubleshooting
+
+| User sees | Cause | Fix |
+| --- | --- | --- |
+| Keycloak: "Invalid parameter: redirect\_uri" | The callback isn't registered on the `librechat` client | Add `https://pdg-chat.software-dev.ncsa.illinois.edu/oauth/openid/callback` |
+| LibreChat rejects the login | The user lacks `mcp-user` | Assign the role (see Approving and revoking users) |
+| Chat works, but `pdg` tools fail with 401 | The forwarded token is missing the role or has expired | Check the `pdg-mcp` logs for `Rejected user`; ask the user to sign out and back in |
+| The model never calls the tools | The model doesn't support tool calling | Suggest a model that does |

@@ -69,11 +69,11 @@ The per-user and global limits are set through `extraEnv` in the chart values, f
 
 `https://pdg-chat.software-dev.ncsa.illinois.edu` is a LibreChat instance with `pdg-mcp` preinstalled. Users sign in once with the PDG realm and bring their own model. LibreChat forwards each user's Keycloak access token to `pdg-mcp`, so they don't sign in a second time. `pdg-mcp` checks the token exactly as it does for Claude, so the `mcp-user` role and per-user rate limits still apply.
 
-It runs in the `pdg` namespace from the upstream chart (`oci://ghcr.io/danny-avila/librechat-chart/librechat`, version 2.0.14) with the values in [`deploy/librechat/values.yaml`](../deploy/librechat/values.yaml):
+It runs in the `pdg` namespace as the `pdg-chat` release of [`charts/pdg-chat`](../charts/pdg-chat). That chart only wraps the upstream LibreChat chart (`oci://ghcr.io/librechat-ai/librechat-chart/librechat` 3.2.1, as in the [LibreChat Helm docs](https://www.librechat.ai/docs/local/helm_chart)) and carries our values. It is a separate release from `pdg-mcp`, so either can be upgraded or rolled back on its own.
 
 | Component | Storage |
 | --- | --- |
-| LibreChat v0.8.8 | uploads on `nfs-taiga`, 5Gi |
+| LibreChat v0.8.9 | uploads on `nfs-taiga`, 5Gi |
 | MongoDB (`bitnamilegacy/mongodb`, auth on) | `csi-cinder-sc-retain`, 2Gi. Cinder quota is shared across the cluster, so grow it only when needed (the storage class allows expansion). |
 | Meilisearch (conversation search) | none. The index is rebuilt from MongoDB on restart. |
 
@@ -88,10 +88,10 @@ This is a second client in the **PDG** realm, separate from the public `pdg-mcp`
 
 ### Secret (one time)
 
-All secrets go in one Secret, `librechat-credentials-env`, which LibreChat, MongoDB and Meilisearch all read. Generate the values locally and never commit them:
+All secrets go in one Secret, `librechat-credentials-env`, which LibreChat, MongoDB and Meilisearch all read. Generate the values locally and never commit them. Type the Keycloak client secret at the prompt so it stays out of your shell history:
 
 ```bash
-MONGO_PW=$(openssl rand -hex 24)
+read -rs "KC_SECRET?librechat client secret: "; echo
 kubectl --context software-dev -n pdg create secret generic librechat-credentials-env \
   --from-literal=CREDS_KEY=$(openssl rand -hex 32) \
   --from-literal=CREDS_IV=$(openssl rand -hex 16) \
@@ -99,23 +99,25 @@ kubectl --context software-dev -n pdg create secret generic librechat-credential
   --from-literal=JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
   --from-literal=MEILI_MASTER_KEY=$(openssl rand -hex 32) \
   --from-literal=OPENID_SESSION_SECRET=$(openssl rand -hex 32) \
-  --from-literal=OPENID_CLIENT_SECRET='<librechat client secret from Keycloak>' \
-  --from-literal=mongodb-root-password=$(openssl rand -hex 24) \
-  --from-literal=mongodb-passwords=$MONGO_PW \
-  --from-literal=MONGO_URI="mongodb://librechat:$MONGO_PW@librechat-mongodb.pdg.svc.cluster.local:27017/LibreChat"
+  --from-literal=OPENID_CLIENT_SECRET="$KC_SECRET" \
+  --from-literal=mongodb-root-password=$(openssl rand -hex 24)
 ```
 
-`CREDS_KEY` and `CREDS_IV` encrypt the model keys users save in LibreChat. If they change, every user has to re-enter their keys. MongoDB only reads its passwords when the volume is first created, so to rotate them, change them inside MongoDB as well as in the Secret.
+The chart builds `MONGO_URI` from `mongodb-root-password`, so the Secret doesn't need it. (`read -rs "VAR?prompt"` is zsh; in bash use `read -rsp "prompt" KC_SECRET`.)
+
+Keep these values for the life of the install. `CREDS_KEY` and `CREDS_IV` encrypt the model keys users save, so changing them makes every user re-enter their keys. MongoDB only reads its root password when the volume is first created, so to rotate it, change it inside MongoDB as well as in the Secret, then `kubectl rollout restart deployment/pdg-chat-librechat`.
 
 ### Install and upgrade
 
 ```bash
-helm --kube-context software-dev -n pdg upgrade --install librechat \
-  oci://ghcr.io/danny-avila/librechat-chart/librechat --version 2.0.14 \
-  -f deploy/librechat/values.yaml
+helm dependency build charts/pdg-chat
 ```
 
-To upgrade LibreChat, bump `image.tag` and the chart `--version` together, and check the release notes for `librechat.yaml` changes (`version:` in `configYamlContent`).
+```bash
+helm --kube-context software-dev -n pdg upgrade --install pdg-chat charts/pdg-chat
+```
+
+To upgrade LibreChat, bump the `librechat` dependency version in `Chart.yaml` and `librechat.image.tag` in `values.yaml` together, run `helm dependency update charts/pdg-chat`, commit the new `Chart.lock`, and check the release notes for `librechat.yaml` changes (`version:` in `configYamlContent`).
 
 ### Models
 

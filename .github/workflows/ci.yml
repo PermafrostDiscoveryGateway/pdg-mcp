@@ -37,3 +37,6 @@ jobs:
       - uses: actions/checkout@v7
       - run: helm lint charts/pdg-mcp
       - run: helm template charts/pdg-mcp > /dev/null
+      - run: helm dependency build charts/pdg-chat
+      - run: helm lint charts/pdg-chat
+      - run: helm template pdg-chat charts/pdg-chat > /dev/null

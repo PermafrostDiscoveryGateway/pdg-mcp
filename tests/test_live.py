@@ -53,6 +53,32 @@ async def test_portals(live):
     assert "PerCS-Net" in [p["label"] for p in owners["portals"]]
 
 
+async def test_profile_file(live):
+    small = (
+        await live.call_tool("search_data_files", {"file_name": "*.csv", "max_size": 200000, "rows": 1})
+    ).structured_content
+    pid = small["results"][0]["id"]
+    r = (await live.call_tool("profile_file", {"pid": pid, "scan": "full"})).structured_content
+    assert r["supported"] and r["complete"] and r["rows_profiled"] > 0 and r["columns"]
+    nc = (
+        await live.call_tool("search_data_files", {"format_id": "netCDF-4", "max_size": 5000000, "rows": 1})
+    ).structured_content
+    assert (await live.call_tool("profile_file", {"pid": nc["results"][0]["id"]})).structured_content[
+        "supported"
+    ] is True
+    parquet = (
+        await live.call_tool("search_data_files", {"format_id": "application/vnd.apache.parquet", "rows": 1})
+    ).structured_content
+    r = (await live.call_tool("profile_file", {"pid": parquet["results"][0]["id"]})).structured_content
+    assert r["supported"] and r["rows_total"] > 0 and r["columns"] and r["read"]["bytes_fetched"] <= r["size"]
+    archive = (
+        await live.call_tool("search_data_files", {"format_id": "application/zip", "rows": 1})
+    ).structured_content
+    assert (await live.call_tool("profile_file", {"pid": archive["results"][0]["id"]})).structured_content[
+        "supported"
+    ] is False
+
+
 # ECSO ids used in current annotations that the bundled table cannot cover: they are not defined in ECSO8.owl
 # at all (13 dataset annotations in November 2026, summed per concept). The www.purl gap this guards against was 164 datasets.
 MAX_UNCOVERED_DATASETS = 30

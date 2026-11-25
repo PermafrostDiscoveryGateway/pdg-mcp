@@ -11,6 +11,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "defusedxml>=0.7.1",
+    "duckdb>=2.0.0",
     "fastmcp>=4.0",
     "httpx>=0.28.1",
     "xmltodict>=1.0.4",
@@ -35,6 +36,12 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "respx>=0.23.1",
     "ruff==0.17.5",
+]
+ingest = [
+    "pandas>=3.1.0",
+    "pyarrow>=26.0.0",
+    "pyproj>=3.7.0",
+    "shapely>=2.2.0",
 ]
 
 [tool.uv]

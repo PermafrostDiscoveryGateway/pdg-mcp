@@ -10,7 +10,6 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from arcticdata_mcp import ontology, solr
-from arcticdata_mcp.client import as_list
 from arcticdata_mcp.tools.apps import SEARCH_MAP_URI
 from arcticdata_mcp.tools.common import (
     READ_ONLY,
@@ -79,6 +78,34 @@ OWNER_FIELDS = {
     "rights_holder": ["rightsHolder"],
     "submitter": ["submitter"],
 }
+# licenseUrl is returnable but not searchable in the index, so only the name can be matched.
+LICENSE_FIELDS = ["licenseName"]
+RECORD_DATE_FIELDS = ("dateUploaded", "datePublished", "dateModified")
+# Fields written directly into query strings in this module.
+INLINE_QUERY_FIELDS = [
+    "fileName",
+    "formatId",
+    "formatType",
+    "size",
+    "isDocumentedBy",
+    "id",
+    "seriesId",
+    "identifier",
+    "documents",
+    "obsoletedBy",
+]
+# Every index field this module searches. solr.check_fields compares them with the index (see tools.fields_in_use),
+# so keep field names in the lists above rather than inline in the tools.
+QUERY_FIELDS = {
+    *INLINE_QUERY_FIELDS,
+    *PROV_FIELDS.values(),
+    *LICENSE_FIELDS,
+    *RECORD_DATE_FIELDS,
+    *(f for options in FIELD_FILTERS.values() for fields in options.values() for f in fields),
+    *(f for fields in OWNER_FIELDS.values() for f in fields),
+}
+# Returned by search_by_provenance and search_data_files on top of the default summary fields.
+EXTRA_RETURN_FIELDS = ["fileName", "formatType", "size", "title"]
 OwnerRole = Annotated[
     Literal["either", "rights_holder", "submitter"],
     Field(description="Match owner against the object's rightsHolder, its submitter, or either."),
@@ -168,7 +195,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         record_date_from: DateStr = None,
         record_date_to: DateStr = None,
         record_date_field: Annotated[
-            Literal["dateUploaded", "datePublished", "dateModified"],
+            Literal[RECORD_DATE_FIELDS],  # type: ignore[valid-type]
             Field(description="Which record date record_date_from/record_date_to filter on."),
         ] = "dateUploaded",
         rows: Rows = 10,
@@ -206,7 +233,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         q += [solr.any_field(FIELD_FILTERS[k][mode], v) for k, (v, mode) in given.items() if v]
         if license:
             value = license if ("*" in license or "?" in license) else f"*{license}*"
-            q.append(solr.any_field(["licenseName", "licenseUrl"], value))
+            q.append(solr.any_field(LICENSE_FIELDS, value))
         if concept_uri:
             q.append(ontology.annotation_clause([concept_uri]))
         has_text = bool(q)
@@ -376,26 +403,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             str | None, Field(description="Optional case-insensitive filter on field name.")
         ] = None,
     ) -> dict[str, Any]:
-        """List every searchable Solr index field (name, type, description, multivalued) from GET /query/solr.
+        """List every Solr index field (name, type, description, searchable/returnable/sortable/multivalued) from GET /query/solr.
 
         Use this to build advanced_solr_query calls.
         """
         desc = await client.get_xml(client.mn("query/solr"))
-        fields = []
-        for f in as_list(desc.get("queryField")):
-            name = f.get("name")
-            if name_contains and name_contains.lower() not in (name or "").lower():
-                continue
-            fields.append(
-                {
-                    "name": name,
-                    "type": f.get("type"),
-                    "description": (f.get("description") or "").strip() or None,
-                    "searchable": f.get("searchable") == "true",
-                    "returnable": f.get("returnable") == "true",
-                    "multivalued": f.get("multivalued") == "true",
-                }
-            )
+        fields = [
+            f
+            for name, f in solr.index_fields(desc).items()
+            if not name_contains or name_contains.lower() in name.lower()
+        ]
         return {
             "engine": desc.get("name"),
             "version": desc.get("queryEngineVersion"),

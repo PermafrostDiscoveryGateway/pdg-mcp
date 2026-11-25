@@ -21,6 +21,9 @@ Term = Annotated[
 ]
 MAX_AUTO_CONCEPTS = 5
 CANDIDATE_POOL = 50
+# Index fields named in this module, compared with the index by solr.check_fields (see tools.fields_in_use).
+QUERY_FIELDS = ["attribute", "id"]
+RETURN_FIELDS = ["sem_annotation"]
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -137,7 +140,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             start=start,
             sort=sort,
             latest_only=latest_only,
-            fl=[*solr.METADATA_FIELDS, "sem_annotation"],
+            fl=[*solr.METADATA_FIELDS, *RETURN_FIELDS],
             facet_queries=facets,
             raw=True,
         )

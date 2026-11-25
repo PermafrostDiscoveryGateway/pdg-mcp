@@ -27,6 +27,8 @@ ODO_HTTP = "http://purl.dataone.org/odo/"
 # copied that spelling into annotations, so the index holds it alongside http:// and https://.
 ODO_FORMS = (ODO_HTTP, "https://purl.dataone.org/odo/", "http://www.purl.dataone.org/odo/")
 BIOPORTAL_ONTOLOGY = "ECSO"
+# Index field holding semantic annotations, compared with the index by solr.check_fields (see tools.fields_in_use).
+QUERY_FIELDS = ["sem_annotation"]
 # A concept scoring at least this well is used automatically by search_by_variable.
 STRONG_MATCH = 0.72
 MIN_SCORE = 0.3

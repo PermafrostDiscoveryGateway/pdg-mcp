@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import calendar
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from arcticdata_mcp.client import DataONEClient
+from arcticdata_mcp.client import DataONEClient, as_list
 
 MAX_ROWS = 100
 ABSTRACT_CHARS = 400
@@ -54,11 +55,26 @@ SORT_OPTIONS = {
     "relevance": "score desc",
     "newest": "dateUploaded desc",
     "oldest": "dateUploaded asc",
-    "published_newest": "datePublished desc",
     "title": "titlestr asc",
     "size_desc": "size desc",
     "size_asc": "size asc",
 }
+
+# Index fields that the helpers in this module write into q and fq (bbox_clause, coverage_clauses, search).
+QUERY_FIELDS = [
+    "northBoundCoord",
+    "southBoundCoord",
+    "eastBoundCoord",
+    "westBoundCoord",
+    "beginDate",
+    "endDate",
+    "formatType",
+    "formatId",
+    "obsoletedBy",
+]
+FIELD_FLAGS = ("searchable", "returnable", "sortable", "multivalued")
+# Field types Solr refuses to sort on ("Sorting not supported on SpatialField"), though the index lists them as sortable.
+UNSORTABLE_TYPES = {"date_range"}
 
 _SPECIAL = re.compile(r'([+\-!(){}\[\]^"~:\\/]|&&|\|\|)')
 _DATE_RE = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
@@ -168,6 +184,8 @@ PRESENT_CLAUSES = {
     "semantic_annotations": "sem_annotation:*",
     "license": "licenseName:*",
 }
+# Index fields named in PRESENT_CLAUSES, for solr.check_fields (see tools.fields_in_use).
+PRESENT_FIELDS = sorted({f for c in PRESENT_CLAUSES.values() for f in re.findall(r"(\w+):\*", c)})
 # EML records only: portals, ISO 19115, Dublin Core and FGDC records have no EML attributes, funding or annotations.
 EML_FORMAT_FQ = "formatId:(" + " OR ".join(term(p) for p in ("eml://*", "https://eml.ecoinformatics.org/*")) + ")"
 
@@ -189,6 +207,60 @@ def missing_filters(names: list[str], match: str = "all") -> list[str]:
     if match == "any" and len(clauses) > 1:
         return [" OR ".join(f"(*:* AND {c})" for c in clauses)]
     return clauses
+
+
+def index_fields(description: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Fields of the index by name, from the parsed GET /query/solr description.
+
+    Each has ``name``, ``type``, ``description`` and the boolean flags in ``FIELD_FLAGS``.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for f in as_list(description.get("queryField")):
+        if not isinstance(f, dict) or not f.get("name"):
+            continue
+        out[f["name"]] = {
+            "name": f["name"],
+            "type": f.get("type"),
+            "description": (f.get("description") or "").strip() or None,
+            **{flag: f.get(flag) == "true" for flag in FIELD_FLAGS},
+        }
+    return out
+
+
+async def fetch_index_fields(client: DataONEClient) -> dict[str, dict[str, Any]]:
+    return index_fields(await client.get_xml(client.mn("query/solr")))
+
+
+@dataclass
+class FieldUse:
+    """Index field names this server hard-codes, grouped by what the index must allow for each."""
+
+    returned: set[str] = field(default_factory=set)  # requested in fl
+    searched: set[str] = field(default_factory=set)  # written into q or fq
+    sorted_by: set[str] = field(default_factory=set)  # written into sort
+
+
+def sort_fields(sorts: Any) -> set[str]:
+    """Field names in Solr sort strings such as 'dateUploaded desc'. 'score' is not an index field."""
+    return {s.split()[0] for s in sorts} - {"score"}
+
+
+def check_fields(index: dict[str, dict[str, Any]], use: FieldUse) -> list[str]:
+    """Compare the field names we use with the index. Returns one message per problem, naming the field.
+
+    A field we request in fl that the index drops is silently left out of results, and one we search or
+    sort on makes the query fail, so both need a code change here.
+    """
+    problems = []
+    for flag, names in (("returnable", use.returned), ("searchable", use.searched), ("sortable", use.sorted_by)):
+        for name in sorted(names):
+            if name not in index:
+                problems.append(f"{name}: not in the index (we need it {flag})")
+            elif not index[name][flag]:
+                problems.append(f"{name}: in the index but not {flag}")
+            elif flag == "sortable" and index[name]["type"] in UNSORTABLE_TYPES:
+                problems.append(f"{name}: type {index[name]['type']} cannot be sorted on")
+    return problems
 
 
 def _first(v: Any) -> Any:

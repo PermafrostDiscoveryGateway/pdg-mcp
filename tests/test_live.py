@@ -3,8 +3,11 @@
 import pytest
 from fastmcp import Client
 
+from arcticdata_mcp import solr
+from arcticdata_mcp.client import DataONEClient
 from arcticdata_mcp.config import Settings
 from arcticdata_mcp.server import create_server
+from arcticdata_mcp.tools import fields_in_use
 
 pytestmark = pytest.mark.live
 DOI = "doi:10.18739/A29K4B"
@@ -13,6 +16,15 @@ DOI = "doi:10.18739/A29K4B"
 @pytest.fixture
 async def live():
     async with Client(create_server(Settings(), require_auth=False)) as c:
+        yield c
+
+
+@pytest.fixture
+async def live_all_tools():
+    """Like live, with the hidden low-level tools enabled too."""
+    settings = Settings()
+    settings.tools.exclude_tags = []
+    async with Client(create_server(settings, require_auth=False)) as c:
         yield c
 
 
@@ -105,3 +117,57 @@ async def test_search_missing_metadata(live):
     both = ["keywords", "spatial_coverage"]
     assert await found(missing=both, match="any") >= await found(missing=both)  # "any" can't match fewer than "all"
     assert await found(missing=["attributes"], eml_only=False) >= await found(missing=["attributes"])
+
+
+async def test_field_names_match_the_index():
+    """Every Solr field name we hard-code still exists in the index with the flag we rely on (#28)."""
+    client = DataONEClient(Settings())
+    try:
+        index = await solr.fetch_index_fields(client)
+    finally:
+        await client.aclose()
+    assert len(index) > 100, "the field description looks truncated"
+    problems = solr.check_fields(index, fields_in_use())
+    assert not problems, "Solr field names out of sync with the index:\n" + "\n".join(problems)
+
+
+# One simple call per tool that builds a query, to catch a field the lists in fields_in_use() miss:
+# an unknown field in q, fq or sort makes the index return an error, which fails the call.
+QUERY_TOOL_CALLS = [
+    ("search_datasets", {"query": "permafrost"}),
+    ("search_datasets", {"title": "permafrost", "author": "Romanovsky", "keyword": "permafrost"}),
+    ("search_datasets", {"place": "Toolik", "organization": "University of Alaska Fairbanks"}),
+    ("search_datasets", {"project": "Arctic Observing Network", "funding": "1503559"}),
+    ("search_datasets", {"variable": "soil temperature", "taxon": "Rangifer tarandus"}),
+    ("search_datasets", {"concept_uri": "http://purl.dataone.org/odo/ECSO_00001197", "license": "Creative Commons"}),
+    ("search_datasets", {"owner": "http://orcid.org/0000-0003-1846-5140"}),
+    ("search_datasets", {"north": 71.5, "south": 68, "east": -141, "west": -166, "start_date": "2010"}),
+    ("search_datasets", {"record_date_from": "2020", "record_date_to": "2021", "record_date_field": "dateModified"}),
+    ("search_by_variable", {"variable": "soil depth"}),
+    ("search_missing_metadata", {"missing": ["keywords", "funding"], "match": "any"}),
+    ("search_by_provenance", {"pid": DOI}),
+    ("search_data_files", {"file_name": "*.csv", "format_id": "text/csv", "min_size": 1, "documented_by": DOI}),
+    ("find_dataset_by_identifier", {"identifier": DOI}),
+    ("get_facet_counts", {"field": "formatId", "limit": 1}),
+    ("get_dataset_citation", {"pid": DOI}),
+    ("get_version_history", {"pid": DOI}),
+    ("get_package_download_info", {"pid": DOI}),
+    ("find_portals_for_dataset", {"pid": DOI}),
+]
+SORTS = ["relevance", "newest", "oldest", "title", "size_desc", "size_asc"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"), QUERY_TOOL_CALLS, ids=[f"{t}-{i}" for i, (t, _) in enumerate(QUERY_TOOL_CALLS)]
+)
+async def test_query_tools_run(live_all_tools, tool, args):
+    schemas = {t.name: t.input_schema for t in await live_all_tools.list_tools()}
+    if "rows" in schemas[tool]["properties"]:
+        args = {**args, "rows": 1}
+    await live_all_tools.call_tool(tool, args)  # raises if the tool returns an error
+
+
+@pytest.mark.parametrize("sort", SORTS)
+async def test_sort_options_run(live, sort):
+    assert set(SORTS) == set(solr.SORT_OPTIONS)
+    await live.call_tool("search_datasets", {"query": "permafrost", "rows": 1, "sort": sort})

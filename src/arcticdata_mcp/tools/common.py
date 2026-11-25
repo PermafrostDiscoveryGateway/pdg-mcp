@@ -23,7 +23,7 @@ class ToolContext:
 Rows = Annotated[int, Field(ge=0, le=100, description="Number of results to return (max 100).")]
 Start = Annotated[int, Field(ge=0, description="Zero-based offset for paging through results.")]
 Sort = Annotated[
-    Literal["relevance", "newest", "oldest", "published_newest", "title", "size_desc", "size_asc"],
+    Literal["relevance", "newest", "oldest", "title", "size_desc", "size_asc"],
     Field(description="Result ordering."),
 ]
 LatestOnly = Annotated[

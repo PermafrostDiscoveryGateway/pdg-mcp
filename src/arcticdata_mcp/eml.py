@@ -22,6 +22,12 @@ from typing import Any
 import defusedxml.ElementTree as ET
 from fastmcp.exceptions import ToolError
 
+# EML versions the parser is checked against: tests/test_eml_schema.py walks their schemas (tests/data/eml-schema).
+# Documents in any other namespace still parse, but their outline carries a warning.
+SUPPORTED_NAMESPACES = {
+    "eml://ecoinformatics.org/eml-2.1.1": "2.1.1",
+    "https://eml.ecoinformatics.org/eml-2.2.0": "2.2.0",
+}
 ENTITY_TYPES = ("dataTable", "spatialRaster", "spatialVector", "storedProcedure", "view", "otherEntity")
 # section name -> element below <dataset>
 FREE_TEXT_SECTIONS = {
@@ -30,6 +36,16 @@ FREE_TEXT_SECTIONS = {
     "purpose": "purpose",
     "intellectual_rights": "intellectualRights",
     "additional_info": "additionalInfo",
+    # EML 2.2
+    "introduction": "introduction",
+    "getting_started": "gettingStarted",
+    "acknowledgements": "acknowledgements",
+}
+# section 'literature': key -> citation element below <dataset>
+LITERATURE = {
+    "reference_publications": "referencePublication",  # EML 2.2
+    "usage_citations": "usageCitation",  # EML 2.2
+    "literature_cited": "literatureCited",
 }
 SECTIONS = (
     "outline",
@@ -37,12 +53,40 @@ SECTIONS = (
     "coverage",
     "people",
     "project",
+    "literature",
+    "maintenance",
     "entities",
     "attributes",
     "codes",
     "annotations",
     "raw",
 )
+# Parts of an EML document that no section returns, on purpose. tests/test_eml_schema.py builds a document with
+# every element and attribute of each supported schema and fails on any value that reaches no section, unless
+# its path is listed here or in KNOWN_GAPS. Paths are below <eml>: "dataset/coverage" for an element and
+# "dataset/@system" for an XML attribute. "*" stands for one element and "**" for any number; a path also
+# covers everything below it.
+IGNORED = {
+    "@system": "which system issued the packageId; the packageId itself is in the outline",
+    "@scope": "whether ids are unique system-wide; it changes nothing about the content",
+    "@lang": "the document's language tag; the text itself is returned",
+    "@schemaLocation": "where a validator finds the schema files",
+    "**/@id": "ids identify elements so that <references> can point at them; references are followed instead",
+    "**/@system": "which system issued an id; see @id",
+    "**/@scope": "see @scope",
+    "**/@lang": "language tags on multilingual text; the text itself is returned",
+    "access": "who may read or change the record in the repository; it doesn't affect reading the data",
+    "citation": "documents describing a citation instead of a dataset get no sections, only section='raw'",
+    "software": "documents describing software instead of a dataset get no sections, only section='raw'",
+    "protocol": "documents describing a protocol instead of a dataset get no sections, only section='raw'",
+    "additionalMetadata": "free-form block for other metadata standards; only its unit definitions are read, "
+    "attached to the attributes that use them",
+    "dataset/references": "a dataset that only points at another document's dataset; nothing to read in it",
+    "dataset/*/attributeList/references": "followed: the attribute list it points at is returned in its place",
+}
+# Parts of the schema that should reach a section but don't yet, as "path": "what is missing". Unlike IGNORED,
+# each of these is a gap to close. The schema test fails when one is fixed, so the entry gets removed.
+KNOWN_GAPS: dict[str, str] = {}
 # Top-level EML resources other than <dataset>; documents describing these have no outline.
 OTHER_RESOURCES = ("citation", "software", "protocol")
 # XML attributes that identify an element rather than describe it; they differ in every copy of a schema.
@@ -333,6 +377,8 @@ def _tree_annotation(node: Any) -> dict[str, Any]:
     def part(v: Any) -> tuple[str | None, str | None]:
         return (v.get("label"), v.get("#text")) if isinstance(v, dict) else (None, v)
 
+    if not isinstance(node, dict):  # an annotation with text but no propertyURI / valueURI (not valid EML)
+        return _compact({"text": node})
     (pl, pu), (vl, vu) = part(node.get("propertyURI")), part(node.get("valueURI"))
     return _compact({"property": pl, "value": vl, "property_uri": pu, "value_uri": vu})
 
@@ -398,6 +444,23 @@ def fit_codes(attr: dict[str, Any], max_chars: int) -> dict[str, Any]:
             kept += 1
     attr["codeDefinition_omitted"] = total - kept
     return attr
+
+
+def fit_polygons(place: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    """Return a geographic coverage ``place`` unchanged if it fits in ``max_chars``; otherwise a copy that keeps
+    only the leading polygons that fit, with ``polygons_omitted`` counting the rest (read them with section='raw')."""
+    polygons = place.get("polygons")
+    if not polygons or _size(place) <= max_chars:
+        return place
+    place = {**place, "polygons": []}
+    budget = max_chars - _size(place) - len('"polygons_omitted": 1000000, ')
+    for p in polygons:
+        budget -= _size(p) + 2
+        if budget < 0:
+            break
+        place["polygons"].append(p)
+    place["polygons_omitted"] = len(polygons) - len(place["polygons"])
+    return place
 
 
 def _display_name(el: Any) -> str | None:
@@ -500,6 +563,8 @@ class EMLDocument:
             if attr_list is not None:
                 attr_list, missing = self._resolve(attr_list)
             attrs = [self._tree(a) for a in attr_list.findall("attribute")] if attr_list is not None else []
+            # An <attribute> holding only text (not valid EML) is still kept, as a dict like the others.
+            attrs = [a if isinstance(a, dict) else {"#text": a} for a in attrs]
             schema_id = None
             if attrs:
                 key = json.dumps(attrs, sort_keys=True)
@@ -613,10 +678,32 @@ class EMLDocument:
         methods = self.free_text("methods")
         return methods.text if methods and methods.text else None
 
+    def literature(self) -> list[dict[str, Any]]:
+        """Citations about the dataset, one item each, with structured parts inside copied next to it."""
+        items = []
+        for kind, tag in LITERATURE.items():
+            for el in self.dataset.findall(tag):
+                builder = _FreeTextBuilder(self)
+                tree = builder.tree(el)
+                items.append(_compact({"type": kind, "citation": tree, "elements": builder.elements}))
+        return items
+
+    def maintenance(self) -> dict[str, Any] | None:
+        """The <maintenance> block (update frequency, change history), copied whole; None if there is none."""
+        found = self.dataset.find("maintenance")
+        if found is None:
+            return None
+        builder = _FreeTextBuilder(self)
+        return _compact({"maintenance": builder.tree(found), "elements": builder.elements})
+
+    def _resolved(self, el: Any, tag: str) -> list[Any]:
+        """The ``tag`` children of ``el``, each in place of the element it references, if it does."""
+        return [self._resolve(child)[0] for child in el.findall(tag)]
+
     def coverage(self) -> dict[str, Any]:
-        geo, temporal, taxa = [], [], []
-        for cov in self.dataset.findall("coverage"):
-            for g in cov.findall("geographicCoverage"):
+        geo, temporal, taxa, systems, general = [], [], [], [], []
+        for cov in self._resolved(self.dataset, "coverage"):
+            for g in self._resolved(cov, "geographicCoverage"):
                 bc = g.find("boundingCoordinates")
                 geo.append(
                     _compact(
@@ -629,27 +716,41 @@ class EMLDocument:
                             "altitude_min": _text(bc, "boundingAltitudes/altitudeMinimum"),
                             "altitude_max": _text(bc, "boundingAltitudes/altitudeMaximum"),
                             "altitude_units": _text(bc, "boundingAltitudes/altitudeUnits"),
+                            # Outer rings and exclusion rings, as written (gRing text or gRingPoint lists).
+                            "polygons": [self._tree(p) for p in g.findall("datasetGPolygon")],
                         }
                     )
                 )
-            for t in cov.findall("temporalCoverage"):
+            for t in self._resolved(cov, "temporalCoverage"):
                 for d in t.findall("singleDateTime"):
                     if date := _date(d):
                         temporal.append({"date": date})
                 for r in t.findall("rangeOfDates"):
                     if rng := _compact({"begin": _date(r.find("beginDate")), "end": _date(r.find("endDate"))}):
                         temporal.append(rng)
-            for tc in cov.iter("taxonomicClassification"):
-                taxa.append(
-                    _compact(
-                        {
-                            "rank": _text(tc, "taxonRankName"),
-                            "value": _text(tc, "taxonRankValue"),
-                            "common_names": _texts(tc, "commonName"),
-                        }
-                    )
-                )
-        return _compact({"geographic": geo, "temporal": temporal, "taxonomic": taxa})
+            for tax in self._resolved(cov, "taxonomicCoverage"):
+                systems += [self._tree(s) for s in tax.findall("taxonomicSystem")]
+                general += _texts(tax, "generalTaxonomicCoverage")
+                taxa += [self._taxon(tc) for tc in tax.iter("taxonomicClassification")]
+        return _compact(
+            {
+                "geographic": geo,
+                "temporal": temporal,
+                "taxonomic": taxa,
+                "taxonomic_summary": general,
+                "taxonomic_systems": systems,
+            }
+        )
+
+    def _taxon(self, tc: Any) -> dict[str, Any]:
+        return _compact(
+            {
+                "rank": _text(tc, "taxonRankName"),
+                "value": _text(tc, "taxonRankValue"),
+                "common_names": _texts(tc, "commonName"),
+                "taxon_ids": [self._tree(i) for i in tc.findall("taxonId")],  # EML 2.2: provider + id
+            }
+        )
 
     def coverage_summary(self) -> dict[str, Any]:
         cov = self.coverage()
@@ -742,10 +843,40 @@ class EMLDocument:
             }
         )
 
+    def all_sections(self) -> dict[str, Any]:
+        """Every section's full content, unpaged: all that get_metadata_document returns for this document
+        apart from 'raw'. The schema and live coverage tests check that each value in a document reaches it."""
+        out: dict[str, Any] = {
+            "outline": self.outline(),
+            "coverage": self.coverage(),
+            "people": self.people(),
+            "project": self.project(),
+            "literature": self.literature(),
+            "maintenance": self.maintenance(),
+            "entities": self.entities,
+            "attributes": self.schemas,  # each attribute holds its code list, so this covers 'codes' too
+            "annotations": self.annotations(),
+        }
+        for section in FREE_TEXT_SECTIONS:
+            if (free := self.free_text(section)) is not None:
+                out[section] = {"text": free.text, **free.elements}
+        return out
+
+    def namespace(self) -> str | None:
+        return self.root.tag.split("}")[0].lstrip("{") if "}" in self.root.tag else None
+
     def outline(self) -> dict[str, Any]:
         d = self.dataset
         methods = self.methods_text()
         groups = self.entity_groups()
+        namespace = self.namespace()
+        warning = None
+        if namespace not in SUPPORTED_NAMESPACES:
+            versions = ", ".join(SUPPORTED_NAMESPACES.values())
+            warning = (
+                f"This document's EML namespace ({namespace}) is not one this server is checked against "
+                f"(EML {versions}). Parts of it may be missing from every section; section='raw' has it all."
+            )
         rights = _plain(d.find("intellectualRights"))
         if rights is None and (lic := d.find("licensed")) is not None:
             name, url = _text(lic, "licenseName"), _text(lic, "url")
@@ -753,11 +884,16 @@ class EMLDocument:
         out = _compact(
             {
                 "format": "EML",
-                "eml_namespace": self.root.tag.split("}")[0].lstrip("{") if "}" in self.root.tag else None,
+                "eml_namespace": namespace,
+                "warning": warning,
                 "package_id": self.root.get("packageId"),
                 "title": " / ".join(_texts(d, "title")) or None,
+                "short_name": _text(d, "shortName"),
                 "alternate_identifiers": _texts(d, "alternateIdentifier"),
+                "series": _text(d, "series"),
+                "language": _text(d, "language"),
                 "pub_date": _text(d, "pubDate"),
+                "pub_place": _text(d, "pubPlace"),
                 "creators": [n for n in (_display_name(c) for c in d.findall("creator")) if n],
                 "keyword_sets": [self._tree(k) for k in d.findall("keywordSet")],
                 "abstract": _text(d, "abstract"),

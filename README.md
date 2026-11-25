@@ -151,13 +151,16 @@ EML documents can be far larger than a model's context, mostly because packages 
 per data file. `get_metadata_document(pid)` therefore returns an **outline**: title, creators, abstract, coverage, a
 methods preview, dataset annotations and `entity_groups`, where entities with identical attribute lists share one
 `schema_id`. Request the rest by `section`: `attributes` (with `schema_id` or `entity`), `codes` (one attribute's code
-list), `coverage`, `people`, `project`, `entities`, `annotations`, a free-text section, or `raw` for the XML. Attributes,
-entities (all but their attribute list), people and projects are copied whole, shaped like the EML. Long responses are
+list), `coverage`, `people`, `project`, `literature` (reference publications, usage citations, literature cited),
+`maintenance`, `entities`, `annotations`, a free-text section, or `raw` for the XML. Attributes, entities (all but their
+attribute list), people, projects, citations, maintenance, polygons and taxonomic systems are copied whole, shaped like
+the EML. Long responses are
 paged with `offset=next_offset`. Content is deduplicated, never summarized. Non-EML documents (for example ISO 19115)
 come back as paged raw XML. Recent documents are cached (`metadata.cache_max_chars`) and parsed off the event loop.
 `get_dataset_details` returns a curated field set without the per-attribute fields; pass `fields="*"` for all of them.
 
-Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`) come back as plain text
+Free-text sections (`abstract`, `methods`, `purpose`, `intellectual_rights`, `additional_info`, and in EML 2.2
+`introduction`, `getting_started`, `acknowledgements`) come back as plain text
 with headings, numbered and bulleted lists, links and `markdown` / `literalLayout` spacing kept, for example
 `get_metadata_document(pid, section="methods")`. Structured elements inside them (protocols, software,
 instrumentation, citations, data sources, sampling coverage) are copied whole next to the text, under `protocols`,
@@ -186,12 +189,29 @@ They modify the repository or need a DataONE admin token.
 ```bash
 uv run pytest            # unit and mocked tests
 uv run pytest -m live    # smoke tests against arcticdata.io
+uv run pytest -m manual  # on-demand live checks only, such as EML coverage
 uv run ruff check .      # lint
 uv run ruff format .     # format
 ```
 
-CI runs the tests and both ruff checks on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the optional
+CI runs the tests and both ruff checks on every pull request. The `live` workflow runs the live tests weekly, except
+those marked `manual`; starting it by hand runs them all. See [CONTRIBUTING.md](CONTRIBUTING.md) for the optional
 pre-commit hook.
+
+### Keeping EML parsing in sync
+
+`get_metadata_document` reads EML into sections. Two checks catch EML content that no section returns:
+
+- `tests/test_eml_schema.py` (every pull request) builds a document holding every element and attribute of the
+  bundled EML 2.1.1 and 2.2.0 schemas (`tests/data/eml-schema`) and fails on any value that reaches no section,
+  unless its path is on `IGNORED` (dropped on purpose, with the reason) or `KNOWN_GAPS` (to fix) in `eml.py`.
+  When you handle a known gap, the test asks you to remove its entry.
+- `tests/test_live_eml.py` (manual) runs the same comparison on the most recently uploaded ADC documents, against
+  the baseline in `tests/data/eml-coverage-baseline.txt`. Run it when EML publishes a release or the ADC editor may
+  write EML differently.
+
+Documents in an EML namespace other than 2.1.1 or 2.2.0 get a `warning` in their outline, and documents that are
+not EML say so and return the raw XML.
 
 Layout: `config.py` (settings), `auth.py` (Keycloak token verification), `client.py` (httpx + XML parsing + DataONE
 errors), `solr.py` (query building), `downloads.py` (inline, URL, or server delivery), `ratelimit.py` (per-user and upstream limits), and `tools/`

@@ -1,0 +1,28 @@
+{{- if and .Values.report.enabled .Values.report.persistence.pv.enabled (not .Values.report.persistence.existingClaim) }}
+# Optional static PersistentVolume for the usage archive. PersistentVolumes are cluster-scoped, so the Argo CD
+# project (or the person installing the chart) must be allowed to create them; with a storage class that
+# provisions volumes dynamically you do not need this file at all (leave persistence.pv.enabled false).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "pdg-mcp.usageClaimName" . }}
+  labels:
+    {{- include "pdg-mcp.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  capacity:
+    storage: {{ .Values.report.persistence.size }}
+  accessModes:
+    - {{ .Values.report.persistence.accessMode }}
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:  # reserve this volume for the claim in this namespace
+    namespace: {{ .Release.Namespace }}
+    name: {{ include "pdg-mcp.usageClaimName" . }}
+  {{- /* the backend (nfs, csi, local, ...) is whatever the cluster uses; passed through as written */}}
+  {{- if not .Values.report.persistence.pv.source }}
+  {{- fail "report.persistence.pv.source is required when report.persistence.pv.enabled is true (for example nfs: {server: ..., path: ...})" }}
+  {{- end }}
+  {{- toYaml .Values.report.persistence.pv.source | nindent 2 }}
+{{- end }}

@@ -91,6 +91,28 @@ class MetadataSettings:
 
 
 @dataclass
+class ObservabilitySettings:
+    log_level: str = "INFO"  # level for the arcticdata_mcp loggers; tool-call records are logged at INFO
+    log_format: str = "json"  # "json" (one object per line, for log shippers) or "text" (human readable)
+    log_tool_calls: bool = True  # emit one structured record per tool call
+    # Secret key for the HMAC that turns the Keycloak "sub" into the user_hash in logs. Keep it stable and
+    # identical across pods so one user keeps one hash; changing it makes past and future hashes unlinkable.
+    user_hash_key: str = ""
+    # Prometheus metrics are served on their own port, never on the MCP port, so the Service/Ingress that expose
+    # the MCP endpoint cannot reach them. Use 0.0.0.0 in a container so a scraper can reach the pod.
+    metrics_enabled: bool = True  # http transport only; stdio never opens a port
+    metrics_host: str = "127.0.0.1"
+    metrics_port: int = 9100
+    # Active users: one row per hashed user per UTC day, exported only as counts (pdg_mcp_active_users). The
+    # database path should be on a persistent volume; empty = in memory, so counts restart at zero with the
+    # process. Rows older than the retention (at least 31 days) are deleted. A file is only used when
+    # user_hash_key is set, since hashes from a random per-process key cannot be matched across restarts.
+    active_users_enabled: bool = True
+    active_users_db: str = ""
+    active_users_retention_days: int = 35
+
+
+@dataclass
 class ToolSettings:
     # Tools carrying any of these tags are not listed or callable. "low_level" covers DataONE node diagnostics
     # and object plumbing (ping, get_node_info, list_objects, get_checksum, ...); set [] to expose everything.
@@ -108,6 +130,7 @@ class Settings:
     ontology: OntologySettings = field(default_factory=OntologySettings)
     portals: PortalSettings = field(default_factory=PortalSettings)
     metadata: MetadataSettings = field(default_factory=MetadataSettings)
+    observability: ObservabilitySettings = field(default_factory=ObservabilitySettings)
     tools: ToolSettings = field(default_factory=ToolSettings)
 
 

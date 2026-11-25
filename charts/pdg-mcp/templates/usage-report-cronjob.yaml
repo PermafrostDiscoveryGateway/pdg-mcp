@@ -1,0 +1,58 @@
+{{- if .Values.report.enabled }}
+# Archives each finished UTC day of usage numbers from Prometheus to the persistent volume, because Prometheus only
+# keeps data for its retention period. See "Keeping numbers past Prometheus's retention" in docs/admin-guide.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "pdg-mcp.fullname" . }}-usage-report
+  labels:
+    {{- include "pdg-mcp.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.report.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "pdg-mcp.labels" . | nindent 12 }}
+            app.kubernetes.io/component: usage-report
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- range . }}
+            - name: {{ . }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001  # lets the job write to the volume where the storage honors fsGroup
+          containers:
+            - name: usage-report
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python", "scripts/usage_report.py"]
+              args:
+                - --prometheus-url={{ .Values.report.prometheusUrl }}
+                - --archive-dir=/data
+                - --days={{ .Values.report.days }}
+              volumeMounts:
+                - name: usage
+                  mountPath: /data
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                {{- toYaml .Values.report.resources | nindent 16 }}
+          volumes:
+            - name: usage
+              persistentVolumeClaim:
+                claimName: {{ include "pdg-mcp.usageClaimName" . }}
+{{- end }}

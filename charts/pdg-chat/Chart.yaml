@@ -1,0 +1,11 @@
+apiVersion: v2
+name: pdg-chat
+description: Hosted LibreChat for PDG users, with pdg-mcp preinstalled and Keycloak sign-in
+type: application
+version: 0.1.0
+appVersion: "v0.8.9"
+dependencies:
+  # Upstream chart, as documented at https://www.librechat.ai/docs/local/helm_chart
+  - name: librechat
+    version: 3.2.1
+    repository: oci://ghcr.io/librechat-ai/librechat-chart

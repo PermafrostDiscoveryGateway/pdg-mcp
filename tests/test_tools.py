@@ -22,10 +22,12 @@ def solr_json(docs, num=None, **extra):
 
 async def test_lists_all_tools(client):
     names = {t.name for t in await client.list_tools()}
-    assert len(names) == 29
+    assert len(names) == 31  # main's 29 visible tools plus profile_file and compare_eml_vs_data
     assert {
         "search_datasets",
         "download_file",
+        "profile_file",
+        "compare_eml_vs_data",
         "list_dataset_files",
         "get_facet_counts",
         "search_portals",
@@ -41,7 +43,7 @@ async def test_low_level_tools_hidden_unless_enabled(settings, mock_api):
     settings.tools.exclude_tags = []
     async with Client(create_server(settings, require_auth=False)) as c:
         names = {t.name for t in await c.list_tools()}
-    assert len(names) == 39
+    assert len(names) == 41  # main's 39 tools plus profile_file and compare_eml_vs_data
     assert {"ping", "list_objects", "get_checksum"} <= names
 
 

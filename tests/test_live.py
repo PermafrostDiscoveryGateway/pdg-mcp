@@ -53,16 +53,19 @@ async def test_portals(live):
     assert "PerCS-Net" in [p["label"] for p in owners["portals"]]
 
 
-# ECSO ids used in current annotations that the bundled table cannot cover: they are not defined in ECSO8.owl
-# at all (13 dataset annotations in November 2026, summed per concept). The www.purl gap this guards against was 164 datasets.
-MAX_UNCOVERED_DATASETS = 30
+# Most datasets an ECSO concept missing from the bundled table may be annotated on before the test fails (#37). Some
+# ids in current annotations are not in ECSO8.owl at all; in November 2026 there were 8 of them, used by at most 3
+# datasets each. The www.purl gap this guards against left single concepts such as Water Content (96) uncovered.
+MAX_DATASETS_PER_UNCOVERED_CONCEPT = 10
 
 
 async def test_bundled_ecso_table_covers_indexed_annotations():
     """Every well-formed ECSO address in current annotations (http, https or www.) should be in concepts.json.
 
-    Malformed values (ECSO_#PAR, the pulr.dataone.org typo, ...) are curation errors to report to ADC, not
-    concepts to bundle, so they are not counted.
+    Fails when a concept missing from the table is used by more than MAX_DATASETS_PER_UNCOVERED_CONCEPT datasets;
+    rarely used ones (often terms only ADC's older indexer copy of ECSO has) are tolerated. Malformed values
+    (ECSO_#PAR, the pulr.dataone.org typo, ...) are curation errors to report to ADC, not concepts to bundle, so
+    they are not counted.
     """
     import re
 
@@ -91,8 +94,13 @@ async def test_bundled_ecso_table_covers_indexed_annotations():
         uri = ontology.normalize_concept_id(value)
         if re.fullmatch(r"http://purl\.dataone\.org/odo/ECSO_\d{8}", uri) and not ontology.concept_by_uri(uri):
             uncovered[uri] = uncovered.get(uri, 0) + n
-    worst = sorted(uncovered.items(), key=lambda kv: -kv[1])
-    assert sum(uncovered.values()) <= MAX_UNCOVERED_DATASETS, f"ECSO concepts annotated but not bundled: {worst}"
+    too_common = sorted(
+        ((uri, n) for uri, n in uncovered.items() if n > MAX_DATASETS_PER_UNCOVERED_CONCEPT), key=lambda kv: -kv[1]
+    )
+    assert not too_common, (
+        f"ECSO concepts used by more than {MAX_DATASETS_PER_UNCOVERED_CONCEPT} datasets but not in the bundled table "
+        f"(run the ecso-refresh workflow, or check whether they are in ECSO upstream): {too_common}"
+    )
 
 
 async def test_search_missing_metadata(live):

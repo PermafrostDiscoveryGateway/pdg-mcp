@@ -1,0 +1,70 @@
+name: ecso-refresh
+# Regenerates the bundled ECSO table (src/arcticdata_mcp/data/ecso/concepts.json) from the highest-numbered
+# ecso/ECSO<n>.owl in DataONEorg/sem-prov-ontologies and opens a pull request when it changes (#37, epic #38).
+# This is the only way the table should change: CI (ci.yml) fails any pull request whose concepts.json differs
+# from the export of the commit it records. Weekly, and by hand from the Actions tab (ecso-refresh > Run workflow).
+# Scheduled runs only happen on the default branch, use UTC, and are disabled by GitHub after 60 days without
+# repository activity (re-enable from the Actions tab).
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" (Settings > Actions > General). Pull requests
+# opened with GITHUB_TOKEN don't trigger other workflows, so CI doesn't start on its own: close and reopen the pull
+# request (or push to its branch) to run it.
+on:
+  schedule:
+    - cron: "43 14 * * 1" # Mondays 14:43 UTC; off the hour to avoid scheduling delays
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ecso-refresh
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      TABLE: src/arcticdata_mcp/data/ecso/concepts.json
+      BRANCH: automation/ecso-refresh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      # Rewrites the table only when the concepts or the source file/commit change, so an unchanged export keeps
+      # its date and leaves no diff.
+      - run: uv run python scripts/export_ecso_terms.py latest --summary "$RUNNER_TEMP/summary.md"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if git diff --quiet -- "$TABLE"; then
+            echo "$TABLE is up to date"
+            exit 0
+          fi
+          commit=$(jq -r .source.commit "$TABLE")
+          path=$(jq -r .source.path "$TABLE")
+          title="Refresh bundled ECSO concepts ($path at ${commit:0:12})"
+          {
+            cat "$RUNNER_TEMP/summary.md"
+            echo
+            echo "Opened by the [ecso-refresh workflow]($RUN_URL) (#37). The table is generated: review the summary,"
+            echo "don't edit the file. CI doesn't start on pull requests opened by a workflow; close and reopen this one"
+            echo "to run it."
+          } > "$RUNNER_TEMP/body.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit -m "$title" -- "$TABLE"
+          git push --force origin "$BRANCH"
+          if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
+            gh pr edit "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --base "$BASE" --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi

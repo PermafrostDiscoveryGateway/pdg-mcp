@@ -1,0 +1,188 @@
+   Building arcticdata-mcp @ file:///Users/helium/ncsa/pdg/pdg-mcp
+warning: `build_system.requires = ["uv-build>=0.11.16,<0.12.0"]` does not contain the current uv version 0.13.7
+      Built arcticdata-mcp @ file:///Users/helium/ncsa/pdg/pdg-mcp
+Uninstalled 1 package in 1ms
+Installed 2 packages in 2ms
+2026-11-23 15:02:22,966 INFO arcticdata_mcp.metrics Serving Prometheus metrics on 127.0.0.1:9100/metrics
+
+
+                    ╭──────────────────────────────────────────────────────────────────────────────╮                     
+                    │                                                                              │                     
+                    │                                                                              │                     
+                    │                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │                     
+                    │                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │                     
+                    │                                                                              │                     
+                    │                                                                              │                     
+                    │                                                                              │                     
+                    │                                FastMCP 4.0.10                                │                     
+                    │                            https://gofastmcp.com                             │                     
+                    │                                                                              │                     
+                    │                  🖥  Server:      Arctic Data Center, 4.0.10                  │                     
+                    │                  🚀 Deploy free: https://horizon.prefect.io                  │                     
+                    │                                                                              │                     
+                    ╰──────────────────────────────────────────────────────────────────────────────╯                     
+                    ╭──────────────────────────────────────────────────────────────────────────────╮                     
+                    │                          🎉 Update available: 4.2.5                          │                     
+                    │                      Run: pip install --upgrade fastmcp                      │                     
+                    ╰──────────────────────────────────────────────────────────────────────────────╯                     
+
+
+[11/23/26 15:02:23] INFO     Starting MCP server 'Arctic Data Center' with transport 'http' on           transport.py:363
+                             http://127.0.0.1:8000/mcp                                                                   
+[32mINFO[0m:     Started server process [[36m15518[0m]
+[32mINFO[0m:     Waiting for application startup.
+[32mINFO[0m:     Application startup complete.
+[32mINFO[0m:     Uvicorn running on [1mhttp://127.0.0.1:8000[0m (Press CTRL+C to quit)
+2026-11-23 15:09:20,625 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=266 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 260}]
+2026-11-23 15:09:20,755 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=67 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 66}]
+2026-11-23 15:09:20,823 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=64 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:09:20,892 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=65 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 65}]
+2026-11-23 15:09:21,174 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=278 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 277}]
+2026-11-23 15:09:21,250 INFO arcticdata_mcp.toolcalls tool_call tool=get_facet_counts status=ok duration_ms=67 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:09:21,257 INFO arcticdata_mcp.toolcalls tool_call tool=unknown status=not_found duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=NotFoundError
+[11/23/26 15:09:21] WARNING  Invalid arguments for tool 'search_datasets': {'error_count': 1,              server.py:1509
+                             'error_types': ['greater_than_equal']}                                                      
+2026-11-23 15:09:21,265 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=invalid_arguments duration_ms=2 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=ValidationError
+2026-11-23 15:09:21,333 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=64 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:09:33,428 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,429 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,436 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,437 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,437 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,437 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,438 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,444 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,444 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,445 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,445 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,445 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,454 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,455 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,455 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,455 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,456 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,456 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,456 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,456 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:09:33,589 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=236 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 234}]
+2026-11-23 15:09:33,594 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=237 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 230}]
+2026-11-23 15:09:33,609 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=238 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 230}]
+2026-11-23 15:09:33,669 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=307 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 299}]
+2026-11-23 15:09:33,670 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=298 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 291}]
+2026-11-23 15:09:33,671 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=309 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 301}]
+2026-11-23 15:09:33,674 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=302 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 84}]
+2026-11-23 15:09:33,675 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=298 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 80}]
+2026-11-23 15:09:33,675 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=298 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 66}]
+2026-11-23 15:09:33,732 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=344 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:09:33,734 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=345 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:09:33,735 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=346 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:09:33,737 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=348 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:09:33,738 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=322 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 61}]
+2026-11-23 15:09:33,740 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=351 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:09:33,799 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=371 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 66}]
+2026-11-23 15:09:33,800 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=373 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 65}]
+2026-11-23 15:09:33,801 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=373 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 66}]
+2026-11-23 15:09:33,803 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=375 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 65}]
+2026-11-23 15:09:33,803 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=375 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 65}]
+2026-11-23 15:10:54,840 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=242 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 242}]
+2026-11-23 15:10:54,963 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=73 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 72}]
+2026-11-23 15:10:55,039 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=71 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 71}]
+2026-11-23 15:10:55,116 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=72 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 71}]
+2026-11-23 15:10:55,196 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=74 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 74}]
+2026-11-23 15:10:55,269 INFO arcticdata_mcp.toolcalls tool_call tool=get_facet_counts status=ok duration_ms=67 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 67}]
+2026-11-23 15:10:55,272 INFO arcticdata_mcp.toolcalls tool_call tool=unknown status=not_found duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=NotFoundError
+[11/23/26 15:10:55] WARNING  Invalid arguments for tool 'search_datasets': {'error_count': 1,              server.py:1509
+                             'error_types': ['greater_than_equal']}                                                      
+2026-11-23 15:10:55,277 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=invalid_arguments duration_ms=1 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=ValidationError
+2026-11-23 15:10:55,350 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=70 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 70}]
+2026-11-23 15:11:07,428 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,428 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,429 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,429 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,429 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,430 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,430 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,430 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,430 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,431 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,431 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,431 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,437 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,438 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,438 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,438 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,443 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,443 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,444 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,444 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:11:07,577 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=209 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 207}]
+2026-11-23 15:11:07,593 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=215 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 209}]
+2026-11-23 15:11:07,596 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=217 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 210}]
+2026-11-23 15:11:07,598 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=219 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 213}]
+2026-11-23 15:11:07,612 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=226 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 218}]
+2026-11-23 15:11:07,618 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=232 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 224}]
+2026-11-23 15:11:07,639 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=249 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 61}]
+2026-11-23 15:11:07,653 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=261 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:11:07,657 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=251 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 61}]
+2026-11-23 15:11:07,658 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=253 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:11:07,673 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=267 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:11:07,676 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=270 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 58}]
+2026-11-23 15:11:07,698 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=292 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 59}]
+2026-11-23 15:11:07,714 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=308 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:11:07,715 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=309 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 58}]
+2026-11-23 15:11:07,719 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=313 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 61}]
+2026-11-23 15:11:07,735 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=329 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 62}]
+2026-11-23 15:11:07,736 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=323 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:11:07,759 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=345 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:11:07,774 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=361 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:14:05,653 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=214 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 214}]
+2026-11-23 15:14:05,764 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=69 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 69}]
+2026-11-23 15:14:05,830 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=62 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 62}]
+2026-11-23 15:14:05,897 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=63 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:14:05,965 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=64 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:14:06,037 INFO arcticdata_mcp.toolcalls tool_call tool=get_facet_counts status=ok duration_ms=68 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 67}]
+2026-11-23 15:14:06,042 INFO arcticdata_mcp.toolcalls tool_call tool=unknown status=not_found duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=NotFoundError
+[11/23/26 15:14:06] WARNING  Invalid arguments for tool 'search_datasets': {'error_count': 1,              server.py:1509
+                             'error_types': ['greater_than_equal']}                                                      
+2026-11-23 15:14:06,046 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=invalid_arguments duration_ms=1 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=ValidationError
+2026-11-23 15:14:06,113 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=63 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 62}]
+2026-11-23 15:14:18,188 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,189 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,189 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,190 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,190 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,190 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,191 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,198 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,198 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,199 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,199 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,199 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,209 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,209 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,209 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,210 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,210 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,210 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,211 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,211 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=rate_limited duration_ms=0 user_hash=anonymous adc_call_count=0 adc_retries=0 adc_calls=[] error_type=RateLimitExceeded
+2026-11-23 15:14:18,345 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=208 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 205}]
+2026-11-23 15:14:18,347 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=206 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 202}]
+2026-11-23 15:14:18,352 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=209 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 200}]
+2026-11-23 15:14:18,374 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=224 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 217}]
+2026-11-23 15:14:18,376 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=226 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 220}]
+2026-11-23 15:14:18,378 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=227 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 221}]
+2026-11-23 15:14:18,409 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=253 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:14:18,410 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=244 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:14:18,413 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=247 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:14:18,435 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=269 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 60}]
+2026-11-23 15:14:18,439 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=272 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 62}]
+2026-11-23 15:14:18,441 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=274 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 62}]
+2026-11-23 15:14:18,472 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=305 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
+2026-11-23 15:14:18,474 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=300 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:14:18,477 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=303 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:14:18,503 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=315 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:14:18,504 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=330 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 69}]
+2026-11-23 15:14:18,505 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=318 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:14:18,537 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=349 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 64}]
+2026-11-23 15:14:18,538 INFO arcticdata_mcp.toolcalls tool_call tool=search_datasets status=ok duration_ms=350 user_hash=anonymous adc_call_count=1 adc_retries=0 adc_calls=[{"endpoint": "query", "method": "GET", "status": 200, "ms": 63}]
